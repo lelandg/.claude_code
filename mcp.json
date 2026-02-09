@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "acestudio": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:21572/mcp"
+      ]
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest"
+      ],
+      "env": {
+        "CDP_HOST": "localhost",
+        "CDP_PORT": "9222"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}

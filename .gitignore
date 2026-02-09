@@ -1,0 +1,47 @@
+# Claude Code session-local files (auto-generated)
+.claude/
+
+# Claude Code private files
+.credentials.json
+history.jsonl
+stats-cache.json
+security_warnings_state_*.json
+session-env/
+file-history/
+debug/
+cache/
+shell-snapshots/
+todos/
+tasks/
+plans/
+paste-cache/
+plugins/cache/
+plugins/installed_plugins.json
+plugins/install-counts-cache.json
+plugins/known_marketplaces.json
+telemetry/
+statsig/
+downloads/
+projects/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Zone identifiers (Windows)
+*:Zone.Identifier
+
+# Temporary files
+*.tmp
+*.bak
