@@ -31,25 +31,36 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 │   ├── genui.md                      # Generative UI (HTML output)
 │   ├── html.md                       # HTML/web development focus
 │   └── technical-quality.md          # Comprehensive technical analysis
-└── skills/                            # Custom skills (slash commands)
-    ├── time.md                       # Execution time tracking
-    ├── claude-md-optimizer/          # CLAUDE.md optimization skill
-    ├── feature-documenter/           # Feature documentation skill
-    └── update-code-map/              # CodeMap maintenance skill
+├── skills/                            # Custom skills (slash commands)
+│   ├── time.md                       # Execution time tracking
+│   ├── claude-md-optimizer/          # CLAUDE.md optimization skill
+│   ├── feature-documenter/           # Feature documentation skill
+│   ├── install-claude-config/        # Install config into ~/.claude/
+│   ├── sync-claude-config/           # Sync ~/.claude/ to this repo
+│   └── update-code-map/              # CodeMap maintenance skill
+└── Docs/
+    └── SETUP_GUIDE.md                # Full setup & configuration guide
 ```
 
 ## Installation
 
-### Option 1: Copy Everything
-```bash
-# Clone this repo
-git clone https://github.com/<YOUR_USERNAME>/.claude_code.git
+### Option 1: Use the Install Skill (Recommended)
+Clone the repo, open Claude Code inside it, and run the install skill. It compares each file against your existing config, shows diffs, and lets you choose per-file whether to install, skip, or smart-merge.
 
-# Copy to your Claude Code config directory
+```bash
+git clone https://github.com/<YOUR_USERNAME>/.claude_code.git
+cd .claude_code
+# In Claude Code:
+# /install-claude-config
+```
+
+### Option 2: Copy Everything
+```bash
+git clone https://github.com/<YOUR_USERNAME>/.claude_code.git
 cp -r .claude_code/* ~/.claude/
 ```
 
-### Option 2: Cherry-Pick What You Need
+### Option 3: Cherry-Pick What You Need
 ```bash
 # Just the agents
 cp .claude_code/agents/*.md ~/.claude/agents/
@@ -64,8 +75,11 @@ cp .claude_code/output-styles/*.md ~/.claude/output-styles/
 cp .claude_code/instructions/*.md ~/.claude/instructions/
 ```
 
-### Option 3: Start from CLAUDE.md Only
+### Option 4: Start from CLAUDE.md Only
 Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` and customize it for your workflow. This single file gives you the core benefits (date handling, security rules, work procedures, project conventions).
+
+### Post-Install Setup
+See **[Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md)** for the full setup guide covering environment variables, plugin installation, required customization, and verification steps.
 
 ## Customization Guide
 
@@ -86,9 +100,7 @@ The global `CLAUDE.md` is loaded into every Claude Code session. Customize these
 - **Read permissions**: Update paths to match your home directory
 
 ### mcp.json
-- **github**: Set `GITHUB_PERSONAL_ACCESS_TOKEN` as an environment variable
-- **acestudio**: Remove if you don't use Ace Studio
-- **chrome-devtools**: Adjust port if needed
+- **github**: Requires `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable ([setup instructions](Docs/SETUP_GUIDE.md#github_personal_access_token))
 - Add your own MCP servers as needed
 
 ## Key Features
@@ -109,6 +121,8 @@ Custom skills extend Claude Code with repeatable workflows:
 - **update-code-map** - Maintains a comprehensive CodeMap.md for codebase navigation
 - **feature-documenter** - Generates user-facing feature documentation from code analysis
 - **claude-md-optimizer** - Reduces CLAUDE.md token usage by extracting rarely-used sections
+- **install-claude-config** - Merges this repo's config into `~/.claude/` with diff-and-ask conflict resolution
+- **sync-claude-config** - Syncs `~/.claude/` back to this repo with automatic sanitization of private info
 - **time** - Tracks execution time for each step in a workflow
 
 ### CodeMap System
