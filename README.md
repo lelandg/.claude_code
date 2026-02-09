@@ -160,6 +160,12 @@ The `CLAUDE.md` is kept under ~200 lines by extracting detailed reference materi
 - CodeMaps use standardized format across all languages
 - Plan files use consistent checklist markers
 
+## Authors
+
+Created by **Leland Green** ([@lelandg](https://github.com/lelandg)) and **Claude** (Opus 4.6) at [Chameleon Labs](https://chameleonlabs.ai).
+
+Join our **[Discord server](https://discord.gg/chameleonlabs)** - free AI chat with the latest Claude, Gemini, and ChatGPT pro models.
+
 ## Contributing
 
 Found something useful to add? PRs welcome. Keep these principles in mind:
