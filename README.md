@@ -48,7 +48,7 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 Clone the repo, open Claude Code inside it, and run the install skill. It compares each file against your existing config, shows diffs, and lets you choose per-file whether to install, skip, or smart-merge.
 
 ```bash
-git clone https://github.com/<YOUR_USERNAME>/.claude_code.git
+git clone https://github.com/lelandg/.claude_code.git
 cd .claude_code
 # In Claude Code:
 # /install-claude-config
@@ -56,7 +56,7 @@ cd .claude_code
 
 ### Option 2: Copy Everything
 ```bash
-git clone https://github.com/<YOUR_USERNAME>/.claude_code.git
+git clone https://github.com/lelandg/.claude_code.git
 cp -r .claude_code/* ~/.claude/
 ```
 
