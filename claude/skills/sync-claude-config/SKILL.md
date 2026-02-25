@@ -24,18 +24,18 @@ Scan these directories/files in `~/.claude/`:
 
 | Source Path | Target Path | Notes |
 |-------------|-------------|-------|
-| `CLAUDE.md` | `CLAUDE.md` | Always sanitize |
-| `CLAUDE_CodeMap.md` | `CLAUDE_CodeMap.md` | Usually generic |
-| `settings.json` | `settings.json` | Sanitize permissions, paths |
-| `mcp.json` | `mcp.json` | Sanitize tokens |
-| `statusline-command.sh` | `statusline-command.sh` | Usually generic |
-| `agentic_prompt_template.md` | `agentic_prompt_template.md` | Usually generic |
-| `agents/*.md` | `agents/*.md` | Skip non-agent files |
-| `agents/specs/*.md` | `agents/specs/*.md` | Usually generic |
-| `instructions/*.md` | `instructions/*.md` | Sanitize infra details |
-| `output-styles/*.md` | `output-styles/*.md` | Usually generic |
-| `skills/*/SKILL.md` | `skills/*/SKILL.md` | Usually generic |
-| `skills/*/references/*` | `skills/*/references/*` | Usually generic |
+| `CLAUDE.md` | `claude/CLAUDE.md` | Always sanitize |
+| `CLAUDE_CodeMap.md` | `claude/CLAUDE_CodeMap.md` | Usually generic |
+| `settings.json` | `claude/settings.json` | Sanitize permissions, paths |
+| `mcp.json` | `claude/mcp.json` | Sanitize tokens |
+| `statusline-command.sh` | `claude/statusline-command.sh` | Usually generic |
+| `agentic_prompt_template.md` | `claude/agentic_prompt_template.md` | Usually generic |
+| `agents/*.md` | `claude/agents/*.md` | Skip non-agent files |
+| `agents/specs/*.md` | `claude/agents/specs/*.md` | Usually generic |
+| `instructions/*.md` | `claude/instructions/*.md` | Sanitize infra details |
+| `output-styles/*.md` | `claude/output-styles/*.md` | Usually generic |
+| `skills/*/SKILL.md` | `claude/skills/*/SKILL.md` | Usually generic |
+| `skills/*/references/*` | `claude/skills/*/references/*` | Usually generic |
 
 **Skip entirely**: `.credentials.json`, `history.jsonl`, `stats-cache.json`, `security_warnings_state_*`, `session-env/`, `file-history/`, `debug/`, `cache/`, `shell-snapshots/`, `todos/`, `tasks/`, `plans/`, `paste-cache/`, `plugins/`, `projects/`, `telemetry/`, `statsig/`, `downloads/`, any `*:Zone.Identifier` files.
 

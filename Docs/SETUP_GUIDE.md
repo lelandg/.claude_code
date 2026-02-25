@@ -15,14 +15,16 @@ cd .claude_code
 # /install-claude-config
 ```
 
+The `/install-claude-config` command is available immediately after cloning — no pre-installation required.
+
 Or manually copy everything:
 ```bash
-cp -r agents/*.md ~/.claude/agents/
-cp -r agents/specs/*.md ~/.claude/agents/specs/
-cp -r skills/* ~/.claude/skills/
-cp -r instructions/*.md ~/.claude/instructions/
-cp -r output-styles/*.md ~/.claude/output-styles/
-cp CLAUDE.md CLAUDE_CodeMap.md settings.json mcp.json statusline-command.sh agentic_prompt_template.md ~/.claude/
+cp -r claude/agents/*.md ~/.claude/agents/
+cp -r claude/agents/specs/*.md ~/.claude/agents/specs/
+cp -r claude/skills/* ~/.claude/skills/
+cp -r claude/instructions/*.md ~/.claude/instructions/
+cp -r claude/output-styles/*.md ~/.claude/output-styles/
+cp claude/CLAUDE.md claude/CLAUDE_CodeMap.md claude/settings.json claude/mcp.json claude/statusline-command.sh claude/agentic_prompt_template.md ~/.claude/
 ```
 
 ## What's Included

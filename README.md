@@ -6,46 +6,52 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 
 ```
 .claude_code/
-├── CLAUDE.md                          # Global instructions (loaded every session)
-├── CLAUDE_CodeMap.md                  # CodeMap specification (language-neutral)
-├── settings.json                      # Claude Code settings & permissions
-├── mcp.json                           # MCP server configurations
-├── agentic_prompt_template.md         # Template for agentic workflows
-├── statusline-command.sh              # Custom status line script
-├── agents/                            # Custom agent definitions
-│   ├── README.md                      # Agent documentation
-│   ├── CLAUDE.md                      # Agent-specific instructions
-│   ├── code-reviewer.md              # Code review agent (Opus)
-│   ├── documentation-specialist.md   # Documentation agent (Sonnet)
-│   ├── performance-optimizer.md      # Performance analysis agent (Opus)
-│   ├── research-assistant.md         # Research agent (Sonnet)
-│   ├── software-engineer.md          # Coding agent (Opus)
-│   ├── test-generator.md             # Test generation agent (Sonnet)
-│   └── specs/
-│       └── CLAUDE_CodeMap.md         # CodeMap spec (copy for agent access)
-├── instructions/                      # On-demand reference docs
-│   ├── credentials.md                # Secrets management patterns
-│   ├── file-operations.md            # File operation guidelines
-│   └── plan-templates.md             # Implementation plan format
-├── output-styles/                     # Output formatting styles
-│   ├── genui.md                      # Generative UI (HTML output)
-│   ├── html.md                       # HTML/web development focus
-│   └── technical-quality.md          # Comprehensive technical analysis
-├── skills/                            # Custom skills (slash commands)
-│   ├── time.md                       # Execution time tracking
-│   ├── claude-md-optimizer/          # CLAUDE.md optimization skill
-│   ├── feature-documenter/           # Feature documentation skill
-│   ├── install-claude-config/        # Install config into ~/.claude/
-│   ├── sync-claude-config/           # Sync ~/.claude/ to this repo
-│   └── update-code-map/              # CodeMap maintenance skill
+├── README.md
+├── .claude/
+│   └── commands/
+│       └── install-claude-config.md  # Bootstrap command (run after cloning)
+├── claude/                            # Mirrors ~/.claude/ — install this
+│   ├── CLAUDE.md                      # Global instructions (loaded every session)
+│   ├── CLAUDE_CodeMap.md              # CodeMap specification (language-neutral)
+│   ├── settings.json                  # Claude Code settings & permissions
+│   ├── mcp.json                       # MCP server configurations
+│   ├── agentic_prompt_template.md     # Template for agentic workflows
+│   ├── statusline-command.sh          # Custom status line script
+│   ├── agents/                        # Custom agent definitions
+│   │   ├── README.md                  # Agent documentation
+│   │   ├── CLAUDE.md                  # Agent-specific instructions
+│   │   ├── code-reviewer.md           # Code review agent (Opus)
+│   │   ├── documentation-specialist.md# Documentation agent (Sonnet)
+│   │   ├── performance-optimizer.md   # Performance analysis agent (Opus)
+│   │   ├── research-assistant.md      # Research agent (Sonnet)
+│   │   ├── software-engineer.md       # Coding agent (Opus)
+│   │   ├── test-generator.md          # Test generation agent (Sonnet)
+│   │   └── specs/
+│   │       └── CLAUDE_CodeMap.md      # CodeMap spec (copy for agent access)
+│   ├── instructions/                  # On-demand reference docs
+│   │   ├── credentials.md             # Secrets management patterns
+│   │   ├── file-operations.md         # File operation guidelines
+│   │   └── plan-templates.md          # Implementation plan format
+│   ├── output-styles/                 # Output formatting styles
+│   │   ├── genui.md                   # Generative UI (HTML output)
+│   │   ├── html.md                    # HTML/web development focus
+│   │   └── technical-quality.md       # Comprehensive technical analysis
+│   └── skills/                        # Custom skills (slash commands)
+│       ├── time.md                    # Execution time tracking
+│       ├── claude-md-optimizer/       # CLAUDE.md optimization skill
+│       ├── feature-documenter/        # Feature documentation skill
+│       ├── install-claude-config/     # Install config into ~/.claude/
+│       ├── product-manager/           # Product management toolkit
+│       ├── sync-claude-config/        # Sync ~/.claude/ to this repo
+│       └── update-code-map/           # CodeMap maintenance skill
 └── Docs/
-    └── SETUP_GUIDE.md                # Full setup & configuration guide
+    └── SETUP_GUIDE.md                 # Full setup & configuration guide
 ```
 
 ## Installation
 
-### Option 1: Use the Install Skill (Recommended)
-Clone the repo, open Claude Code inside it, and run the install skill. It compares each file against your existing config, shows diffs, and lets you choose per-file whether to install, skip, or smart-merge.
+### Option 1: Use the Install Command (Recommended)
+Clone the repo, open Claude Code inside it, and run `/install-claude-config`. It compares each file against your existing config, shows diffs, and lets you choose per-file whether to install, skip, or smart-merge.
 
 ```bash
 git clone https://github.com/lelandg/.claude_code.git
@@ -54,29 +60,31 @@ cd .claude_code
 # /install-claude-config
 ```
 
+The command is available immediately after cloning — no pre-installation needed.
+
 ### Option 2: Copy Everything
 ```bash
 git clone https://github.com/lelandg/.claude_code.git
-cp -r .claude_code/* ~/.claude/
+cp -r .claude_code/claude/* ~/.claude/
 ```
 
 ### Option 3: Cherry-Pick What You Need
 ```bash
 # Just the agents
-cp .claude_code/agents/*.md ~/.claude/agents/
+cp .claude_code/claude/agents/*.md ~/.claude/agents/
 
 # Just the skills
-cp -r .claude_code/skills/* ~/.claude/skills/
+cp -r .claude_code/claude/skills/* ~/.claude/skills/
 
 # Just the output styles
-cp .claude_code/output-styles/*.md ~/.claude/output-styles/
+cp .claude_code/claude/output-styles/*.md ~/.claude/output-styles/
 
 # Just the instructions
-cp .claude_code/instructions/*.md ~/.claude/instructions/
+cp .claude_code/claude/instructions/*.md ~/.claude/instructions/
 ```
 
 ### Option 4: Start from CLAUDE.md Only
-Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` and customize it for your workflow. This single file gives you the core benefits (date handling, security rules, work procedures, project conventions).
+Copy `claude/CLAUDE.md` to `~/.claude/CLAUDE.md` and customize it for your workflow. This single file gives you the core benefits (date handling, security rules, work procedures, project conventions).
 
 ### Post-Install Setup
 See **[Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md)** for the full setup guide covering environment variables, plugin installation, required customization, and verification steps.

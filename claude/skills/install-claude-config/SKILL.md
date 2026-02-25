@@ -38,27 +38,28 @@ Scan the repo for installable files and compare against user's existing config.
 
 | Repo Path | Target Path | Category |
 |-----------|-------------|----------|
-| `CLAUDE.md` | `~/.claude/CLAUDE.md` | Core config |
-| `CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` | Spec |
-| `settings.json` | `~/.claude/settings.json` | Settings |
-| `mcp.json` | `~/.claude/mcp.json` | MCP servers |
-| `statusline-command.sh` | `~/.claude/statusline-command.sh` | Script |
-| `agentic_prompt_template.md` | `~/.claude/agentic_prompt_template.md` | Template |
-| `agents/*.md` | `~/.claude/agents/*.md` | Agents |
-| `agents/specs/*.md` | `~/.claude/agents/specs/*.md` | Agent specs |
-| `instructions/*.md` | `~/.claude/instructions/*.md` | Instructions |
-| `output-styles/*.md` | `~/.claude/output-styles/*.md` | Output styles |
-| `skills/*/SKILL.md` | `~/.claude/skills/*/SKILL.md` | Skills |
-| `skills/*/references/*` | `~/.claude/skills/*/references/*` | Skill refs |
-| `skills/time.md` | `~/.claude/skills/time.md` | Skill |
+| `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Core config |
+| `claude/CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` | Spec |
+| `claude/settings.json` | `~/.claude/settings.json` | Settings |
+| `claude/mcp.json` | `~/.claude/mcp.json` | MCP servers |
+| `claude/statusline-command.sh` | `~/.claude/statusline-command.sh` | Script |
+| `claude/agentic_prompt_template.md` | `~/.claude/agentic_prompt_template.md` | Template |
+| `claude/agents/*.md` | `~/.claude/agents/*.md` | Agents |
+| `claude/agents/specs/*.md` | `~/.claude/agents/specs/*.md` | Agent specs |
+| `claude/instructions/*.md` | `~/.claude/instructions/*.md` | Instructions |
+| `claude/output-styles/*.md` | `~/.claude/output-styles/*.md` | Output styles |
+| `claude/skills/*/SKILL.md` | `~/.claude/skills/*/SKILL.md` | Skills |
+| `claude/skills/*/references/*` | `~/.claude/skills/*/references/*` | Skill refs |
+| `claude/skills/time.md` | `~/.claude/skills/time.md` | Skill |
 
 **Skip these files** (repo-specific, not user config):
-- `README.md`, `agents/README.md` - repo documentation
+- `README.md`, `claude/agents/README.md` - repo documentation
 - `.gitignore`, `.git/`, `.idea/` - repo metadata
 - `.claude/` directory - project-local settings
-- `skills/sync-claude-config/` - reverse-direction skill
-- `skills/install-claude-config/` - this skill itself
-- `skills/*.skill` - packaged skill archives
+- `Docs/`, `Notes/` - repo documentation
+- `claude/skills/sync-claude-config/` - reverse-direction skill
+- `claude/skills/install-claude-config/` - this skill itself
+- `claude/skills/*.skill` - packaged skill archives
 
 ### 3. Compare and Present Diff Summary
 

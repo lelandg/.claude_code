@@ -1,5 +1,6 @@
 # Claude Code session-local files (auto-generated)
-.claude/
+.claude/settings.local.json
+.claude/cache/
 
 # Claude Code private files
 .credentials.json
@@ -41,6 +42,9 @@ Thumbs.db
 
 # Zone identifiers (Windows)
 *:Zone.Identifier
+
+# Personal notes (not for public repo)
+Notes/
 
 # Temporary files
 *.tmp
