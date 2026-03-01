@@ -50,44 +50,111 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 
 ## Installation
 
+### Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and working (`claude --version`)
+- `~/.claude/` directory exists (created automatically by Claude Code on first run)
+- `git` installed
+
+---
+
 ### Option 1: Use the Install Command (Recommended)
-Clone the repo, open Claude Code inside it, and run `/install-claude-config`. It compares each file against your existing config, shows diffs, and lets you choose per-file whether to install, skip, or smart-merge.
+
+Clone the repo, open Claude Code inside it, and run `/install-claude-config`.
 
 ```bash
 git clone https://github.com/lelandg/.claude_code.git
 cd .claude_code
-# In Claude Code:
-# /install-claude-config
+claude .
+```
+
+Then in Claude Code:
+```
+/install-claude-config
 ```
 
 The command is available immediately after cloning — no pre-installation needed.
 
+**What it does:**
+1. Scans `claude/` and compares every file against your existing `~/.claude/`
+2. Presents a table: `NEW`, `CHANGED`, or `IDENTICAL` for each file
+3. For each changed file, shows a diff and asks: **Install** / **Keep current** / **Smart merge**
+4. Smart merge for `settings.json`: unions `permissions.allow` and `enabledPlugins`, keeps your personal values (`defaultMode`, `trustedWorkspaces`, etc.)
+5. Smart merge for `CLAUDE.md`: keeps your version, reports any new sections you don't have yet
+6. Backs up all overwritten files to `~/.claude/.backup/YYYY-MM-DD/` before writing
+7. Sets `chmod +x` on shell scripts automatically
+
+---
+
 ### Option 2: Copy Everything
+
 ```bash
 git clone https://github.com/lelandg/.claude_code.git
 cp -r .claude_code/claude/* ~/.claude/
 ```
 
+> **Note:** This overwrites existing files without merging. Back up `~/.claude/` first if you have existing config.
+
+---
+
 ### Option 3: Cherry-Pick What You Need
+
 ```bash
+cd .claude_code
+
 # Just the agents
-cp .claude_code/claude/agents/*.md ~/.claude/agents/
+cp claude/agents/*.md ~/.claude/agents/
 
 # Just the skills
-cp -r .claude_code/claude/skills/* ~/.claude/skills/
+cp -r claude/skills/* ~/.claude/skills/
 
 # Just the output styles
-cp .claude_code/claude/output-styles/*.md ~/.claude/output-styles/
+cp claude/output-styles/*.md ~/.claude/output-styles/
 
 # Just the instructions
-cp .claude_code/claude/instructions/*.md ~/.claude/instructions/
+cp claude/instructions/*.md ~/.claude/instructions/
 ```
 
-### Option 4: Start from CLAUDE.md Only
-Copy `claude/CLAUDE.md` to `~/.claude/CLAUDE.md` and customize it for your workflow. This single file gives you the core benefits (date handling, security rules, work procedures, project conventions).
+---
 
-### Post-Install Setup
-See **[Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md)** for the full setup guide covering environment variables, plugin installation, required customization, and verification steps.
+### Option 4: Start from CLAUDE.md Only
+
+```bash
+cp .claude_code/claude/CLAUDE.md ~/.claude/CLAUDE.md
+```
+
+Customize it for your workflow. This single file gives you the core benefits: date handling, security rules, work procedures, and project conventions.
+
+---
+
+### Required After Install
+
+**1. Personalize `~/.claude/CLAUDE.md`** — replace the placeholder table at the top:
+
+```markdown
+| Your Name | your-github-username | your-discord-username |
+```
+
+**2. Fix the Read permission path in `~/.claude/settings.json`** — find and update:
+
+```json
+"Read(//home/<YOUR_USER>/.claude/**)"
+```
+
+Replace `<YOUR_USER>` with your actual username.
+
+**3. Set the GitHub token** (required for GitHub MCP server):
+
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"
+```
+
+Generate a token at [github.com/settings/tokens](https://github.com/settings/tokens) with `repo`, `read:org`, `read:user` scopes.
+
+**4. Restart Claude Code** to load the new config.
+
+See **[Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md)** for the full guide including plugin installation, verification checklist, and troubleshooting.
 
 ## Customization Guide
 
