@@ -1,4 +1,7 @@
-# ImageAI Features
+# Example: ImageGen App Features
+
+> Below is a worked example. "ImageGen" is a placeholder name — replace with your actual product when using this template.
+
 
 > AI-powered image generation desktop application with multi-provider support.
 
@@ -53,7 +56,7 @@ Create lyric-synced video projects with AI-generated visuals for each scene.
 |--------|-------------|---------|
 | provider | AI provider to use | google |
 | model | Specific model for generation | auto |
-| output_dir | Where to save images | ~/ImageAI/output |
+| output_dir | Where to save images | ~/ImageGen/output |
 | save_metadata | Store generation params | true |
 
 ## Supported Formats/Integrations

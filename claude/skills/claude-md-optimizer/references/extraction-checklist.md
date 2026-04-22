@@ -57,7 +57,7 @@ After extraction, add a reference pointer in the core file:
 
 ```markdown
 ## AWS Infrastructure
-For AWS ChameleonLabs infrastructure (Amplify, RDS, SES), see `~/.claude/instructions/aws-chameleonlabs.md`
+For AWS infrastructure reference (Amplify, RDS, SES), see `~/.claude/instructions/aws-<yourcompany>.md`
 ```
 
 Keep the pointer brief (1-2 lines) with just enough context to know when to read the full reference.

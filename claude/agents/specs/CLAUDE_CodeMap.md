@@ -332,5 +332,5 @@ When updating the code map:
 
 ## Examples
 
-- **C#/.NET**: `/mnt/d/Documents/Code/GitHub/.Net/MeshForge/Docs/MeshForge-CodeMap.md`
-- **Web/TypeScript**: `/mnt/d/Documents/Code/GitHub/Web/LelandGreenProductions/Docs/CodeMap.md`
+- **C#/.NET**: `/path/to/CSharpProject/Docs/CodeMap.md`
+- **Web/TypeScript**: `/path/to/WebProject/Docs/CodeMap.md`

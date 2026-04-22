@@ -2,6 +2,18 @@
 
 A comprehensive, production-tested configuration for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - Anthropic's CLI for Claude. This repository mirrors a real-world `~/.claude/` setup with custom agents, skills, output styles, and best-practice instructions.
 
+## Platform
+
+**This config is written for Linux** (native Linux or WSL on Windows). macOS should work with minimal changes — swap `python3` for `python` where needed and replace `/home/<user>` with `/Users/<user>` in permission entries.
+
+**Using Windows without WSL?** Ask Claude to port it for you:
+
+> Here is my Claude Code config repo cloned at `<repo-path>`. Convert everything from Linux/WSL conventions to native Windows PowerShell equivalents: change shell scripts like `statusline-command.sh` to a PowerShell `.ps1` (or keep Bash if using Git Bash), update `/home/<USER>/` paths in `claude/settings.json` permissions to `C:\Users\<USER>\` form, replace `python3` with `python`, and adjust any `bash ~/.claude/...` invocations in `settings.json` / `statusLine` to whatever shell you want to use. Leave the rest (agents, skills, CLAUDE.md, instructions) alone — they are OS-neutral.
+
+### `cl*` skills — heads-up
+
+Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example of a [Chameleon Labs](https://chameleonlabs.ai)-specific workflow**. The company-specific details (emails, product names, brand colors) have been replaced with `YourCompany` / `yourdomain.com` placeholders, but the skill is still structured around the author's use case. Treat it as a template you fork and rename for your own company, not something to install verbatim.
+
 ## What's Included
 
 ```
@@ -9,7 +21,8 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 ├── README.md
 ├── .claude/
 │   └── commands/
-│       └── install-claude-config.md  # Bootstrap command (run after cloning)
+│       ├── install-claude-config.md  # Bootstrap command (run after cloning)
+│       └── yt-transcript.md          # /yt-transcript slash command
 ├── claude/                            # Mirrors ~/.claude/ — install this
 │   ├── CLAUDE.md                      # Global instructions (loaded every session)
 │   ├── CLAUDE_CodeMap.md              # CodeMap specification (language-neutral)
@@ -20,6 +33,7 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 │   ├── agents/                        # Custom agent definitions
 │   │   ├── README.md                  # Agent documentation
 │   │   ├── CLAUDE.md                  # Agent-specific instructions
+│   │   ├── Claude-Code-Agents-Documentation.md  # Full agent architecture reference
 │   │   ├── code-reviewer.md           # Code review agent (Opus)
 │   │   ├── documentation-specialist.md# Documentation agent (Sonnet)
 │   │   ├── performance-optimizer.md   # Performance analysis agent (Opus)
@@ -38,12 +52,19 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 │   │   └── technical-quality.md       # Comprehensive technical analysis
 │   └── skills/                        # Custom skills (slash commands)
 │       ├── time.md                    # Execution time tracking
+│       ├── cl-project-init/           # Sanitized example: company project scaffolder
 │       ├── claude-md-optimizer/       # CLAUDE.md optimization skill
+│       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
 │       ├── feature-documenter/        # Feature documentation skill
+│       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
 │       ├── install-claude-config/     # Install config into ~/.claude/
 │       ├── product-manager/           # Product management toolkit
+│       ├── project-documenter/        # Per-project user-facing docs generator
+│       ├── raginclude-generator/      # Generate .raginclude file for RAG ingest
 │       ├── sync-claude-config/        # Sync ~/.claude/ to this repo
-│       └── update-code-map/           # CodeMap maintenance skill
+│       ├── technical-documenter/      # Developer/support docs generator
+│       ├── update-code-map/           # CodeMap maintenance skill
+│       └── yt-transcript/             # Download YouTube transcripts
 └── Docs/
     └── SETUP_GUIDE.md                 # Full setup & configuration guide
 ```
@@ -53,6 +74,7 @@ A comprehensive, production-tested configuration for [Claude Code](https://docs.
 ### Prerequisites
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and working (`claude --version`)
+- Linux, WSL, or macOS shell (Bash/Zsh). Native Windows users should run the conversion prompt [above](#platform) first.
 - `~/.claude/` directory exists (created automatically by Claude Code on first run)
 - `git` installed
 
@@ -195,7 +217,15 @@ Custom skills extend Claude Code with repeatable workflows:
 
 - **update-code-map** - Maintains a comprehensive CodeMap.md for codebase navigation
 - **feature-documenter** - Generates user-facing feature documentation from code analysis
+- **project-documenter** - Per-project user-facing feature docs + sitemap
+- **technical-documenter** - Developer and support-staff documentation (APIs, data models, errors)
+- **doc-all-projects** - Parallel sweep that regenerates stale docs across every registered project
 - **claude-md-optimizer** - Reduces CLAUDE.md token usage by extracting rarely-used sections
+- **graphify** - Turns any input (code, docs, papers, images) into a clustered knowledge graph (HTML + JSON)
+- **raginclude-generator** - Generates a `.raginclude` file to curate what a RAG knowledge base should ingest
+- **cl-project-init** - *(ChameleonLabs-specific, sanitized)* Example project scaffolder (Next.js SaaS / Python / library templates). Fork and rename for your own company — the `cl-` prefix marks it as company-scoped.
+- **yt-transcript** - Download a YouTube transcript into a local `yt-transcript` project
+- **product-manager** - Full PM toolkit (strategy, discovery, market research, GTM, execution)
 - **install-claude-config** - Merges this repo's config into `~/.claude/` with diff-and-ask conflict resolution
 - **sync-claude-config** - Syncs `~/.claude/` back to this repo with automatic sanitization of private info
 - **time** - Tracks execution time for each step in a workflow

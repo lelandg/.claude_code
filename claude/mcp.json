@@ -6,6 +6,16 @@
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       }
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest"
+      ],
+      "env": {
+        "CDP_HOST": "localhost",
+        "CDP_PORT": "9222"
+      }
     }
   }
 }
