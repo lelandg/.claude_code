@@ -1,5 +1,12 @@
 {
   "mcpServers": {
+    "acestudio": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:21572/mcp"
+      ]
+    },
     "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],

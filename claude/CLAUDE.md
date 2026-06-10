@@ -27,6 +27,31 @@ This conversation may be logged, committed to git, or shared. Running commands l
 
 For detailed credential management patterns, see `~/.claude/instructions/credentials.md`
 
+### GitHub Actions - NEVER use `pull_request_target`
+
+**NEVER** use the `pull_request_target` trigger in any GitHub Actions workflow you create or modify.
+
+- `pull_request_target` runs in the context of the **base** repo with **write permissions** and access to **all secrets**, while checking out untrusted PR code from forks. This is the #1 source of GitHub Actions supply-chain compromises (e.g., the tj-actions/changed-files incident).
+- Use `pull_request` instead. If a workflow legitimately needs secrets to comment on PRs from forks, split it into two workflows: one `pull_request` workflow that produces an artifact, and one `workflow_run` workflow that consumes it with secrets — and **never** check out untrusted PR head SHAs in the privileged half.
+- If you encounter an existing `pull_request_target` workflow, flag it as a security risk before modifying.
+
+### Package Manager - Minimum Package Age (Supply Chain Defense)
+
+To defend against newly-published malicious packages (npm/PyPI typosquats, compromised maintainer accounts), enforce a **minimum package age of 7 days** for every package manager. Never install or upgrade to a package version published less than 7 days ago without explicit user approval.
+
+| Manager | Configuration |
+|---------|---------------|
+| **npm** (v11+) | Add `min-release-age=7` to `~/.npmrc` (value is in **DAYS**, not minutes — verified from npm's `@npmcli/config` definitions: `hint: '<days>'`. `minimumReleaseAge` is the **pnpm** key, NOT npm's, and npm silently ignores it) |
+| **pnpm** (v10.16+) | Add `minimum-release-age=10080` to `~/.npmrc` or `pnpm-workspace.yaml` (minutes) |
+| **yarn** | No native flag — pin versions in `package.json` and verify publish dates with `npm view <pkg> time` before bumping |
+| **pip / pypi** | pip has no native flag. Before `pip install <pkg>` of an unpinned/upgraded version, check publish date via `pip index versions <pkg>` or `https://pypi.org/pypi/<pkg>/json` and skip versions <7 days old |
+| **uv** | `uv pip install --exclude-newer=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) <pkg>` |
+| **poetry** | No native flag — verify with PyPI JSON API before adding new deps |
+| **cargo** | No native flag — verify on crates.io before adding |
+| **go modules** | Go's checksum DB mitigates this; still prefer versions ≥7 days old |
+
+**When installing:** If a user asks you to install/upgrade a package and the latest version is <7 days old, tell them and ask before proceeding. Exception: security patches explicitly flagged as CVE fixes by the upstream maintainer.
+
 ## Work Procedures
 - When I ask you to update the code map (or CodeMap), use the code map agent
 - When I ask you to review any code, always use the code reviewer agent
@@ -134,6 +159,15 @@ For detailed file operation guidelines, see `~/.claude/instructions/file-operati
   - Future plans, ideas, and brainstorming go in project-level `Notes/` directory
   - Use markdown format (.md) as standard
 
+## Output & Prompt Formatting
+Grounded in Anthropic's own guidance — the real win is XML-tag *input* structuring, not "HTML over Markdown" output (that's community folklore; Anthropic recommends the opposite for prose).
+
+- **Prompts/context sent TO Claude (input):** delimit sections with XML-style tags (`<context>`, `<instructions>`, `<example>`, `<document index="n">`). Claude parses these unambiguously. Applies to system prompts, RAG context, and tool-result payloads built in backend services/agents. Ref: [use-xml-tags](https://platform.claude.com/docs/en/docs/build-with-claude/prompt-engineering/use-xml-tags).
+- **Claude's text/chat output:** Markdown is the recommended format for prose and reports. Do **not** switch agent conversational output to HTML — terminals (and Claude Code) render Markdown, so HTML shows as literal tags. Ref: [control-output-format](https://platform.claude.com/docs/en/docs/control-output-format).
+- **Structured/programmatic data:** use JSON Schema / Structured Outputs, not free-form XML or Markdown. Ref: [structured-outputs](https://platform.claude.com/docs/en/docs/build-with-claude/structured-outputs).
+- **HTML as a deliverable (DO use it here):** when the artifact *is* something visual, generate a real HTML page to open in a browser — design mockups, side-by-side layout/option comparisons, "pick one of these" decision pages, dashboards. For visual/design choices, an HTML page to click through beats a terminal list. Write it to the project (e.g. `Notes/` or a temp path) and surface the file.
+- **Presenting options in-conversation:** use the `AskUserQuestion` tool (structured choices), not HTML-encoded options — unless it's a visual/design decision, where an HTML page (above) is better.
+
 ## Screenshots and Analysis Guidelines
 - Screenshots are stored in `_screenshots` symlink (customize the target path)
 - To find the most recent screenshot: `ls -lt _screenshots/*.png | head -3 | awk '{print $9}'`
@@ -151,6 +185,9 @@ For detailed file operation guidelines, see `~/.claude/instructions/file-operati
 
 ## System Dependencies
 Do not attempt to install system packages via sudo or pip install without asking first. If a system tool is needed, tell the user what's required and let them install it.
+
+## Debugging / Production
+Always target the deployed production environment when diagnosing runtime issues, not local logs. (Customize for your infrastructure — e.g., "our production services run on EC2 instances.")
 
 ## Bug Fixing Philosophy
 When fixing bugs, look for the systemic root cause rather than applying narrow point fixes. Check if the issue is part of a broader pattern (e.g., if one command leaks, check all commands; if one search path has a privacy gap, check all search paths).

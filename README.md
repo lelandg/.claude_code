@@ -250,6 +250,9 @@ Three output styles for different contexts:
 - **HTML** - Web development focus with accessibility and standards compliance
 - **Technical Quality** - Comprehensive analysis with systematic problem-solving
 
+### Status Line
+`statusline-command.sh` renders a two-line status bar: user@host, working directory, and git branch on line 1; model, context usage, PR badge (color-coded by review state), and vim mode on line 2. When the current session has a messaging channel attached (Discord, Telegram), the channel name appears in its brand color with an "active" suffix — detected live via the process tree, not just pairing files.
+
 ## Design Philosophy
 
 ### Context Efficiency
@@ -259,6 +262,8 @@ The `CLAUDE.md` is kept under ~200 lines by extracting detailed reference materi
 - Credentials are never stored in project directories
 - Bash commands never contain inline secrets
 - All issues/inputs are treated as untrusted (prompt injection awareness)
+- Supply-chain defense: 7-day minimum package age enforced across npm/pnpm/pip/uv/poetry/cargo (see `CLAUDE.md`)
+- GitHub Actions: `pull_request_target` is banned — the #1 source of Actions supply-chain compromises
 
 ### Convention Over Configuration
 - Projects follow their own naming conventions (checked before creating files)

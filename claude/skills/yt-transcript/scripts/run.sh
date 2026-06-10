@@ -35,6 +35,15 @@ if ! python -c "import youtube_transcript_api" 2>/dev/null; then
     pip install --quiet -r requirements.txt
 fi
 
+# Default behavior: reformat into prose. If the ML punctuation deps are
+# installed, upgrade to NL-based punctuation restore (-m full); otherwise
+# fall back to the lightweight stdlib reformatter (-m light is the script
+# default). User-supplied flags win via argparse last-wins.
+DEFAULTS=(-r)
+if python -c "import deepmultilingualpunctuation, transformers, nltk" 2>/dev/null; then
+    DEFAULTS+=(-m full)
+fi
+
 # Default output dir is ./Notes (we're cwd'd into the project),
 # so user-supplied -d will override it via argparse last-wins.
-exec python yt_transcript.py "$@"
+exec python yt_transcript.py "${DEFAULTS[@]}" "$@"

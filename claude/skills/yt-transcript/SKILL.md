@@ -37,6 +37,17 @@ First run will create the venv and install deps — subsequent runs skip that an
 
 **Why a venv (not `uv run`, not global pip):** `uv run` installs the latest `youtube-transcript-api` on every fresh cache, and newer releases trip YouTube's bot-block much more aggressively on the same residential IP. A pinned venv avoids that churn — once the venv has a working version, it keeps working.
 
+## Default behavior
+
+The wrapper always passes `-r` so output is reformatted into readable prose. It then probes the venv for the ML punctuation deps (`deepmultilingualpunctuation`, `transformers`, `nltk`) and:
+
+- **If installed** → adds `-m full` for NL-based punctuation restore.
+- **If missing** → falls back to the script's built-in `-m light` reformatter.
+
+Paragraph length stays at the script default (`-p 4`, ~3–4 sentences per paragraph). Any user-supplied flag overrides these defaults via argparse last-wins, so passing `-m light` or `-p 6` works as expected.
+
+If the user wants the raw, unformatted transcript, they need to bypass the wrapper (call `python yt_transcript.py` directly inside the venv) — there is no "no-reformat" flag.
+
 ## Useful flags
 
 Pass these through when the user asks for the corresponding behavior — don't add them speculatively:
@@ -46,14 +57,14 @@ Pass these through when the user asks for the corresponding behavior — don't a
 | Custom filename | `-o <name>` |
 | Include `[HH:MM:SS]` timestamps | `-t` |
 | Non-English / specific language | `-l <code>` (e.g. `-l es`) |
-| Reformat into readable prose | `-r` |
-| ML-based punctuation restore | `-r -m full` |
-| Sentences per paragraph | `-p <N>` (with `-r`) |
+| Force lightweight reformat (skip ML even if installed) | `-m light` |
+| Force ML punctuation restore | `-m full` |
+| Sentences per paragraph | `-p <N>` |
 
 Example with flags:
 
 ```bash
-bash ~/.claude/skills/yt-transcript/scripts/run.sh "<URL>" -t -r
+bash ~/.claude/skills/yt-transcript/scripts/run.sh "<URL>" -t -p 3
 ```
 
 ## After running

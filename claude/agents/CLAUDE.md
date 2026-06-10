@@ -1,12 +1,9 @@
-## USAGE:
-1. Copy the agent `.md` files to `~/.claude/agents/`.
-2. Edit your `~/.claude/CLAUDE.md` to reference the agents.
-3. Restart all Claude instances.
+## USAGE: <br> 1. Copy this file to ~/.claude/CLAUDE.md. <br> 2. Edit it to change/remove `Development Environment` section, as needed. <br> 3. Edit other sections, as desired. <br> 4. Optionally, remove this line. <br> 5. Restart all Claude instances.
 
 ## Work Procedures
 - When I ask you to update the code map (or CodeMap), check the last date it was modified, then use git history to look for changes and update appropriate sections.
 - When I ask you to review any code, always use the code reviewer agent.
-- When I ask to update the code map, use the code map agent.
+- When I ask to update the code map, use the code map agent
 - Use agent when one is available for a task.
 
 ### Code Review Agent Guidelines
@@ -18,7 +15,7 @@
 5. **Consider modern best practices**: Modern codebases often already implement proper patterns (IDisposable, async/await, etc.)
 
 ## Startup Procedures
-- At startup, if ./CLAUDE.md exists and there is not a project-level `Docs/CodeMap.md`, offer to create it.
+- At startup, if ./CLAUDE.md exists and there is not a project-level `Docs/CodeMap.md` (e.g., `MyProject/Docs/CodeMap.md` for the MyProject project), offer to create it.
 
 ## Plan File Management
 
@@ -27,8 +24,8 @@
 ### When to Update Plan Files
 
 Update the corresponding plan file **immediately** after:
-1. **Completing any task or phase** - Mark with status "COMPLETED"
-2. **Starting a new task** - Mark with status "IN PROGRESS"
+1. **Completing any task or phase** - Mark with ✅ and status "COMPLETED"
+2. **Starting a new task** - Mark with ⏳ and status "IN PROGRESS"
 3. **Creating new files** - Document file paths and line counts
 4. **Modifying existing files** - Note what was changed
 5. **Discovering blockers** - Document issues and workarounds
@@ -37,13 +34,41 @@ Update the corresponding plan file **immediately** after:
 ### Required Updates
 
 When updating plan files, you MUST:
-1. **Mark task completion status**: Use check marks (complete), clock (in progress), X (blocked), pause (paused)
+1. **Mark task completion status**: Use ✅ (complete), ⏳ (in progress), ❌ (blocked), ⏸️ (paused)
 2. **Add timestamps**: Update "Last Updated" at top of file or section
 3. **Document deliverables**: List all files created/modified with line counts
 4. **Update progress percentages**: Calculate phase completion (e.g., "Phase 2: 95% Complete")
 5. **Add implementation notes**: Document deviations from plan, lessons learned
 6. **Update "Status" sections**: Keep current status at top of each phase
-7. **Cross-reference files**: Link to actual code files (e.g., `src/module.py`)
+7. **Cross-reference files**: Link to actual code files (e.g., `gui/video/controls_widget.py`)
+
+### Plan File Format Standards
+
+```markdown
+## Phase N: [Phase Name] [Status Emoji] [Progress]
+
+**Goal:** [Clear objective]
+
+**Status:** Phase N is **[percentage]% complete**. [Current state summary]
+
+**Last Updated:** YYYY-MM-DD HH:MM
+
+### Tasks
+
+1. ✅ Task description - **COMPLETED** (file.py:123)
+   - Implementation details
+   - Files created: `path/to/file.py` (N lines)
+2. ⏳ Task description - **IN PROGRESS**
+   - Current blocker or status
+3. ❌ Task description - **BLOCKED**
+   - Reason for blocking
+4. Task description - **PENDING**
+
+**Deliverables:** [Status Emoji]
+- ✅ Deliverable 1 - Done
+- ⏳ Deliverable 2 - In Progress
+- Deliverable 3 - Pending
+```
 
 ### Auto-Update Triggers
 
@@ -63,14 +88,36 @@ When resuming after session interruption:
 4. **Resume from last checkpoint** - Continue from last completed task
 5. **Update plan immediately** - Mark current task as "IN PROGRESS"
 
+### Example Update Workflow
+
+```
+# After completing a task:
+1. Mark task ✅ in plan file
+2. Update phase progress percentage
+3. Add implementation notes
+4. List files created/modified
+5. Update "Last Updated" timestamp
+6. Update "Status" section
+
+# Before ending session:
+1. Update all in-progress tasks with current state
+2. Note any blockers or issues
+3. Update "Status" section with next steps
+4. Ensure timestamps are current
+```
+
+This ensures that even if power is lost or session ends abruptly, the plan file accurately reflects completed work and allows seamless resumption.
+
 ## Important Agent Usage Notes
 
 **Agent File Creation**: When agents (documentation-specialist, code-reviewer, etc.) report creating files, always verify the file exists afterward. If it doesn't exist, create it directly using the Write tool with the agent's output. Agents sometimes indicate file creation in their summaries without the actual file being written due to their sandboxed execution environment.
 
+**Agent Folder Documentation**: The file `Claude-Code-Agents-Documentation.md` in the `~/.claude/agents/` folder is documentation about agents, not an agent itself. When searching for or listing agents, ignore this file as it's reference documentation only.
+
 ### Code Navigation
 
 #### Code Map Reference
-**IMPORTANT**: Always use the comprehensive code map located at the project level `Docs/CodeMap.md` for:
+**IMPORTANT**: Always use the comprehensive code map located at the project level `Docs/CodeMap.md` (e.g., `MyProject/Docs/CodeMap.md` for the MyProject project) for:
 - **Finding classes and methods**: Detailed inventory with line numbers for quick navigation
 - **Understanding file organization**: Complete project structure with cross-references
 - **Locating shared variables**: Cross-file state management and variable usage
@@ -79,10 +126,22 @@ When resuming after session interruption:
 **Code Map Currency Check**:
 - **ALWAYS** check the last updated timestamp at the top of CodeMap.md before using it
 - If the code map is older than 7 days, prompt: "The CodeMap.md was last updated on [YYYY-MM-DD HH:MM:SS]. Would you like me to update it first to ensure accuracy?"
+- When updating code maps, the code-map-updater agent MUST include the exact timestamp in format: `*Last Updated: YYYY-MM-DD HH:MM:SS*`
+
+The CodeMap.md contains:
+- A table of contents with line numbers for each section
+    - Then each section also has a table of contents with line numbers for each subsection
+    - This allows you to quickly jump to specific parts of the codebase
+- Complete file-by-file breakdowns of classes, methods, and properties with line numbers
+- Architectural pattern documentation
+- UI component mapping
+- Configuration file locations
 
 Use `file_path:line_number` references from the code map to quickly locate specific implementations.
 
 ## File Navigation Best Practices
+
+**IMPORTANT**: Use convenient symbolic links when working across project directories, if available.
 
 ### Working with Files Across Directories
 
@@ -91,13 +150,54 @@ Use `file_path:line_number` references from the code map to quickly locate speci
 - **Always use full paths**: Specify complete paths for all file operations
 - **Batch operations**: Call multiple tools in parallel when searching
 
+## Development Environments
+- **IDE**: Customize this section for your IDE (e.g., JetBrains PyCharm/Rider/WebStorm, VS Code, Vim)
+- **Python-specific Notes**
+  - Note which GUI frameworks (e.g., PyQt6) are available in which environment
+  - Note your Python versions per shell (e.g., python3 for bash, Python 3.12 for PowerShell) and any Anaconda/Docker environments available for testing
+- **.NET/C# Development Notes**
+  - WPF applications require Windows to build and run fully
+  - When working in WSL/Linux bash, use syntax checking instead of full builds
+  - Check for compilation errors: `dotnet build --no-dependencies 2>&1 | grep -E "error CS|warning CS"`
+  - Full builds (`dotnet build`) only work in PowerShell or Windows Command Prompt
+  - Always verify syntax correctness before suggesting the user build in PowerShell
+
+#### Efficiency Tips:
+1. **Parallel searches**: When searching multiple directories, batch the tool calls in a single message
+2. **Path variables**: When working repeatedly with a directory, note its absolute path at the start
+3. **Avoid path traversal**: Use direct absolute paths instead of `../../../` constructions
+4. **Git repository operations**: Use `git -C /absolute/path` to run git commands in other directories
+
+#### Examples:
+```bash
+# Good - uses absolute path
+Grep(pattern="class.*Controller", path="/path/to/MyProject")
+
+# Bad - requires changing directory
+cd /path/to/MyProject && grep -r "class.*Controller"
+
+# Good - parallel operations with absolute paths
+[
+  Glob(pattern="*.md", path="/path/to/Project1"),
+  Glob(pattern="*.md", path="/path/to/Project2")
+]
+
+# Good - git operation without changing directory
+git -C /path/to/MyProject log --oneline -5
+```
+
+## Important Agent Usage Notes
+
+**Agent File Creation**: When agents (documentation-specialist, code-reviewer, etc.) report creating files, always verify the file exists afterward. If it doesn't exist, create it directly using the Write tool with the agent's output. Agents sometimes indicate file creation in their summaries without the actual file being written due to their sandboxed execution environment.
+
 ## Documentation Procedures
 - Any time you write to a CodeMap.md file, see ~/.claude/CLAUDE_CodeMap.md for specs.
 - Any time I ask for documentation, use the documentation specialist agent.
 - **Documentation Structure**:
-  - Developer and user documentation goes in project-level `Docs/` directory
+  - Developer and user documentation goes in project-level `Docs/` directory (e.g., `MyProject/Docs/` for the MyProject project, not solution-level)
   - Future plans, ideas, and brainstorming go in project-level `Notes/` directory
   - Use markdown format (.md) as standard for all documentation
+  - This allows separate documentation for main projects and test projects (e.g., `MyProject/Docs/` vs `MyProject.Tests/Docs/`)
 
 ## Credentials and Secrets Management
 
@@ -111,11 +211,59 @@ Store credentials in platform-specific user config directories **outside the pro
 - **macOS**: `~/Library/Application Support/{AppName}/config.json`
 - **Linux**: `~/.config/{AppName}/config.json`
 
+### Implementation Template
+
+When creating configuration management for a new project:
+
+1. **Create `config/user_config.py`** with `UserConfigManager` class:
+   - `_get_config_dir()` - Returns platform-specific path
+   - `load_config()` - Loads from user directory
+   - `save_config()` - Saves to user directory
+   - Include template generation function
+
+2. **Update settings/config loading** to check user config as fallback:
+   - Try environment variables first
+   - Try project `.env` second (for non-secrets)
+   - Fall back to user config directory for secrets
+
+3. **Update `.gitignore`** to block common secret patterns:
+   ```
+   .env*
+   !.env.example
+   config.json
+   secrets.json
+   *.key
+   *.pem
+   *_credentials.json
+   *_api_key.txt
+   ```
+
+4. **Create `config/README.md`** explaining:
+   - Where config is stored
+   - How to set it up
+   - Configuration loading priority
+   - Security notes
+
+5. **Document in project CLAUDE.md** with:
+   - User config location paths
+   - Setup command (e.g., `python -m config.user_config`)
+   - Configuration loading order
+
 ### Security Notes
+
 - Project `.env` files can contain non-secret defaults, but **never** API keys
 - User config directory is outside git - must be backed up separately
+- Include encryption details only when explicitly requested
 - Always use absolute paths (`Path.home()`) to locate config
 - Create config directory with `mkdir(parents=True, exist_ok=True)`
+
+## Screenshots and Analysis Guidelines
+- Screenshots are stored in `_screenshots` symlink (customize the target path)
+- To find the most recent screenshot, e.g., to find newest 3 use: `ls -lt _screenshots/*.png | head -3 | awk '{print $9}'`
+- If I refer to just one "screenshot," look at the newest one based on timestamp.
+- If I refer to "# screenshots," consider only the # newest. Examine the newest one first based on timestamp.
+- Analyze and see if you can complete the task. Read the next older one only when needed.
+- You can also use timestamps in the log to correlate screenshots with log entries.
 
 ## Node.js Version Management
 - **Update Node.js to latest LTS**:
@@ -123,3 +271,4 @@ Store credentials in platform-specific user config directories **outside the pro
   - `nvm alias default lts/* && nvm use default`
 - **Per-project version pinning**:
   - Create a `.nvmrc` in each repo (e.g., `lts/*` or `20`), then run `nvm use` in that directory
+- Note any shell-specific runtime conventions here (e.g., "server runs from PowerShell using .venv; WSL uses .venv_linux with python3")
