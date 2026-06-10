@@ -49,3 +49,6 @@ Notes/
 # Temporary files
 *.tmp
 *.bak
+
+# Project-local skill maintained in the ImageAI repo
+.claude/skills/gpt-image-2/
