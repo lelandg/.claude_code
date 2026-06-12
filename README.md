@@ -71,6 +71,8 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 
 ## Installation
 
+> **New to Claude Code?** There's a beginner-friendly visual walkthrough with copy buttons for every command: **[open the HTML install guide](https://htmlpreview.github.io/?https://github.com/lelandg/.claude_code/blob/master/Docs/install-guide.html)** (or open [`Docs/install-guide.html`](Docs/install-guide.html) locally in your browser after cloning).
+
 ### Prerequisites
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and working (`claude --version`)

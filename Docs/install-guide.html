@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Install Guide — Claude Code Config by Chameleon Labs</title>
+<meta name="description" content="Beginner-friendly guide to installing the Chameleon Labs Claude Code configuration: agents, skills, settings, and plugins — with copy-paste commands.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:        #0b120e;
+    --ink-2:      #101a14;
+    --panel:      #141f18;
+    --panel-2:    #18261d;
+    --line:       #24382b;
+    --text:       #d8e6dc;
+    --text-dim:   #8fa897;
+    --lime:       #a3f05f;
+    --teal:       #34d8a8;
+    --amber:      #f0c45f;
+    --rose:       #f08a8a;
+    --code-bg:    #0a0f0c;
+    --radius:     14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: "Atkinson Hyperlegible", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    /* layered atmosphere: faint chameleon-green glows + grain */
+    background-image:
+      radial-gradient(900px 500px at 85% -10%, rgba(52,216,168,.10), transparent 60%),
+      radial-gradient(700px 420px at -10% 25%, rgba(163,240,95,.07), transparent 60%),
+      radial-gradient(600px 600px at 50% 110%, rgba(52,216,168,.06), transparent 60%);
+    background-attachment: fixed;
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.045'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  ::selection { background: rgba(163,240,95,.25); }
+
+  h1, h2, h3 { font-family: "Bricolage Grotesque", "Atkinson Hyperlegible", sans-serif; line-height: 1.15; }
+  a { color: var(--teal); text-decoration: none; border-bottom: 1px solid rgba(52,216,168,.35); }
+  a:hover { color: var(--lime); border-bottom-color: var(--lime); }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 18px;
+    padding: 12px 28px;
+    background: rgba(11,18,14,.85); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .logo {
+    font-family: "Bricolage Grotesque", sans-serif; font-weight: 800; font-size: 17px;
+    color: var(--lime); border: none; display: flex; align-items: center; gap: 9px;
+  }
+  .topbar .logo .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--lime), var(--teal));
+    box-shadow: 0 0 12px rgba(163,240,95,.6);
+    animation: hueshift 6s ease-in-out infinite alternate;
+  }
+  @keyframes hueshift { from { filter: hue-rotate(0deg); } to { filter: hue-rotate(50deg); } }
+  .topbar nav { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+  .topbar nav a {
+    border: none; color: var(--text-dim); font-size: 14px; padding: 6px 11px; border-radius: 8px;
+  }
+  .topbar nav a:hover { color: var(--lime); background: rgba(163,240,95,.08); }
+
+  .wrap { position: relative; z-index: 1; max-width: 880px; margin: 0 auto; padding: 0 24px 120px; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 84px 0 48px; }
+  .hero .kicker {
+    display: inline-block; font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--teal);
+    border: 1px solid rgba(52,216,168,.4); border-radius: 999px; padding: 5px 14px; margin-bottom: 22px;
+  }
+  .hero h1 {
+    font-size: clamp(38px, 6vw, 60px); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 18px;
+  }
+  .hero h1 .shift {
+    background: linear-gradient(100deg, var(--lime) 10%, var(--teal) 55%, var(--lime) 95%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shimmer 7s ease-in-out infinite alternate;
+  }
+  @keyframes shimmer { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+  .hero p.lede { font-size: 19.5px; color: var(--text-dim); max-width: 640px; margin-bottom: 30px; }
+  .hero p.lede strong { color: var(--text); }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: "Bricolage Grotesque", sans-serif; font-weight: 600; font-size: 15.5px;
+    padding: 11px 20px; border-radius: 10px; border: 1px solid var(--line); color: var(--text);
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  .btn:hover { transform: translateY(-2px); border-color: var(--teal); color: var(--lime); }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--lime), var(--teal)); color: #08110c; border: none;
+    box-shadow: 0 4px 24px rgba(52,216,168,.25);
+  }
+  .btn.primary:hover { color: #08110c; box-shadow: 0 6px 32px rgba(163,240,95,.35); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 72px; }
+  .step-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 10px; }
+  .step-num {
+    font-family: "Bricolage Grotesque", sans-serif; font-weight: 800;
+    font-size: 54px; line-height: 1; color: transparent;
+    -webkit-text-stroke: 1.5px rgba(163,240,95,.55);
+    flex-shrink: 0; transform: translateY(4px);
+  }
+  section h2 { font-size: clamp(25px, 3.4vw, 33px); font-weight: 700; letter-spacing: -0.01em; }
+  section > p, .step-body > p { color: var(--text-dim); max-width: 700px; margin-top: 12px; }
+  section > p strong, .step-body p strong, li strong { color: var(--text); }
+  h3 { font-size: 19px; font-weight: 600; color: var(--lime); margin: 34px 0 6px; }
+  ul, ol { margin: 14px 0 0 24px; color: var(--text-dim); }
+  li { margin-bottom: 9px; }
+  li::marker { color: var(--teal); }
+
+  /* ---------- code blocks with copy buttons ---------- */
+  .code {
+    position: relative; margin-top: 16px;
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .code .code-label {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px 8px 16px; border-bottom: 1px solid var(--line);
+    font-family: "JetBrains Mono", monospace; font-size: 11.5px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--text-dim); background: rgba(255,255,255,.02);
+  }
+  .code pre {
+    padding: 16px 18px; overflow-x: auto;
+    font-family: "JetBrains Mono", monospace; font-size: 14.5px; line-height: 1.7; color: #cfe8d4;
+  }
+  .code pre .c { color: #5f7a68; } /* comment */
+  .code pre .hl { color: var(--lime); }
+  .copy-btn {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: .03em;
+    color: var(--teal); background: rgba(52,216,168,.08);
+    border: 1px solid rgba(52,216,168,.35); border-radius: 7px; padding: 4px 12px;
+    transition: all .15s ease;
+  }
+  .copy-btn:hover { background: rgba(163,240,95,.14); color: var(--lime); border-color: var(--lime); }
+  .copy-btn.copied { background: rgba(163,240,95,.18); color: var(--lime); border-color: var(--lime); }
+
+  /* ---------- cards / callouts ---------- */
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 22px 24px; margin-top: 18px;
+  }
+  .card h3 { margin-top: 0; }
+  .callout {
+    display: flex; gap: 14px; margin-top: 18px; padding: 16px 20px;
+    border-radius: var(--radius); border: 1px solid; font-size: 16px;
+  }
+  .callout .ico { font-size: 19px; flex-shrink: 0; transform: translateY(1px); }
+  .callout p { margin: 0; color: var(--text); }
+  .callout.tip   { border-color: rgba(52,216,168,.4);  background: rgba(52,216,168,.06); }
+  .callout.warn  { border-color: rgba(240,196,95,.4);  background: rgba(240,196,95,.06); }
+  .callout.danger{ border-color: rgba(240,138,138,.4); background: rgba(240,138,138,.06); }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 15.5px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-family: "Bricolage Grotesque", sans-serif; font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--teal); }
+  td { color: var(--text-dim); }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  code.inline {
+    font-family: "JetBrains Mono", monospace; font-size: .88em;
+    background: rgba(163,240,95,.09); color: var(--lime);
+    padding: 2px 7px; border-radius: 6px;
+  }
+
+  /* checklist */
+  .checklist { list-style: none; margin-left: 0; }
+  .checklist li { padding-left: 32px; position: relative; }
+  .checklist li::before {
+    content: "✓"; position: absolute; left: 0; top: 0;
+    color: var(--lime); font-weight: 700;
+    border: 1px solid rgba(163,240,95,.4); border-radius: 6px;
+    width: 21px; height: 21px; font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ---------- footer ---------- */
+  footer {
+    margin-top: 100px; padding: 44px 0 0; border-top: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; gap: 28px; align-items: center; justify-content: space-between;
+  }
+  footer .sig { color: var(--text-dim); font-size: 15px; max-width: 460px; }
+  footer .links { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 10px 16px; } .topbar nav { display: none; }
+    .hero { padding: 56px 0 36px; }
+    .step-head { gap: 12px; } .step-num { font-size: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a class="logo" href="#top"><span class="dot"></span>Chameleon Labs · Claude Code Config</a>
+  <nav>
+    <a href="#prereqs">Prerequisites</a>
+    <a href="#install">Install</a>
+    <a href="#after">After Install</a>
+    <a href="#plugins">Plugins</a>
+    <a href="#verify">Verify</a>
+    <a href="#help">Help</a>
+  </nav>
+</div>
+
+<div class="wrap" id="top">
+
+  <!-- ================= HERO ================= -->
+  <header class="hero">
+    <span class="kicker">Beginner-friendly · ~10 minutes</span>
+    <h1>Install the <span class="shift">Claude&nbsp;Code</span> config in three commands.</h1>
+    <p class="lede">
+      This guide walks you through installing a <strong>production-tested Claude Code configuration</strong> —
+      custom agents, skills, settings, and plugins — even if you've never touched a config file before.
+      Every command has a <strong>copy button</strong>: click it, paste into your terminal, done.
+    </p>
+    <div class="cta-row">
+      <a class="btn primary" href="#install">Start Installing ↓</a>
+      <a class="btn" href="https://github.com/lelandg/.claude_code" target="_blank" rel="noopener">⭐ GitHub Repo</a>
+      <a class="btn" href="https://chameleonlabs.ai" target="_blank" rel="noopener">🦎 chameleonlabs.ai</a>
+      <a class="btn" href="https://discord.gg/chameleonlabs" target="_blank" rel="noopener">💬 Join our Discord</a>
+    </div>
+  </header>
+
+  <!-- ================= WHAT IS THIS ================= -->
+  <section id="what">
+    <div class="step-head"><h2>What you're installing</h2></div>
+    <p>
+      Claude Code keeps its personal configuration in a hidden folder in your home directory called
+      <code class="inline">~/.claude/</code>. This repository is a real-world, battle-tested version of that
+      folder that you can copy onto your own machine. After installing, Claude Code gains:
+    </p>
+    <table>
+      <tr><th>Component</th><th>What it gives you</th></tr>
+      <tr><td>6 custom agents</td><td>Specialists for code review, engineering, performance, docs, research, and testing</td></tr>
+      <tr><td>14+ skills</td><td>Repeatable workflows like CodeMap maintenance, doc generation, and knowledge graphs</td></tr>
+      <tr><td><code class="inline">CLAUDE.md</code></td><td>Global instructions Claude reads every session — security rules, date handling, conventions</td></tr>
+      <tr><td><code class="inline">settings.json</code></td><td>Sensible permissions, enabled plugins, and a custom status line</td></tr>
+      <tr><td>Output styles</td><td>Three formatting modes: GenUI, HTML, and Technical Quality</td></tr>
+    </table>
+    <div class="callout tip">
+      <span class="ico">🦎</span>
+      <p><strong>Heads up on platform:</strong> this config is written for <strong>Linux, WSL, or macOS</strong>.
+      On native Windows without WSL, see the conversion prompt in the
+      <a href="https://github.com/lelandg/.claude_code#platform" target="_blank" rel="noopener">README's Platform section</a> first.</p>
+    </div>
+  </section>
+
+  <!-- ================= STEP 1: PREREQS ================= -->
+  <section id="prereqs">
+    <div class="step-head"><span class="step-num">1</span><h2>Check your prerequisites</h2></div>
+    <div class="step-body">
+      <p>You need two things: <strong>git</strong> (to download the repo) and <strong>Claude Code</strong> itself.
+      Open a terminal and run each check below.</p>
+
+      <h3>Is git installed?</h3>
+      <div class="code">
+        <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="git --version">git --version</pre>
+      </div>
+      <p>If you see a version number (like <code class="inline">git version 2.43.0</code>), you're good.
+      If not, install it from <a href="https://git-scm.com/downloads" target="_blank" rel="noopener">git-scm.com</a>.</p>
+
+      <h3>Is Claude Code installed?</h3>
+      <div class="code">
+        <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="claude --version">claude --version</pre>
+      </div>
+      <p>No version number? Install Claude Code with npm:</p>
+      <div class="code">
+        <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="npm install -g @anthropic-ai/claude-code">npm install -g @anthropic-ai/claude-code</pre>
+      </div>
+      <p>Full installation docs live at
+      <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">docs.anthropic.com/claude-code</a>.
+      Run <code class="inline">claude</code> once after installing — it creates the <code class="inline">~/.claude/</code>
+      folder this config installs into.</p>
+    </div>
+  </section>
+
+  <!-- ================= STEP 2: INSTALL ================= -->
+  <section id="install">
+    <div class="step-head"><span class="step-num">2</span><h2>Install the config <span style="color:var(--text-dim); font-weight:400; font-size:.55em;">(the easy way)</span></h2></div>
+    <div class="step-body">
+      <p>The repo ships with its own installer — a slash command that compares every file against what you
+      already have, shows you diffs, and <strong>asks before overwriting anything</strong>. It even backs up
+      replaced files automatically. This is the recommended path.</p>
+
+      <h3>2a · Clone the repo and open Claude Code inside it</h3>
+      <div class="code">
+        <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="git clone https://github.com/lelandg/.claude_code.git
+cd .claude_code
+claude .">git clone https://github.com/lelandg/.claude_code.git
+cd .claude_code
+claude .</pre>
+      </div>
+
+      <h3>2b · Run the installer inside Claude Code</h3>
+      <p>Once Claude Code opens, type this and press Enter:</p>
+      <div class="code">
+        <div class="code-label"><span>inside claude code</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="/install-claude-config"><span class="hl">/install-claude-config</span></pre>
+      </div>
+      <p>The installer will:</p>
+      <ul>
+        <li>Scan every file and show you a table — <strong>NEW</strong>, <strong>CHANGED</strong>, or <strong>IDENTICAL</strong></li>
+        <li>Show a diff for each changed file and ask: <em>Install / Keep current / Smart merge</em></li>
+        <li>Smart-merge <code class="inline">settings.json</code> and <code class="inline">CLAUDE.md</code> so your personal values survive</li>
+        <li>Back up anything it overwrites to <code class="inline">~/.claude/.backup/&lt;date&gt;/</code></li>
+      </ul>
+
+      <div class="callout tip">
+        <span class="ico">💡</span>
+        <p><strong>First time using Claude Code?</strong> Slash commands are typed directly into the Claude Code
+        prompt — the same place you'd type a question. They start with <code class="inline">/</code> and trigger
+        built-in or custom workflows.</p>
+      </div>
+
+      <h3>Alternative: manual copy (no installer)</h3>
+      <p>If you'd rather not use the installer — for example, on a <strong>fresh machine with no existing
+      config to protect</strong> — copy everything in one shot:</p>
+      <div class="code">
+        <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="git clone https://github.com/lelandg/.claude_code.git
+cp -r .claude_code/claude/* ~/.claude/">git clone https://github.com/lelandg/.claude_code.git
+cp -r .claude_code/claude/* ~/.claude/</pre>
+      </div>
+      <div class="callout warn">
+        <span class="ico">⚠️</span>
+        <p><strong>This overwrites without asking.</strong> If you already have files in
+        <code class="inline">~/.claude/</code>, back them up first:
+        <code class="inline">cp -r ~/.claude ~/.claude.backup</code></p>
+      </div>
+
+      <h3>Alternative: cherry-pick just what you want</h3>
+      <p>Only want part of the config? Run any of these from inside the cloned repo:</p>
+      <div class="code">
+        <div class="code-label"><span>terminal — pick &amp; choose</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="# Just the agents
+cp claude/agents/*.md ~/.claude/agents/
+
+# Just the skills
+cp -r claude/skills/* ~/.claude/skills/
+
+# Just the output styles
+cp claude/output-styles/*.md ~/.claude/output-styles/
+
+# Just the global instructions file
+cp claude/CLAUDE.md ~/.claude/CLAUDE.md"><span class="c"># Just the agents</span>
+cp claude/agents/*.md ~/.claude/agents/
+
+<span class="c"># Just the skills</span>
+cp -r claude/skills/* ~/.claude/skills/
+
+<span class="c"># Just the output styles</span>
+cp claude/output-styles/*.md ~/.claude/output-styles/
+
+<span class="c"># Just the global instructions file</span>
+cp claude/CLAUDE.md ~/.claude/CLAUDE.md</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= STEP 3: AFTER INSTALL ================= -->
+  <section id="after">
+    <div class="step-head"><span class="step-num">3</span><h2>Personalize it <span style="color:var(--text-dim); font-weight:400; font-size:.55em;">(4 quick edits)</span></h2></div>
+    <div class="step-body">
+      <p>The config ships with placeholders so no one's personal info leaks into the repo.
+      Make these four changes and you're done.</p>
+
+      <h3>3a · Put your name in CLAUDE.md</h3>
+      <p>Open <code class="inline">~/.claude/CLAUDE.md</code> in any editor and replace the placeholder
+      contact table at the top with your own details:</p>
+      <div class="code">
+        <div class="code-label"><span>~/.claude/CLAUDE.md</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="| Your Name | your-github-username | your-discord-username |">| Your Name | your-github-username | your-discord-username |</pre>
+      </div>
+
+      <h3>3b · Fix the username in settings.json</h3>
+      <p>Open <code class="inline">~/.claude/settings.json</code>, find the line below, and replace
+      <code class="inline">&lt;YOUR_USER&gt;</code> with your actual username (run
+      <code class="inline">whoami</code> in a terminal if unsure):</p>
+      <div class="code">
+        <div class="code-label"><span>~/.claude/settings.json</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy='"Read(//home/<YOUR_USER>/.claude/**)"'>"Read(//home/&lt;YOUR_USER&gt;/.claude/**)"</pre>
+      </div>
+
+      <h3>3c · Set your GitHub token (for the GitHub MCP server)</h3>
+      <p>The config includes a GitHub integration that lets Claude read repos, issues, and PRs.
+      It needs a personal access token. Create one at
+      <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
+      with the <code class="inline">repo</code>, <code class="inline">read:org</code>, and
+      <code class="inline">read:user</code> scopes, then add it to your shell profile:</p>
+      <div class="code">
+        <div class="code-label"><span>add to ~/.bashrc or ~/.zshrc</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy='export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"'>export GITHUB_PERSONAL_ACCESS_TOKEN=<span class="hl">"ghp_your_token_here"</span></pre>
+      </div>
+      <p>Then reload your shell so the variable takes effect:</p>
+      <div class="code">
+        <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="source ~/.bashrc">source ~/.bashrc</pre>
+      </div>
+      <div class="callout danger">
+        <span class="ico">🔒</span>
+        <p><strong>Never paste your token into a file inside a git repo</strong> — only into your shell
+        profile (<code class="inline">~/.bashrc</code>). Tokens committed to git get scraped by bots within minutes.</p>
+      </div>
+
+      <h3>3d · Restart Claude Code</h3>
+      <p>Exit Claude Code (<code class="inline">/exit</code> or Ctrl+C) and start it again.
+      The new config loads on startup.</p>
+    </div>
+  </section>
+
+  <!-- ================= STEP 4: PLUGINS ================= -->
+  <section id="plugins">
+    <div class="step-head"><span class="step-num">4</span><h2>Install plugins from the marketplace</h2></div>
+    <div class="step-body">
+      <p>Plugins extend Claude Code with extra skills, agents, and integrations — and Claude Code has a
+      <strong>built-in plugin marketplace</strong>. This config enables a curated set in
+      <code class="inline">settings.json</code>; you install them with one command each.</p>
+
+      <h3>Open the plugin manager</h3>
+      <p>Inside Claude Code, run:</p>
+      <div class="code">
+        <div class="code-label"><span>inside claude code</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="/plugin"><span class="hl">/plugin</span></pre>
+      </div>
+      <p>This opens an interactive browser where you can search the official marketplace, view plugin
+      details, and install with Enter. Install any of these that sound useful — they're the ones this
+      config expects:</p>
+      <table>
+        <tr><th>Plugin</th><th>What it does</th></tr>
+        <tr><td><code class="inline">superpowers</code></td><td>Advanced workflows: TDD, systematic debugging, planning</td></tr>
+        <tr><td><code class="inline">code-review</code></td><td>Code review workflow with PR integration</td></tr>
+        <tr><td><code class="inline">commit-commands</code></td><td>Git commit, push, and PR creation skills</td></tr>
+        <tr><td><code class="inline">frontend-design</code></td><td>Frontend design skills and workflows</td></tr>
+        <tr><td><code class="inline">feature-dev</code></td><td>Guided feature development workflow</td></tr>
+        <tr><td><code class="inline">security-guidance</code></td><td>Security best practices and vulnerability analysis</td></tr>
+        <tr><td><code class="inline">context7</code></td><td>Fetches up-to-date library documentation</td></tr>
+        <tr><td><code class="inline">example-skills</code></td><td>Anthropic's example skill collection (PDF, DOCX, design…)</td></tr>
+      </table>
+
+      <h3>Adding third-party marketplaces</h3>
+      <p>Beyond the official marketplace, you can register any GitHub repo that publishes plugins:</p>
+      <div class="code">
+        <div class="code-label"><span>inside claude code</span><button class="copy-btn" type="button">Copy</button></div>
+        <pre data-copy="/plugin marketplace add owner/repo-name"><span class="hl">/plugin marketplace add</span> owner/repo-name</pre>
+      </div>
+      <div class="callout warn">
+        <span class="ico">🧪</span>
+        <p><strong>Language server plugins</strong> (<code class="inline">pyright-lsp</code>,
+        <code class="inline">typescript-lsp</code>, <code class="inline">csharp-lsp</code>,
+        <code class="inline">clangd-lsp</code>) are enabled in this config but need their language toolchains
+        installed. Disable any you don't use in <code class="inline">~/.claude/settings.json</code> under
+        <code class="inline">enabledPlugins</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= STEP 5: VERIFY ================= -->
+  <section id="verify">
+    <div class="step-head"><span class="step-num">5</span><h2>Verify everything works</h2></div>
+    <div class="step-body">
+      <p>After restarting Claude Code, run through this checklist:</p>
+      <ul class="checklist">
+        <li><strong>Status line</strong> — the bottom bar should show <code class="inline">user@host:/path</code> plus your model and git branch</li>
+        <li><strong>Skills loaded</strong> — type <code class="inline">/</code> and you should see commands like <code class="inline">/install-claude-config</code> in the list</li>
+        <li><strong>Agents working</strong> — ask <em>"review this code"</em> on any file; the code-reviewer agent should activate</li>
+        <li><strong>GitHub MCP</strong> — ask Claude about one of your GitHub repos; it should fetch real data</li>
+        <li><strong>No placeholders</strong> — your name is in <code class="inline">CLAUDE.md</code>, your username is in <code class="inline">settings.json</code></li>
+      </ul>
+      <div class="callout tip">
+        <span class="ico">✅</span>
+        <p><strong>All green?</strong> You're done. Claude Code is now running with the full
+        Chameleon Labs configuration.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= HELP ================= -->
+  <section id="help">
+    <div class="step-head"><h2>Something not working?</h2></div>
+    <table>
+      <tr><th>Symptom</th><th>Fix</th></tr>
+      <tr><td>Skills don't show up</td><td>Restart Claude Code; check <code class="inline">~/.claude/skills/&lt;name&gt;/SKILL.md</code> exists</td></tr>
+      <tr><td>Status line missing</td><td>Run <code class="inline">chmod +x ~/.claude/statusline-command.sh</code></td></tr>
+      <tr><td>GitHub MCP fails</td><td>Run <code class="inline">echo $GITHUB_PERSONAL_ACCESS_TOKEN</code> — empty means the token isn't set</td></tr>
+      <tr><td>Plugins not loading</td><td>Restart Claude Code; check names under <code class="inline">enabledPlugins</code> in settings.json</td></tr>
+      <tr><td>Agents not appearing</td><td>Verify the <code class="inline">.md</code> files in <code class="inline">~/.claude/agents/</code> kept their <code class="inline">---</code> frontmatter</td></tr>
+    </table>
+    <p style="margin-top:22px;">
+      Still stuck? The full reference lives in
+      <a href="https://github.com/lelandg/.claude_code/blob/master/Docs/SETUP_GUIDE.md" target="_blank" rel="noopener">SETUP_GUIDE.md</a>,
+      or come ask a human (or an AI) in our
+      <a href="https://discord.gg/chameleonlabs" target="_blank" rel="noopener">Discord server</a> —
+      it also has free AI chat with the latest Claude, Gemini, and ChatGPT pro models.
+    </p>
+  </section>
+
+  <!-- ================= FOOTER ================= -->
+  <footer>
+    <div class="sig">
+      Built by <a href="https://github.com/lelandg" target="_blank" rel="noopener">Leland Green</a> &amp; Claude
+      at <a href="https://chameleonlabs.ai" target="_blank" rel="noopener">Chameleon Labs</a>.
+      MIT licensed — use however you like.
+    </div>
+    <div class="links">
+      <a class="btn" href="https://chameleonlabs.ai" target="_blank" rel="noopener">🦎 Website</a>
+      <a class="btn" href="https://discord.gg/chameleonlabs" target="_blank" rel="noopener">💬 Discord</a>
+      <a class="btn" href="https://github.com/lelandg/.claude_code" target="_blank" rel="noopener">⭐ GitHub</a>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  // Copy buttons: copy the pre's data-copy text (falls back to textContent).
+  document.querySelectorAll('.code').forEach(function (block) {
+    var btn = block.querySelector('.copy-btn');
+    var pre = block.querySelector('pre');
+    if (!btn || !pre) return;
+    btn.addEventListener('click', function () {
+      var text = pre.getAttribute('data-copy') || pre.textContent;
+      function done(ok) {
+        btn.textContent = ok ? 'Copied ✓' : 'Press Ctrl+C';
+        btn.classList.add('copied');
+        setTimeout(function () {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallback(); });
+      } else {
+        fallback();
+      }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        done(ok);
+      }
+    });
+  });
+</script>
+
+</body>
+</html>
