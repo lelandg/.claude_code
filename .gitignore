@@ -15,6 +15,7 @@ shell-snapshots/
 todos/
 tasks/
 plans/
+!Docs/plans/
 paste-cache/
 plugins/cache/
 plugins/installed_plugins.json
