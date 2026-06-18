@@ -184,3 +184,42 @@ def trash_item(path, run_id, allowed_roots, *, commit=False,
         _write_trashinfo(dest, rp)
     log_event("trash", rp, dest, base)
     return record
+
+
+def latest_run_id(base=None):
+    runs = base_dir(base) / "runs"
+    if not runs.is_dir():
+        return None
+    manifests = sorted(runs.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return manifests[0].stem if manifests else None
+
+
+def restore_run(run_id, *, base=None):
+    manifest = base_dir(base) / "runs" / ("%s.jsonl" % run_id)
+    results = []
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if rec.get("action") != "trashed":
+            continue
+        original = Path(rec["original"])
+        dest = Path(rec["dest"])
+        if original.exists():
+            log_event("undo-collision", original, dest, base)
+            results.append({"original": str(original), "status": "collision"})
+            continue
+        if not dest.exists():
+            log_event("undo-missing", original, dest, base)
+            results.append({"original": str(original), "status": "missing-in-trash"})
+            continue
+        original.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(dest), str(original))
+        # Clean up FreeDesktop .trashinfo sidecar if present.
+        if rec.get("method") == "freedesktop":
+            info = _freedesktop_trash_dir() / "info" / (dest.name + ".trashinfo")
+            if info.exists():
+                info.unlink()
+        log_event("undo-restore", original, dest, base)
+        results.append({"original": str(original), "status": "restored"})
+    return results
