@@ -1265,3 +1265,17 @@ No gaps.
 **3. Type consistency:** `classify` returns `(Verdict, Path)` everywhere; `trash_item` record keys (`original`, `action`, `dest`, `method`, `reason`) match across Tasks 2/3/4; `restore_run` result keys (`original`, `status`) match Task 4 CLI and tests; `validate_rule_pack`/`REQUIRED_RULE_SECTIONS` consistent across Tasks 5/7; `--allow`/`--commit`/`--run-id`/`--quarantine` flags consistent between SKILL.md and the CLI.
 
 Plan is internally consistent and fully covers the spec.
+
+---
+
+## Post-Implementation Notes (2026-06-18)
+
+Implemented on branch `feat/disk-doctor` via subagent-driven development (13 commits, 29 tests passing). Final whole-branch review (Opus): **ready to merge, no Critical/blocking issues**; the file-deletion trust boundary was adversarially verified (symlinked-parent escape, `..` traversal, deny-before-allow, dry-run, undo collision), plus an end-to-end sandbox smoke test (dry-run → commit → undo, content preserved, all logged).
+
+**Verified deviation from this plan (correct):** Task 1's code put `Path("/")` and `home()` directly in `denylist_floor()` with pure ancestor-matching. That was a latent plan bug — `/` and `home` are ancestors of (nearly) every path, so ancestor-matching them would have denied **everything**, making the tool inert. The implementation correctly moved `/` and `home` to an `exact_only_denied` (exact-match) check in `classify()`, keeping their sub-paths (`~/.ssh`, `~/.config`, …) ancestor-matched. A comment in `denylist_floor()` now documents this so the floor is never "fixed" back into the bug.
+
+**v1.1 follow-ups (non-blocking, triaged acceptable for v1):**
+- Write the FreeDesktop `.trashinfo` *before* the move (robustness; undo relies on the JSONL manifest, so no data-loss risk today).
+- Implement or explicitly document cross-filesystem refusal (spec §4.6); currently mitigated by the Linux pack denying `/media`,`/mnt` and only home-subdir roots being allowlisted.
+- `validate_rule_pack`: tolerate trailing heading text for third-party rule packs.
+- macOS/Windows rule-pack path accuracy (modern npm cache under `%LOCALAPPDATA%`, Chrome macOS cache profile subdir, Windows pip version-stamped user-site).
