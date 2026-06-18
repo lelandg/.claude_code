@@ -15,3 +15,11 @@ def test_malformed_pack_reports_missing_sections(tmp_path):
     bad.write_text("# Bad rule pack\n\nNothing useful here.\n")
     missing = core.validate_rule_pack(bad)
     assert set(missing) == set(core.REQUIRED_RULE_SECTIONS)
+
+
+def test_macos_rule_pack_is_valid():
+    assert core.validate_rule_pack(RULES / "macos.md") == []
+
+
+def test_windows_rule_pack_is_valid():
+    assert core.validate_rule_pack(RULES / "windows.md") == []
