@@ -3,7 +3,11 @@
 The ONLY code in disk-doctor that can delete. Deny-by-default, in-script
 denylist floor, Trash-not-rm, manifest-before-move, dry-run default.
 """
+import json
 import os
+import shutil
+import time
+import urllib.parse
 from pathlib import Path
 
 
@@ -73,3 +77,110 @@ def classify(path, allowed_roots, extra_denied=()):
         if _is_within(rp, resolve_path(root)):
             return Verdict.OK, rp
     return Verdict.NOT_ALLOWED, rp
+
+
+def base_dir(base=None):
+    return Path(base) if base is not None else home() / ".disk-doctor"
+
+
+def _now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def log_event(event, path, detail, base=None):
+    b = base_dir(base)
+    b.mkdir(parents=True, exist_ok=True)
+    line = "%s\t%s\t%s\t%s\n" % (_now_iso(), event, path, detail)
+    with open(b / "disk-doctor.log", "a", encoding="utf-8") as fh:
+        fh.write(line)
+
+
+def _size(path):
+    if path.is_dir():
+        total = 0
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                fp = Path(root) / f
+                if not fp.is_symlink() and fp.exists():
+                    total += fp.stat().st_size
+        return total
+    return path.stat().st_size
+
+
+def _freedesktop_trash_dir():
+    data_home = os.environ.get("XDG_DATA_HOME") or str(home() / ".local" / "share")
+    return Path(data_home) / "Trash"
+
+
+def _unique_name(directory, name):
+    candidate = directory / name
+    i = 1
+    while candidate.exists():
+        candidate = directory / ("%s.%d" % (name, i))
+        i += 1
+    return candidate
+
+
+def _compute_dest(rp, run_id, base, prefer_freedesktop):
+    """Decide where the file will go. Does NOT move it."""
+    if prefer_freedesktop:
+        files_dir = _freedesktop_trash_dir() / "files"
+        try:
+            files_dir.mkdir(parents=True, exist_ok=True)
+            dest = _unique_name(files_dir, rp.name)
+            return dest, "freedesktop"
+        except OSError:
+            pass  # fall through to quarantine
+    q = base_dir(base) / "trash" / run_id
+    q.mkdir(parents=True, exist_ok=True)
+    return _unique_name(q, rp.name), "quarantine"
+
+
+def _write_trashinfo(dest, original):
+    info_dir = _freedesktop_trash_dir() / "info"
+    info_dir.mkdir(parents=True, exist_ok=True)
+    info_path = info_dir / (dest.name + ".trashinfo")
+    quoted = urllib.parse.quote(str(original))
+    info_path.write_text(
+        "[Trash Info]\nPath=%s\nDeletionDate=%s\n" % (quoted, _now_iso()),
+        encoding="utf-8",
+    )
+    return info_path
+
+
+def _append_manifest(base, run_id, record):
+    runs = base_dir(base) / "runs"
+    runs.mkdir(parents=True, exist_ok=True)  # raises OSError if 'runs' exists as a file
+    with open(runs / ("%s.jsonl" % run_id), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+
+def trash_item(path, run_id, allowed_roots, *, commit=False,
+               extra_denied=(), base=None, prefer_freedesktop=True):
+    verdict, rp = classify(path, allowed_roots, extra_denied)
+    if verdict != Verdict.OK:
+        log_event("refuse", rp, verdict, base)
+        return {"original": str(rp), "action": "refused", "reason": verdict}
+
+    record = {"run_id": run_id, "ts": _now_iso(), "original": str(rp), "size": _size(rp)}
+    if not commit:
+        record["action"] = "dry-run"
+        return record
+
+    dest, method = _compute_dest(rp, run_id, base_dir(base), prefer_freedesktop)
+    record["dest"] = str(dest)
+    record["method"] = method
+    record["action"] = "trashed"
+
+    # Manifest BEFORE move. If this raises, we abort without touching the file.
+    try:
+        _append_manifest(base, run_id, record)
+    except OSError as exc:
+        log_event("abort-no-manifest", rp, str(exc), base)
+        raise
+
+    shutil.move(str(rp), str(dest))
+    if method == "freedesktop":
+        _write_trashinfo(dest, rp)
+    log_event("trash", rp, dest, base)
+    return record
