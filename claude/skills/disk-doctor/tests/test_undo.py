@@ -1,8 +1,13 @@
 from pathlib import Path
+import os
+import subprocess
+import sys
 
 import pytest
 
 import disk_doctor_core as core
+
+UNDO_BIN = Path(__file__).resolve().parent.parent / "bin" / "disk-doctor-undo"
 
 
 @pytest.fixture
@@ -45,4 +50,16 @@ def test_latest_run_id(fake_home, tmp_path):
     runs.mkdir(parents=True)
     (runs / "run-A.jsonl").write_text("{}\n")
     (runs / "run-B.jsonl").write_text("{}\n")
-    assert core.latest_run_id(base=base) in {"run-A", "run-B"}
+    os.utime(runs / "run-A.jsonl", (1000, 1000))
+    os.utime(runs / "run-B.jsonl", (2000, 2000))
+    assert core.latest_run_id(base=base) == "run-B"
+
+
+def test_undo_bogus_run_exits_2(tmp_path):
+    env = dict(os.environ)
+    env["HOME"] = str(tmp_path)
+    res = subprocess.run(
+        [sys.executable, str(UNDO_BIN), "--run", "does-not-exist"],
+        capture_output=True, text=True, env=env,
+    )
+    assert res.returncode == 2
