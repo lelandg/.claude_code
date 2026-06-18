@@ -70,6 +70,8 @@ def test_denied_path_is_refused_not_moved(fake_home, dd_base):
     assert rec["action"] == "refused"
     assert rec["reason"] == core.Verdict.DENIED
     assert target.exists()                       # never moved
+    log = (dd_base / "disk-doctor.log").read_text()
+    assert "refuse" in log
 
 
 def test_abort_when_manifest_unwritable(fake_home, dd_base):
@@ -81,6 +83,8 @@ def test_abort_when_manifest_unwritable(fake_home, dd_base):
     with pytest.raises(OSError):
         core.trash_item(target, "run1", [fake_home / "Downloads"], commit=True, base=dd_base)
     assert target.exists()                       # aborted before move
+    log = (dd_base / "disk-doctor.log").read_text()
+    assert "abort-no-manifest" in log
 
 
 def test_every_event_is_logged(fake_home, dd_base):
