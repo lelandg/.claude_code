@@ -223,3 +223,18 @@ def restore_run(run_id, *, base=None):
         log_event("undo-restore", original, dest, base)
         results.append({"original": str(original), "status": "restored"})
     return results
+
+
+REQUIRED_RULE_SECTIONS = [
+    "Allowed roots",
+    "Never-touch (additional)",
+    "Cache-clean rules",
+    "Install-hygiene rules",
+]
+
+
+def validate_rule_pack(path):
+    """Return list of required section headings missing from the rule pack."""
+    text = Path(path).read_text(encoding="utf-8")
+    headings = {line.lstrip("#").strip() for line in text.splitlines() if line.lstrip().startswith("#")}
+    return [s for s in REQUIRED_RULE_SECTIONS if s not in headings]
