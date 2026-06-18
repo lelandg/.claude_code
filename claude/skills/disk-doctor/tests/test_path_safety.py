@@ -87,3 +87,22 @@ def test_proc_and_dev_are_denied(fake_home):
     for p in ("/proc", "/dev"):
         verdict, _ = core.classify(p, allowed_roots=[p])
         assert verdict == core.Verdict.DENIED
+
+
+def test_symlinked_parent_into_denied_is_denied(fake_home):
+    # A path THROUGH a symlinked parent directory that resolves into a denied
+    # location must be DENIED — this is exactly what canonicalize-first defends
+    # against. The leaf is a real file (not itself a symlink), so this exercises
+    # the resolve-then-deny path, not the SYMLINK short-circuit.
+    denied_dir = fake_home / ".config"
+    denied_dir.mkdir(parents=True, exist_ok=True)
+    secret = denied_dir / "secret.conf"
+    secret.write_text("x")
+    downloads = fake_home / "Downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    link = downloads / "cfglink"
+    link.symlink_to(denied_dir)
+    target = link / "secret.conf"  # path through the symlinked parent
+    verdict, rp = core.classify(target, allowed_roots=[downloads])
+    assert verdict == core.Verdict.DENIED
+    assert rp == secret.resolve()

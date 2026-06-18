@@ -21,6 +21,11 @@ def resolve_path(p):
 
 def denylist_floor():
     """Absolute never-touch roots. Cannot be weakened by rule packs."""
+    # NOTE: the filesystem root "/" and the home root are intentionally absent
+    # from this list. They are ancestors of (nearly) every path, so ancestor-
+    # matching them would deny EVERYTHING. They are denied by EXACT match in
+    # classify() via `exact_only_denied`. Do NOT add "/" or home() here — doing
+    # so would make the tool refuse all paths.
     h = home()
     raw = [
         Path("/usr"), Path("/etc"), Path("/bin"), Path("/sbin"),
