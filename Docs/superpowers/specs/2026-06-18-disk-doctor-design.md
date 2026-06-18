@@ -9,7 +9,7 @@
 
 ## 1. Summary
 
-`disk-doctor` is a Claude Code skill that helps a user reclaim disk space and find install-hygiene problems on their machine — safely. It scans the user's home and dev/cache locations, classifies what's reclaimable, proposes a plain-English plan, and only ever deletes through a single hardened helper that moves files to the system Trash and records a guaranteed undo.
+`disk-doctor` is a Claude Code skill that helps a user reclaim disk space and find install-hygiene problems on their machine — safely. It scans the user's home and dev/cache locations, classifies what's reclaimable, and presents a plain-English plan. The user then chooses one of two outcomes: **clean up** (delete the chosen categories — only ever through a single hardened helper that moves files to the system Trash and records a guaranteed undo) or **produce a runbook** (a document of findings + exact commands, changing nothing).
 
 It is cross-platform (Linux/Pop!_OS, macOS, Windows) via per-OS **rule packs** — plain data files the engine loads based on the detected OS. The dangerous code lives in exactly one place and is identical on every platform.
 
@@ -110,11 +110,23 @@ Reads the manifest (latest run by default), restores each item from Trash/quaran
 2. **Scan** the allowlisted roots (home + dev/cache locations). Gather sizes, ages, categories: package/build caches, stale `node_modules`/`__pycache__`/`.venv`, duplicates (by size then hash), pending trash, old logs, large-and-old files. *Read-only.*
 3. **Run install-hygiene checks** (Section 6) — report-only.
 4. **Build a plan** → write to `~/.disk-doctor/runs/<run-id>-plan.md` using the report template: ranked by reclaimable size, plain-English reason per item, grouped by category, with a clear total. Hygiene findings in their own section.
-5. **Present the plan** in chat (the dry-run output) and ask for approval — all, by category, or item-by-item.
-6. **Act** on approved items via `safe-trash --commit`, which writes the manifest as it goes.
-7. **Report** what was reclaimed, where it went (Trash), and how to undo (`disk-doctor-undo`).
+5. **Present the plan summary** in chat (the dry-run output), then **ask the user what to do** via the AskUserQuestion tool:
+   - **Clean up now** — act on the findings.
+   - **Create a runbook** — produce a document instead of changing anything.
+6. **Branch on the choice:**
 
-The user always sees the full plan before anything moves; undo is one command.
+   **A) Clean up now**
+   - If there is more than one cleanup option/category, **ask again with AskUserQuestion** (multi-select) which to act on — e.g. "Package caches (1.2 GB)", "Stale node_modules (3.4 GB)", "Duplicates (800 MB)", or "Everything". This keeps the decision easy for a non-technical user instead of approving items one by one.
+   - **Act** on the chosen categories via `safe-trash --commit`, which writes the manifest as it goes.
+   - **Report** what was reclaimed, where it went (Trash), and how to undo (`disk-doctor-undo`).
+
+   **B) Create a runbook**
+   - **Ask the output format with AskUserQuestion:** Markdown, HTML, or Other (free-text — e.g. PDF, plain text; honor whatever they type).
+   - Generate the runbook: every finding with its plain-English reason, grouped by category with sizes/totals, plus the **exact command to reclaim each item** the user can run themselves later (the corresponding `safe-trash` invocation, or a manual equivalent), and the full install-hygiene section. **No changes are made to the system.**
+   - For **HTML**, render via the `html-doc` skill so it's a polished standalone page. For **Markdown**, use the report template. For **Other**, produce the closest sensible artifact (and say so if a format can't be honored).
+   - Save to `~/.disk-doctor/runs/<run-id>-runbook.<ext>` and surface the file path to the user.
+
+The user always sees the full plan before anything moves; cleanup is opt-in per category; the runbook path changes nothing at all; undo is one command.
 
 ---
 
