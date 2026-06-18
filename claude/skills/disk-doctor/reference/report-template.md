@@ -2,6 +2,8 @@
 
 **Total reclaimable: {{total_human}}**
 
+**Run ID: {{run_id}}**
+
 ## Cleanup candidates (by reclaimable size)
 
 | Category | Size | What it is (plain English) | Path(s) |
@@ -20,11 +22,11 @@ Each cleanup category above maps to a command you can run yourself:
 
 ```bash
 # {{category}} ({{size}})
-safe-trash --allow {{allowed_root}} --commit {{paths}}
+bin/safe-trash --allow {{allowed_root}} --commit --run-id {{run_id}} {{paths}}
 ```
 
 To undo the most recent cleanup at any time:
 
 ```bash
-disk-doctor-undo
+bin/disk-doctor-undo --run {{run_id}}
 ```
