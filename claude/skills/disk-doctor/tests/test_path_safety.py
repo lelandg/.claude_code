@@ -76,3 +76,14 @@ def test_extra_denied_can_only_add(fake_home):
         target, allowed_roots=[fake_home / "Downloads"], extra_denied=[fake_home / "Downloads" / "keepme"]
     )
     assert verdict == core.Verdict.DENIED
+
+
+def test_filesystem_root_is_denied(fake_home):
+    verdict, _ = core.classify("/", allowed_roots=["/"])
+    assert verdict == core.Verdict.DENIED
+
+
+def test_proc_and_dev_are_denied(fake_home):
+    for p in ("/proc", "/dev"):
+        verdict, _ = core.classify(p, allowed_roots=[p])
+        assert verdict == core.Verdict.DENIED

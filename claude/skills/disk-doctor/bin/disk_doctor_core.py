@@ -21,6 +21,7 @@ def denylist_floor():
     raw = [
         Path("/usr"), Path("/etc"), Path("/bin"), Path("/sbin"),
         Path("/boot"), Path("/lib"), Path("/lib64"), Path("/opt"), Path("/var"),
+        Path("/proc"), Path("/dev"), Path("/run"), Path("/sys"),
         Path("/System"), Path("/Library"),
         Path("C:/Windows"), Path("C:/Program Files"), Path("C:/Program Files (x86)"),
         h / ".ssh", h / ".config", h / ".gnupg",
@@ -58,9 +59,10 @@ def classify(path, allowed_roots, extra_denied=()):
     if not rp.exists():
         return Verdict.MISSING, rp
 
-    # Special case: home root itself is always denied
-    h = resolve_path(home())
-    if rp == h:
+    # Roots denied by EXACT match only. Ancestor-matching these would block
+    # every path beneath them (they are ancestors of the entire tree).
+    exact_only_denied = [resolve_path(home()), resolve_path(Path("/"))]
+    if rp in exact_only_denied:
         return Verdict.DENIED, rp
 
     denied = denylist_floor() + [resolve_path(x) for x in extra_denied]
