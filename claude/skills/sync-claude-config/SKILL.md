@@ -1,132 +1,180 @@
 ---
 name: sync-claude-config
-description: Sync and sanitize Claude Code configuration from ~/.claude/ to the public repo. Use when the user asks to sync, merge, update, or refresh their public Claude Code config repo from their live setup. Triggers on requests like "sync my config", "update the repo from my settings", "merge my claude config", "refresh from ~/.claude", or "pull in my latest claude setup".
+description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, plugins, CC version) AND the shared cross-CLI agent house-rules (~/.config/agents/AGENTS.md + Codex/Copilot/Gemini/Pi wiring) from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when Leland asks to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
 ---
 
-# Sync Claude Config
+# Sync Claude Code Config to a Remote Host
 
-Merge files from `~/.claude/` into this public repo, sanitizing private information.
+Push this machine's Claude Code configuration to an SSH-reachable host, **merging**
+(never clobbering) anything remote-specific. Born from the 2026-06-11 your-host sync —
+see `Notes/your-host-claude-config-sync-2026-06-11.md` in the ChameleonLabs repo for a
+worked example.
 
-## Workflow
+## 0. Pick the target host
 
-### 1. Locate Source and Target
-
-```bash
-SOURCE="$HOME/.claude"
-TARGET="<repo-root>"   # detect from current working directory or user input
-```
-
-Confirm both paths with the user before proceeding.
-
-### 2. Discover Syncable Files
-
-Scan these directories/files in `~/.claude/`:
-
-| Source Path | Target Path | Notes |
-|-------------|-------------|-------|
-| `CLAUDE.md` | `claude/CLAUDE.md` | Always sanitize |
-| `CLAUDE_CodeMap.md` | `claude/CLAUDE_CodeMap.md` | Usually generic |
-| `settings.json` | `claude/settings.json` | Sanitize permissions, paths |
-| `mcp.json` | `claude/mcp.json` | Sanitize tokens |
-| `statusline-command.sh` | `claude/statusline-command.sh` | Usually generic |
-| `agentic_prompt_template.md` | `claude/agentic_prompt_template.md` | Usually generic |
-| `agents/*.md` | `claude/agents/*.md` | Skip non-agent files |
-| `agents/specs/*.md` | `claude/agents/specs/*.md` | Usually generic |
-| `instructions/*.md` | `claude/instructions/*.md` | Sanitize infra details |
-| `output-styles/*.md` | `claude/output-styles/*.md` | Usually generic |
-| `skills/*/SKILL.md` | `claude/skills/*/SKILL.md` | Usually generic |
-| `skills/*/references/*` | `claude/skills/*/references/*` | Usually generic |
-
-**Skip entirely**: `.credentials.json`, `history.jsonl`, `stats-cache.json`, `security_warnings_state_*`, `session-env/`, `file-history/`, `debug/`, `cache/`, `shell-snapshots/`, `todos/`, `tasks/`, `plans/`, `paste-cache/`, `plugins/`, `projects/`, `telemetry/`, `statsig/`, `downloads/`, any `*:Zone.Identifier` files.
-
-### 3. Compare and Identify Changes
-
-For each syncable file:
-
-1. Check if it exists in target repo
-2. If it exists, diff source vs target to find meaningful changes
-3. If it's new, flag as "NEW"
-4. If content differs, flag as "CHANGED"
-
-Present a summary table to the user:
-
-```
-Status  | File
---------|---------------------------
-NEW     | agents/security-auditor.md
-CHANGED | CLAUDE.md
-CHANGED | settings.json
-OK      | agents/code-reviewer.md
-```
-
-Ask user which files to sync. Default: all NEW and CHANGED files.
-
-### 4. Copy and Sanitize
-
-For each file being synced, copy from source then apply sanitization rules. See `references/sanitization-rules.md` for the full rule set.
-
-**Sanitization priority:**
-1. **Credentials/secrets** - API keys, tokens, passwords (CRITICAL)
-2. **Personal identifiers** - Real names, email addresses, usernames
-3. **Infrastructure** - AWS account IDs, hostnames, IP addresses, database endpoints
-4. **Local paths** - Home directories, project-specific absolute paths
-5. **Project-specific** - Product names, company names, internal tool references
-
-**For each file:**
-1. Read the source file
-2. Apply all matching sanitization rules from the rules reference
-3. Write to target path
-4. Verify no private patterns remain with a grep check
-
-### 5. Post-Sync Verification
-
-After all files are synced, run a final scan:
+If no host argument was given, discover candidates and ask:
 
 ```bash
-# Scan for any remaining private info
-grep -rn '<PATTERNS_FROM_RULES>' <TARGET>/
+# Host aliases from ~/.ssh/config, following Include directives (skip wildcards):
+awk 'tolower($1)=="include" {print $2}' ~/.ssh/config 2>/dev/null | while read -r g; do eval ls $g 2>/dev/null; done
+awk 'tolower($1)=="host" {for(i=2;i<=NF;i++) if ($i !~ /[*?]/) print $i}' ~/.ssh/config $(awk 'tolower($1)=="include" {print $2}' ~/.ssh/config 2>/dev/null | while read -r g; do eval ls $g 2>/dev/null; done) 2>/dev/null | sort -u
 ```
 
-Report any findings and fix them before finishing.
+Also check `~/.justfile` for ssh recipes (`j ssh` etc.) if nothing matches.
+Present the list with AskUserQuestion. Any host works as long as `ssh <host>` succeeds —
+adding a new machine is just a new ~/.ssh/config entry + key, no skill changes needed.
 
-### 6. Report
+## 1. Preflight (read-only)
 
-Present a summary:
-
-```
-Sync Complete
-=============
-Synced: N files (X new, Y updated)
-Skipped: M files (unchanged)
-Sanitized: P replacements made
-
-Files synced:
-  NEW     agents/security-auditor.md
-  UPDATED CLAUDE.md (3 sanitizations)
-  UPDATED settings.json (12 sanitizations)
+```bash
+ssh <host> 'whoami; hostname; uname -s; ls ~/.claude 2>/dev/null | head -40'
+ssh <host> 'bash -lc "claude --version"'   # MUST use bash -lc: claude is often not in non-login PATH
+claude --version                            # local, for comparison
 ```
 
-## Special Handling
+- No `~/.claude` on remote → fresh install case: confirm Claude Code is installed first
+  (`bash -lc "which claude"`); if absent, stop and give Leland the install command.
+- Inventory what is REMOTE-SPECIFIC so it survives the sync (see §2 table).
+- Check remote `~/.claude/agents/`, `skills/`, `commands/` for items that don't exist
+  locally — these are preserved, never deleted.
 
-### settings.json
-- Remove all project-specific `Bash(...)` permission entries (keep only generic ones like `Bash(ls:*)`, `Bash(git log:*)`, etc.)
-- Remove `trustedWorkspaces` entries
-- Remove `feedbackSurveyState`
-- Replace home directory paths with `<YOUR_USER>` placeholder in `Read()` permissions
-- Keep `enabledPlugins` as-is (no private info)
-- Keep `env`, `statusLine`, `alwaysThinkingEnabled`, `installMethod`
+## 2. What syncs vs. what never syncs
 
-### CLAUDE.md
-- Replace personal names and contact info with placeholders
-- Replace absolute project paths with generic examples
-- Remove company-specific sections (or replace company name with placeholder)
-- Keep all workflow rules, conventions, and best practices intact
+| Item | Action |
+|------|--------|
+| `~/.config/agents/AGENTS.md` | **MERGE/adapt by hand** (§4b) — now holds the bulk of the machine-agnostic house rules every CLI reads |
+| Other-CLI wiring (Codex/Copilot/Gemini/Pi) | Wire on the remote to point at its own shared file (§4b); symlinks guarded, never clobber |
+| `CLAUDE.md` | **MERGE by hand, never copy** (§4) — now mostly `@import` + Claude specifics |
+| `instructions/` | `rsync -a` (full overwrite — they're reference docs) |
+| `agents/` | `rsync -aL --delete --exclude .git --exclude .idea` — **`-L` is mandatory**: local cl-* agents are symlinks into your-config-repo; remote needs materialized files. `--delete` mirrors archivals. |
+| `skills/` | `rsync -a --exclude '*-workspace' --exclude '*.skill' --exclude '*.zip'` — **additive, NO --delete** (preserve remote-only skills) |
+| `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. `aws-db-*`/`aws-env-*` need the your-admin-cli venv at /mnt/d). Never delete remote-only command dirs. |
+| `settings.json` | **Programmatic merge, never replace** (§5) |
+| Plugins/marketplaces | Reconcile via `claude plugin` CLI (§6) |
+| Claude Code version | `bash -lc "claude update"` on remote to match local |
+| **NEVER sync** | `.credentials.json`, `history.jsonl`, `projects/` (memory!), `sessions/`, `session-env/`, `file-history/`, `shell-snapshots/`, `tasks/`, `teams/`, `daemon/`, `jobs/`, `policy-limits.json`, `statusline-command.sh` (often host-customized), `my-projects.yaml` (local paths), security/ |
 
-### instructions/aws-*.md (or similar infra files)
-- These are typically too specific to sanitize. Recommend excluding or heavily redacting.
-- If user wants them included, replace ALL account IDs, hostnames, IPs, bucket names, function names, email addresses.
+## 3. Backup first — always
 
-### mcp.json
-- Token env vars using `${VAR_NAME}` syntax are already safe
-- Remove any hardcoded tokens or credentials
-- Keep server configurations as useful examples
+```bash
+ssh <host> 'mkdir -p ~/.claude/backups/sync-$(date +%Y%m%d) && cp ~/.claude/CLAUDE.md ~/.claude/settings.json ~/.claude/backups/sync-$(date +%Y%m%d)/ 2>/dev/null; cp -r ~/.claude/agents ~/.claude/backups/sync-$(date +%Y%m%d)/agents-bak 2>/dev/null; ls ~/.claude/backups/sync-$(date +%Y%m%d)/'
+```
+
+## 4. CLAUDE.md merge
+
+If the local `~/.claude/CLAUDE.md` is now just `@import` of `~/.config/agents/AGENTS.md`
+plus Claude-specific bits, the heavy machine-agnostic merge happens on the shared
+file in §4b — here you only reconcile the Claude-specific part and make sure the
+remote CLAUDE.md `@import`s the **remote's** shared path (line 1, no indent,
+absolute path using the remote's home). For older hosts whose CLAUDE.md still
+holds everything inline, do the full merge below.
+
+Fetch the remote file (`scp <host>:~/.claude/CLAUDE.md /tmp/`), diff against local, then
+write a merged version to /tmp and push it. Rules:
+
+- Bring over ALL machine-agnostic content: security sections, work procedures, issue
+  management, labels, plan-file rules, output formatting, skill triggers.
+- KEEP the remote file's platform adaptations: project root (`~/code/` vs `/mnt/d/...`),
+  downloads location, venv conventions, sudo posture, platform line.
+- DROP local-machine-only sections for Linux remotes: WSL/PowerShell notes, Windows
+  Chrome debugging, `/mnt/e` screenshot symlinks, `/mnt/*` paths generally.
+- ADAPT tooling references: if a section requires a tool the remote lacks (e.g.
+  your-admin-cli), rewrite as "not installed on this host — ask Leland to run from the dev
+  machine", don't silently keep or drop the safety rule it carries.
+- If the remote has no CLAUDE.md, start from local and apply the DROP/ADAPT rules,
+  asking for the remote project root if unknown.
+
+## 4b. Shared cross-CLI house rules (~/.config/agents/AGENTS.md + other CLIs)
+
+Leland's global house rules now live in `~/.config/agents/AGENTS.md` — the
+canonical file every CLI reads. `~/.claude/CLAUDE.md` `@import`s it; Codex,
+Copilot, Gemini, and Pi point at it too. Sync this so **non-Claude** agents
+behave the same on the remote. (See the `unify-agents-md` skill — esp. its
+`references/tool-matrix.md` — for the per-tool paths, the `@import`-vs-symlink
+reasoning, and the `agy` probe. Reuse that knowledge here.)
+
+If the local machine has no `~/.config/agents/AGENTS.md` (older setup, everything
+still in CLAUDE.md), skip this section — there's nothing shared to push yet.
+
+1. **Merge/adapt the shared file** with the SAME DROP/ADAPT rules as §4 (it now
+   carries the platform-specific bits — `/mnt/*` paths, WSL/PowerShell, Windows
+   Chrome, screenshot symlinks — that must be dropped/adapted for a Linux remote):
+   - Back up + ensure dir on remote:
+     `ssh <host> 'mkdir -p ~/.config/agents && cp -n ~/.config/agents/AGENTS.md ~/.config/agents/AGENTS.md.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null'`
+   - Fetch remote copy (if any), diff vs local, write merged → push. Bring all
+     machine-agnostic content; DROP local-only sections; ADAPT tool refs the
+     remote lacks; KEEP the remote's own platform adaptations.
+2. **Point Claude at it:** ensure remote `~/.claude/CLAUDE.md` line 1 is
+   `@<remote-home>/.config/agents/AGENTS.md` (absolute, remote's home, no indent).
+3. **Wire each CLI present on the remote.** Detect first:
+   `ssh <host> 'bash -lc "for c in codex copilot gemini agy pi; do command -v $c && echo $c; done"'`.
+   Guard every symlink (`[ -e <t> ] || [ -L <t> ]` before `ln -s`), never clobber,
+   back up anything pre-existing:
+   - **Codex:** `ln -s ~/.config/agents/AGENTS.md ~/.codex/AGENTS.md` (no import — concatenates).
+   - **Copilot:** `ln -s ~/.config/agents/AGENTS.md ~/.copilot/copilot-instructions.md`.
+   - **Gemini:** remote `~/.gemini/GEMINI.md` line 1 `@<remote-home>/.config/agents/AGENTS.md` + keep remote extras (symlink if none).
+   - **Pi:** append to remote `~/.bash_aliases` (idempotent — grep before adding;
+     `bash -n` after): `pi(){ command pi --append-system-prompt "$HOME/.config/agents/AGENTS.md" "$@"; }`.
+   - **agy:** probe before wiring (don't guess); report findings if unclear.
+4. **Same NEVER-sync discipline:** push only instruction files / wiring for these
+   CLIs — never their `auth.json`/credentials, `sessions/`, `history*`, or memory.
+
+## 5. settings.json merge (fetch → merge locally → push)
+
+Never overwrite. Python-merge with these rules:
+
+- `env`: ADD missing feature flags (e.g. `CLAUDE_CODE_FORK_SUBAGENT`); PRESERVE remote
+  telemetry/OTEL/host-specific vars.
+- `model`, `effortLevel`, `alwaysThinkingEnabled`, `teammateMode`: set to local values.
+- `enabledPlugins`: add local `true` entries missing on remote. Do NOT disable remote
+  extras (hosts enable plugins deliberately). SKIP machine-bound plugins: LSPs without
+  the toolchain (clangd/csharp on a worker box), obsidian-cli (vault elsewhere).
+- `permissions.allow`: union local rules EXCEPT any containing `/mnt/`, `/home/<localuser>`,
+  `.exe`, `powershell`, `wsl` — and **never copy write-capable cloud rules to an
+  autonomous/worker host** (e.g. `aws amplify update-app`, `aws iam create-access-key`,
+  `aws iam delete-access-key`). When unsure whether a rule is write-capable, leave it out.
+- `extraKnownMarketplaces`: add missing ones. Directory-source marketplaces must be
+  re-pointed at a remote-local clone (§6), never at a local-only path.
+- Validate before push: `python3 -m json.tool`. Push, then re-validate on remote.
+
+## 6. Plugins & marketplaces (on the remote, via `bash -lc`)
+
+1. `claude plugin marketplace add <repo-or-path>` for each marketplace the remote lacks.
+2. Directory-source marketplaces (e.g. your-marketplace → local plugins repo): the remote
+   needs its own clone. Pattern from your-host: clone/pull the marketplace repo into
+   `~/code/plugins`, recreate any gitignored plugin symlinks against the remote's clones
+   (`ln -sfn ~/code/ChameleonLabs/.claude/plugins/your-plugin your-plugin`),
+   copy over uncommitted marketplace.json wiring, then
+   `claude plugin marketplace remove <name> && claude plugin marketplace add <path>`.
+   If the remote repo clone is dirty, `git stash` around the pull; on conflict keep
+   upstream and save the remote version as `<file>.{host}-local` — never discard.
+3. `claude plugin install <plugin>@<marketplace>` for every locally-enabled plugin
+   (marketplace remove can uninstall its plugins — reinstall those too).
+4. Verify: `claude plugin list`.
+
+Gotcha: compare plugin content with `diff`/content checks, not md5 — CRLF on /mnt/*
+working trees makes hashes lie.
+
+## 7. Verify end-to-end
+
+```bash
+ssh <host> 'bash -lc "claude --version; cd ~ && claude -p \"Reply with exactly: CONFIG OK\" 2>&1 | tail -1"'
+```
+
+- `CONFIG OK` → done.
+- `401 Invalid authentication credentials` → auth problem, NOT a sync failure. Check
+  structure only (never cat values): does `.credentials.json` → `claudeAiOauth` have a
+  non-empty `refreshToken`? Old `claude setup-token` credentials have none and die at
+  their fixed expiry with no warning. Fix = Leland runs `/login` in an interactive
+  session on that host (self-renewing refresh token; preferred over setup-token for
+  hosts that run full Claude Code). Headless timers (your-agent, your-agent-style
+  services) share this credential — flag that they're dark until re-auth.
+
+## 8. Report
+
+Write a summary to the current project's `Notes/` (check casing conventions):
+what synced, what was skipped and why, dropped permission rules, **which non-Claude
+CLIs were wired to the shared house-rules file** (and any — e.g. `agy` — left
+pending a probe), repo housekeeping flags found along the way (unpushed commits,
+diverged branches — flag, don't fix), backup location, and any ACTION REQUIRED
+items (auth) with exact commands inline.
