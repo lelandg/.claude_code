@@ -1,14 +1,12 @@
 ---
 name: sync-claude-config
-description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, plugins, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when Leland asks to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
+description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, plugins, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
 ---
 
 # Sync Claude Code Config to a Remote Host
 
 Push this machine's Claude Code configuration to an SSH-reachable host, **merging**
-(never clobbering) anything remote-specific. Born from the 2026-06-11 your-host sync —
-see `Notes/your-host-claude-config-sync-2026-06-11.md` in the ChameleonLabs repo for a
-worked example.
+(never clobbering) anything remote-specific.
 
 ## 0. Pick the target host
 
@@ -33,7 +31,7 @@ claude --version                            # local, for comparison
 ```
 
 - No `~/.claude` on remote → fresh install case: confirm Claude Code is installed first
-  (`bash -lc "which claude"`); if absent, stop and give Leland the install command.
+  (`bash -lc "which claude"`); if absent, stop and give the user the install command.
 - Inventory what is REMOTE-SPECIFIC so it survives the sync (see §2 table).
 - Check remote `~/.claude/agents/`, `skills/`, `commands/` for items that don't exist
   locally — these are preserved, never deleted.
@@ -46,9 +44,9 @@ claude --version                            # local, for comparison
 | `CLAUDE.md` & `GEMINI.md` | **MERGE by hand, never copy** (§4) — each = `@import` of AGENTS.md (line 1) + tool-specific extras (Claude triggers / Gemini memories) |
 | Other-CLI wiring (Codex/Copilot/Pi) | Symlink/append on the remote to point at the shared file (§4b); guarded, never clobber |
 | `instructions/` | `rsync -a` (full overwrite — they're reference docs) |
-| `agents/` | `rsync -aL --delete --exclude .git --exclude .idea` — **`-L` is mandatory**: local cl-* agents are symlinks into your-config-repo; remote needs materialized files. `--delete` mirrors archivals. |
+| `agents/` | `rsync -aL --delete --exclude .git --exclude .idea` — **`-L` is mandatory**: some local agents may be symlinks into a source repo; the remote needs materialized files. `--delete` mirrors archivals. |
 | `skills/` | `rsync -a --exclude '*-workspace' --exclude '*.skill' --exclude '*.zip'` — **additive, NO --delete** (preserve remote-only skills) |
-| `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. `aws-db-*`/`aws-env-*` need the your-admin-cli venv at /mnt/d). Never delete remote-only command dirs. |
+| `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. commands that need an admin CLI or virtualenv present only on the dev machine). Never delete remote-only command dirs. |
 | `settings.json` | **Programmatic merge, never replace** (§5) |
 | Plugins/marketplaces | Reconcile via `claude plugin` CLI (§6) |
 | Claude Code version | `bash -lc "claude update"` on remote to match local |
@@ -75,13 +73,13 @@ Do this for **each** file. Fetch the remote copy (`scp <host>:~/.claude/CLAUDE.m
 
 - Bring over machine-agnostic content for that tool: security/work-procedure/issue/label
   rules, plan-file rules, output formatting, skill/agent triggers, review-doc naming.
-- KEEP the remote file's platform adaptations: project root (`~/code/` vs `/mnt/d/...`),
+- KEEP the remote file's platform adaptations: project root (`~/code/` vs `/path/to/projects`),
   downloads location, venv conventions, sudo posture, platform/log-path lines.
 - DROP local-machine-only sections for Linux remotes: WSL/PowerShell notes, Windows
-  Chrome debugging, `/mnt/e` screenshot symlinks, Windows log paths, `/mnt/*` generally.
-- ADAPT tooling references: if a section needs a tool the remote lacks (e.g. your-admin-cli),
-  rewrite as "not installed on this host — ask Leland to run it from the dev machine";
-  never silently drop the safety rule it carries.
+  Chrome debugging, external screenshot symlinks, Windows log paths, local mount paths generally.
+- ADAPT tooling references: if a section needs a tool the remote lacks (e.g. an admin CLI
+  only on the dev machine), rewrite as "not installed on this host — run it from the dev
+  machine instead"; never silently drop the safety rule it carries.
 
 Edge cases:
 
@@ -99,7 +97,7 @@ Edge cases:
 
 ## 4b. Shared cross-CLI house rules (~/.config/agents/AGENTS.md + other CLIs)
 
-Leland's global house rules now live in `~/.config/agents/AGENTS.md` — the
+Your global house rules now live in `~/.config/agents/AGENTS.md` — the
 canonical file every CLI reads. `~/.claude/CLAUDE.md` `@import`s it; Codex,
 Copilot, Gemini, and Pi point at it too. Sync this so **non-Claude** agents
 behave the same on the remote. (See the `unify-agents-md` skill — esp. its
@@ -110,7 +108,7 @@ If the local machine has no `~/.config/agents/AGENTS.md` (older setup, everythin
 still in CLAUDE.md), skip this section — there's nothing shared to push yet.
 
 1. **Merge/adapt the shared file** with the SAME DROP/ADAPT rules as §4 (it now
-   carries the platform-specific bits — `/mnt/*` paths, WSL/PowerShell, Windows
+   carries the platform-specific bits — local mount paths, WSL/PowerShell, Windows
    Chrome, screenshot symlinks — that must be dropped/adapted for a Linux remote):
    - Back up + ensure dir on remote:
      `ssh <host> 'mkdir -p ~/.config/agents && cp -n ~/.config/agents/AGENTS.md ~/.config/agents/AGENTS.md.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null'`
@@ -154,10 +152,10 @@ Never overwrite. Python-merge with these rules:
 ## 6. Plugins & marketplaces (on the remote, via `bash -lc`)
 
 1. `claude plugin marketplace add <repo-or-path>` for each marketplace the remote lacks.
-2. Directory-source marketplaces (e.g. your-marketplace → local plugins repo): the remote
-   needs its own clone. Pattern from your-host: clone/pull the marketplace repo into
+2. Directory-source marketplaces (e.g. a private marketplace → local plugins repo): the
+   remote needs its own clone. Clone/pull the marketplace repo into
    `~/code/plugins`, recreate any gitignored plugin symlinks against the remote's clones
-   (`ln -sfn ~/code/ChameleonLabs/.claude/plugins/your-plugin your-plugin`),
+   (`ln -sfn ~/code/your-repo/.claude/plugins/your-plugin your-plugin`),
    copy over uncommitted marketplace.json wiring, then
    `claude plugin marketplace remove <name> && claude plugin marketplace add <path>`.
    If the remote repo clone is dirty, `git stash` around the pull; on conflict keep
@@ -166,7 +164,7 @@ Never overwrite. Python-merge with these rules:
    (marketplace remove can uninstall its plugins — reinstall those too).
 4. Verify: `claude plugin list`.
 
-Gotcha: compare plugin content with `diff`/content checks, not md5 — CRLF on /mnt/*
+Gotcha: compare plugin content with `diff`/content checks, not md5 — CRLF on Windows/WSL
 working trees makes hashes lie.
 
 ## 7. Verify end-to-end
@@ -179,10 +177,10 @@ ssh <host> 'bash -lc "claude --version; cd ~ && claude -p \"Reply with exactly: 
 - `401 Invalid authentication credentials` → auth problem, NOT a sync failure. Check
   structure only (never cat values): does `.credentials.json` → `claudeAiOauth` have a
   non-empty `refreshToken`? Old `claude setup-token` credentials have none and die at
-  their fixed expiry with no warning. Fix = Leland runs `/login` in an interactive
+  their fixed expiry with no warning. Fix = run `/login` in an interactive
   session on that host (self-renewing refresh token; preferred over setup-token for
-  hosts that run full Claude Code). Headless timers (your-agent, your-agent-style
-  services) share this credential — flag that they're dark until re-auth.
+  hosts that run full Claude Code). Headless timers / scheduled services share this
+  credential — flag that they're dark until re-auth.
 
 ## 8. Report
 
