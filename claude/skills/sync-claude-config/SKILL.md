@@ -1,6 +1,6 @@
 ---
 name: sync-claude-config
-description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, plugins, CC version) AND the shared cross-CLI agent house-rules (~/.config/agents/AGENTS.md + Codex/Copilot/Gemini/Pi wiring) from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when Leland asks to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
+description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, plugins, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when Leland asks to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
 ---
 
 # Sync Claude Code Config to a Remote Host
@@ -42,9 +42,9 @@ claude --version                            # local, for comparison
 
 | Item | Action |
 |------|--------|
-| `~/.config/agents/AGENTS.md` | **MERGE/adapt by hand** (§4b) — now holds the bulk of the machine-agnostic house rules every CLI reads |
-| Other-CLI wiring (Codex/Copilot/Gemini/Pi) | Wire on the remote to point at its own shared file (§4b); symlinks guarded, never clobber |
-| `CLAUDE.md` | **MERGE by hand, never copy** (§4) — now mostly `@import` + Claude specifics |
+| `~/.config/agents/AGENTS.md` | **MERGE/adapt by hand** (§4b) — canonical house rules every CLI reads via `@import` |
+| `CLAUDE.md` & `GEMINI.md` | **MERGE by hand, never copy** (§4) — each = `@import` of AGENTS.md (line 1) + tool-specific extras (Claude triggers / Gemini memories) |
+| Other-CLI wiring (Codex/Copilot/Pi) | Symlink/append on the remote to point at the shared file (§4b); guarded, never clobber |
 | `instructions/` | `rsync -a` (full overwrite — they're reference docs) |
 | `agents/` | `rsync -aL --delete --exclude .git --exclude .idea` — **`-L` is mandatory**: local cl-* agents are symlinks into your-config-repo; remote needs materialized files. `--delete` mirrors archivals. |
 | `skills/` | `rsync -a --exclude '*-workspace' --exclude '*.skill' --exclude '*.zip'` — **additive, NO --delete** (preserve remote-only skills) |
@@ -60,29 +60,42 @@ claude --version                            # local, for comparison
 ssh <host> 'mkdir -p ~/.claude/backups/sync-$(date +%Y%m%d) && cp ~/.claude/CLAUDE.md ~/.claude/settings.json ~/.claude/backups/sync-$(date +%Y%m%d)/ 2>/dev/null; cp -r ~/.claude/agents ~/.claude/backups/sync-$(date +%Y%m%d)/agents-bak 2>/dev/null; ls ~/.claude/backups/sync-$(date +%Y%m%d)/'
 ```
 
-## 4. CLAUDE.md merge
+## 4. Per-CLI instruction-file merge — CLAUDE.md & GEMINI.md
 
-If the local `~/.claude/CLAUDE.md` is now just `@import` of `~/.config/agents/AGENTS.md`
-plus Claude-specific bits, the heavy machine-agnostic merge happens on the shared
-file in §4b — here you only reconcile the Claude-specific part and make sure the
-remote CLAUDE.md `@import`s the **remote's** shared path (line 1, no indent,
-absolute path using the remote's home). For older hosts whose CLAUDE.md still
-holds everything inline, do the full merge below.
+Post-migration both `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md` share one shape:
+**line 1 is `@<remote-home>/.config/agents/AGENTS.md`** (absolute, the remote's home, no
+indent) and everything below is **tool-specific extras only** — skill/agent triggers in
+CLAUDE.md, "Gemini Added Memories" + Gemini specifics in GEMINI.md. The bulk
+machine-agnostic merge happens once on the shared file (§4b); here you only reconcile
+each tool's own section and fix its line-1 `@import` to the **remote's** home path.
 
-Fetch the remote file (`scp <host>:~/.claude/CLAUDE.md /tmp/`), diff against local, then
-write a merged version to /tmp and push it. Rules:
+Do this for **each** file. Fetch the remote copy (`scp <host>:~/.claude/CLAUDE.md /tmp/`,
+`scp <host>:~/.gemini/GEMINI.md /tmp/`), diff against local, write a merged version to
+/tmp, push it. Merge rules (same for both):
 
-- Bring over ALL machine-agnostic content: security sections, work procedures, issue
-  management, labels, plan-file rules, output formatting, skill triggers.
+- Bring over machine-agnostic content for that tool: security/work-procedure/issue/label
+  rules, plan-file rules, output formatting, skill/agent triggers, review-doc naming.
 - KEEP the remote file's platform adaptations: project root (`~/code/` vs `/mnt/d/...`),
-  downloads location, venv conventions, sudo posture, platform line.
+  downloads location, venv conventions, sudo posture, platform/log-path lines.
 - DROP local-machine-only sections for Linux remotes: WSL/PowerShell notes, Windows
-  Chrome debugging, `/mnt/e` screenshot symlinks, `/mnt/*` paths generally.
-- ADAPT tooling references: if a section requires a tool the remote lacks (e.g.
-  your-admin-cli), rewrite as "not installed on this host — ask Leland to run from the dev
-  machine", don't silently keep or drop the safety rule it carries.
-- If the remote has no CLAUDE.md, start from local and apply the DROP/ADAPT rules,
-  asking for the remote project root if unknown.
+  Chrome debugging, `/mnt/e` screenshot symlinks, Windows log paths, `/mnt/*` generally.
+- ADAPT tooling references: if a section needs a tool the remote lacks (e.g. your-admin-cli),
+  rewrite as "not installed on this host — ask Leland to run it from the dev machine";
+  never silently drop the safety rule it carries.
+
+Edge cases:
+
+- **Remote file missing:** start from local, apply DROP/ADAPT, prepend the line-1
+  `@import`, ask for the remote project root if unknown.
+- **GEMINI.md still in the old memories-only format** (no `@import` line — common; it
+  predates the migration on most hosts, including this dev machine as of 2026-06-21):
+  **prepend** `@<remote-home>/.config/agents/AGENTS.md` as a new line 1 and keep the
+  existing memories below (after DROP/ADAPT). Never symlink GEMINI.md away — unlike
+  Codex/Copilot it carries Gemini-only memory that must survive.
+- **Local file not yet migrated:** if the local CLAUDE.md/GEMINI.md has no `@import`
+  line, there are no canonical tool extras to push beyond the shared file — still ensure
+  the remote file `@import`s AGENTS.md so that CLI reads the house rules, and preserve
+  whatever extras the remote already has.
 
 ## 4b. Shared cross-CLI house rules (~/.config/agents/AGENTS.md + other CLIs)
 
@@ -104,15 +117,16 @@ still in CLAUDE.md), skip this section — there's nothing shared to push yet.
    - Fetch remote copy (if any), diff vs local, write merged → push. Bring all
      machine-agnostic content; DROP local-only sections; ADAPT tool refs the
      remote lacks; KEEP the remote's own platform adaptations.
-2. **Point Claude at it:** ensure remote `~/.claude/CLAUDE.md` line 1 is
-   `@<remote-home>/.config/agents/AGENTS.md` (absolute, remote's home, no indent).
+2. **Point the per-CLI files at it:** §4 ensures both CLAUDE.md and GEMINI.md `@import`
+   the remote's shared path at line 1 (absolute, remote's home, no indent).
 3. **Wire each CLI present on the remote.** Detect first:
    `ssh <host> 'bash -lc "for c in codex copilot gemini agy pi; do command -v $c && echo $c; done"'`.
    Guard every symlink (`[ -e <t> ] || [ -L <t> ]` before `ln -s`), never clobber,
    back up anything pre-existing:
    - **Codex:** `ln -s ~/.config/agents/AGENTS.md ~/.codex/AGENTS.md` (no import — concatenates).
    - **Copilot:** `ln -s ~/.config/agents/AGENTS.md ~/.copilot/copilot-instructions.md`.
-   - **Gemini:** remote `~/.gemini/GEMINI.md` line 1 `@<remote-home>/.config/agents/AGENTS.md` + keep remote extras (symlink if none).
+   - **Gemini:** do NOT symlink — GEMINI.md keeps Gemini-only memories, so merge it by
+     hand per §4 (`@import` line 1 + preserved extras).
    - **Pi:** append to remote `~/.bash_aliases` (idempotent — grep before adding;
      `bash -n` after): `pi(){ command pi --append-system-prompt "$HOME/.config/agents/AGENTS.md" "$@"; }`.
    - **agy:** probe before wiring (don't guess); report findings if unclear.
