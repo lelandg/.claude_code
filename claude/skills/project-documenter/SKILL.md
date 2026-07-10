@@ -26,16 +26,26 @@ If existing docs are found, note them and inform the user which files will be re
 
 #### Step 1b: Scan Source Files
 
-Read these files (adapt to project structure):
+First, **classify the project**, because the user-facing surface lives in different places depending on type:
 
-1. **package.json** (or equivalent) — project name, description, dependencies
+- **Web app** (has `app/`, `pages/`, `src/routes/`) — features live in routes/pages **and** interactive components. Use the full list below.
+- **CLI tool** (has a `bin/`, `cli`, `argparse`/`click`/`commander`/`cobra` usage, or a `[project.scripts]`/`bin` entry) — the user-facing surface is **commands, subcommands, flags, and their help text**, not routes. Enumerate every command and option; treat each command group as a feature area.
+- **Library / SDK** — the surface is the **public/exported API** (exported functions, classes, types) and its usage examples. Treat each public module as a feature area.
+- **Desktop / TUI app** — the surface is **menus, panels, keyboard shortcuts, and dialogs**.
+
+Then read these files (adapt to the project type above):
+
+1. **package.json / pyproject.toml / Cargo.toml / go.mod** (or equivalent) — project name, description, entry points, `bin`/`scripts`
 2. **Route/page files** — `app/**/page.tsx`, `pages/**/*.tsx`, `src/routes/**`
 3. **API routes** — `app/api/**/route.ts`, `pages/api/**`
-4. **Layouts & middleware** — `app/layout.tsx`, `middleware.ts`, `src/layouts/**`
-5. **Context providers** — `src/context/**`, `app/providers.tsx`, `lib/providers/**`
-6. **Schema** — `prisma/schema.prisma`, `**/models/**`, `src/services/db.ts`
-7. **Existing docs** — `$DOCS_DIR/**/*.md`, `README.md`
-8. **Product config** — `lib/products.ts`, `lib/config.ts`, `src/config/**`
+4. **Interactive components** — `components/**`, `src/components/**`, `app/**/_components/**`. **Do not skip this.** Many user-facing features are not routes: modals, dialogs, drawers, command palettes, bulk/multi-select actions, export/import, search & filter & sort, toggles (e.g. dark mode), notification bells, toasts, keyboard shortcuts, drag-and-drop. Read component files and the settings/preferences sub-components a page renders, not just the page shell.
+5. **CLI / command definitions** — `bin/**`, `cli/**`, `**/commands/**`, `**/__main__.py`, argparse/click/commander/cobra setup (for CLI projects)
+6. **Layouts & middleware** — `app/layout.tsx`, `middleware.ts`, `src/layouts/**`
+7. **Context providers** — `src/context/**`, `app/providers.tsx`, `lib/providers/**`
+8. **Schema** — `prisma/schema.prisma`, `**/models/**`, `src/services/db.ts`
+9. **User-facing emails & notifications** — `emails/**`, `**/templates/**`, `lib/email/**`, `lib/notify/**`, any Discord/Slack/SMS dispatch. Transactional emails (welcome, receipt, password-reset), digests, and in-app notifications are real user touchpoints even though they aren't pages.
+10. **Existing docs** — `$DOCS_DIR/**/*.md`, `README.md`
+11. **Product config** — `lib/products.ts`, `lib/config.ts`, `src/config/**`. **Monorepos:** if the repo hosts multiple products, segment feature areas per product rather than blending them into one flat set.
 
 #### Step 1c: Build Feature Map
 
@@ -44,12 +54,17 @@ From the scanned files, identify **feature areas** — groups of related user-fa
 | Area | What to look for |
 |------|-----------------|
 | Authentication | Auth routes, sign-in/sign-up pages, password reset, OAuth providers |
-| User Account | Profile, settings, preferences pages |
+| User Account | Profile, settings, preferences pages (including each toggle/option rendered by sub-components) |
 | Billing | Stripe routes, subscription pages, pricing |
 | Products/Apps | Product pages, app dashboards, feature pages |
 | Chat/AI | Chat components, AI routes, model config |
+| In-page / interactive features | Modals, dialogs, command palettes, bulk actions, export/import, search & filter & sort, dark-mode toggle, keyboard shortcuts, drag-and-drop — features that live in components, not routes |
+| Emails & notifications | Transactional emails, digests, in-app notifications, Discord/Slack/SMS messages users receive |
+| CLI commands | Each command/subcommand and its flags (CLI projects) |
 | Admin | Admin pages, admin API routes |
 | API/Integrations | OAuth, webhooks, external API routes |
+
+> The agent that *writes* each doc only ever sees the files you bin into its area here. A feature you miss in this map is a feature that never gets documented — the Phase 4 completeness pass is the backstop, but bin thoroughly now.
 
 Also build a **route inventory** for sitemap generation — a list of every public route with:
 - Path (e.g., `/dashboard`, `/inventory`)
@@ -57,7 +72,15 @@ Also build a **route inventory** for sitemap generation — a list of every publ
 - Whether it requires authentication
 - Associated source file
 
-Present the feature map, route inventory, and any files that will be overwritten to the user for approval before proceeding.
+Finally, capture an **authoritative feature menu** — the single best source of "everything a user can reach." This is what the Phase 4 completeness pass checks the docs against. Use whichever exists:
+- Web: the nav bar / sidebar / bottom-nav component, plus the route inventory
+- CLI: the top-level `--help` command list (every command and subcommand)
+- Library: the package's exported/public API surface
+- Desktop/TUI: the menu tree
+
+Save this list — the completeness reviewer needs it.
+
+Present the feature map, route inventory, authoritative menu, and any files that will be overwritten to the user for approval before proceeding.
 
 ### Phase 2: Document (parallel agents)
 
@@ -100,9 +123,18 @@ Task tool call:
 
     ## Common Questions
     Q&A format — anticipate what users would ask.
+
+    These docs are public and indexed for customer support. Follow the disclosure
+    policy in references/disclosure-policy.md: document what users need to use and
+    troubleshoot the feature, but do NOT include infrastructure names, secrets,
+    env-var names, internal API paths, auth/signing internals, pricing formulas,
+    proprietary algorithms, admin-only capabilities, or PII. When unsure, omit it
+    and note it for review.
 ```
 
 Launch up to 4 agents in parallel. If more than 4 areas, batch them.
+
+> Reference: `references/disclosure-policy.md` defines exactly what is SAFE vs DO-NOT-DISCLOSE. The writing agents apply it as a first filter; the Phase 4 disclosure reviewer is the gate of record.
 
 ### Phase 3: Sitemap & Navigation
 
@@ -178,9 +210,96 @@ Generate `$DOCS_DIR/Features/site-navigation.md` — a human-readable navigation
 
 This doc helps RAG-powered chat answer "where do I find X?" and "how do I get to Y?" questions.
 
-### Phase 4: Index & RAG Integration
+### Phase 4: Verify (completeness + disclosure)
 
-After all outputs are generated:
+This is the gate before anything is indexed for support. Run **two independent reviewer
+agents in parallel** — they have opposite mandates, so keep them separate. Both read every
+generated markdown file (the feature docs, `site-navigation.md`, and the README index).
+
+Nothing reaches Phase 5 (RAG indexing) until disclosure review passes. **No doc is
+published or indexed while a disclosure finding is unresolved.**
+
+#### 4a: Completeness reviewer
+
+**Mandate: find user-facing features that are MISSING from the docs.** Dispatch a
+`general-purpose` agent:
+
+```
+Task tool call:
+  subagent_type: "general-purpose"
+  name: "verify-completeness"
+  description: "Find undocumented user-facing features"
+  prompt: |
+    You are auditing documentation coverage for {project name}.
+
+    Authoritative feature menu (everything a user can reach), captured in Phase 1:
+    {paste the nav/sidebar list, route inventory, CLI --help command list, or public API surface}
+
+    Generated docs to check:
+    {list every file in $DOCS_DIR/Features/}
+
+    For EACH item in the authoritative menu, confirm it is documented in the generated
+    docs. Also re-scan components/, commands/, and email/notification templates for any
+    user-facing feature (modal, bulk action, toggle, export, shortcut, transactional
+    email, CLI flag) that appears in NEITHER the menu NOR the docs.
+
+    Report ONLY gaps, as a list:
+    - Feature name — where it lives (file/route/command) — why it's user-facing — which doc should cover it
+    If coverage is complete, say "COMPLETE — no gaps." Do not rewrite docs.
+```
+
+For every gap reported, either dispatch a documenting agent to cover it (re-running the
+relevant Phase 2 agent with the missing files) or, if it's intentionally out of scope,
+record why. Re-run the completeness reviewer if you added docs.
+
+#### 4b: Disclosure reviewer (trade-secret gate)
+
+**Mandate: find anything in the docs that must NOT be shown to a customer**, and redact it.
+
+**Scope = the publish manifest, not just the docs you generated.** If the project has a
+`.raginclude` (or equivalent index manifest), resolve its patterns and review EVERY file
+that will be indexed — pre-existing files included. The RAG boundary is the manifest;
+a leaky legacy doc in `.raginclude` ships to customers just as surely as a new one.
+Files that fail review and aren't part of this run's output should be removed from the
+manifest (or relocated out of its globs), not silently left in place.
+
+Dispatch a `general-purpose` agent:
+
+```
+Task tool call:
+  subagent_type: "general-purpose"
+  name: "verify-disclosure"
+  description: "Redact trade secrets from user-facing docs"
+  prompt: |
+    You are the disclosure gate for public, customer-facing, RAG-indexed documentation
+    of {project name}. Apply the policy in:
+      {skill dir}/references/disclosure-policy.md
+
+    Review every file in $DOCS_DIR/Features/ (including site-navigation.md and README.md),
+    PLUS every additional file resolved from the project's .raginclude (or equivalent
+    RAG manifest) — pre-existing files ship to customers too:
+    {list any extra manifest-resolved files here}
+
+    Flag and REDACT anything in the DO-NOT-DISCLOSE categories: infrastructure/resource
+    names, secrets, env-var names, internal API paths, auth/signing internals, exact
+    evasion-relevant security thresholds, pricing formulas/costs/margins, proprietary
+    algorithms, internal roadmap / unreleased features, admin-only capabilities shown to
+    users, and PII. Keep everything a customer genuinely needs to use or troubleshoot
+    the product (user-facing limits and plan differences are SAFE).
+
+    For each finding: edit the file to remove or rephrase the leak, then report:
+    - file:line — category — what was removed — how you rephrased it (or "removed")
+    Mark borderline cases "FLAG FOR HUMAN" and leave them in place but call them out.
+    If a doc is clean, say so. End with a verdict: SAFE TO PUBLISH or NEEDS HUMAN REVIEW.
+```
+
+Present the disclosure reviewer's report (and any "FLAG FOR HUMAN" items) to the user.
+**Do not proceed to Phase 5 until the verdict is SAFE TO PUBLISH** or the user clears the
+flagged items.
+
+### Phase 5: Index & RAG Integration
+
+After all outputs are generated and the Phase 4 disclosure gate has passed:
 
 1. **Create index file** — Write `$DOCS_DIR/Features/README.md` listing all generated docs with one-line descriptions
 2. **Update .raginclude** — Read the existing `.raginclude` file (or create one if it doesn't exist). Ensure glob patterns cover all generated docs:
@@ -224,7 +343,7 @@ public/sitemap.xml             (static/other frameworks)
 - **Write for end users** — as if explaining to a customer. No jargon, no API details.
 - **Concrete over abstract** — "Click Settings > Profile" not "navigate to the profile management interface"
 - **Include current behavior** — read the actual code, don't guess. If a feature has limits (e.g., "5 messages per hour for free tier"), state them.
-- **No trade secrets** — omit internal pricing formulas, proprietary algorithms, security infrastructure details
+- **No trade secrets** — omit internal pricing formulas, proprietary algorithms, security/infrastructure details, secrets, env-var names, internal API paths, admin-only capabilities, and PII. The full policy is `references/disclosure-policy.md`; the Phase 4 disclosure reviewer enforces it before anything is indexed.
 - **Respect existing work** — when replacing existing docs, preserve any manually-added content that isn't auto-generated (look for markers like `<!-- manual -->` or sections not matching the template)
 
 ## Doc Template

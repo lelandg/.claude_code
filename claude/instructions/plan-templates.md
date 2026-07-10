@@ -76,7 +76,7 @@ When updating plan files, you MUST:
 ## Auto-Update Triggers
 
 Automatically update the plan file when:
-- Completing a TodoWrite task that's part of a plan
+- Completing a tracked task (TaskCreate/TaskUpdate list) that's part of a plan
 - Creating new files mentioned in the plan
 - Finishing a section or major milestone
 - Encountering errors that affect the plan

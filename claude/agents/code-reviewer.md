@@ -1,8 +1,8 @@
 ---
 name: code-reviewer
 description: Use this agent when you need to review any code for quality, bugs, performance issues, or adherence to best practices. This includes reviewing new functions, classes, refactored code, or any logical chunk of code that has just been implemented. The agent will analyze code structure, identify potential bugs, suggest improvements, and ensure alignment with project-specific standards from CLAUDE.md files.\n\nExamples:\n- <example>\n  Context: The user wants code reviewed after implementing a new feature.\n  user: "Please write a function that validates email addresses"\n  assistant: "Here's the email validation function:"\n  <function implementation>\n  assistant: "Now let me use the code-reviewer agent to review this implementation"\n  <commentary>\n  Since a new function was just written, use the Task tool to launch the code-reviewer agent to analyze it for bugs and improvements.\n  </commentary>\n</example>\n- <example>\n  Context: The user has just refactored a complex method.\n  user: "I've refactored the mesh generation pipeline. Can you check if it looks good?"\n  assistant: "I'll use the code-reviewer agent to thoroughly review your refactored mesh generation pipeline"\n  <commentary>\n  The user explicitly wants code reviewed, so use the Task tool to launch the code-reviewer agent.\n  </commentary>\n</example>\n- <example>\n  Context: After implementing a new class or module.\n  assistant: "I've implemented the new PythonShapeCompletionRepository class as requested"\n  assistant: "Let me now review this implementation for any issues or improvements"\n  <commentary>\n  Proactively use the Task tool to launch the code-reviewer agent after writing significant code.\n  </commentary>\n</example>
-tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch
-model: opus
+tools: Glob, Grep, Read, WebFetch, TaskCreate, TaskUpdate, TaskList, WebSearch
+model: fable
 color: green
 ---
 

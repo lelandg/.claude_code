@@ -38,6 +38,7 @@ Scan the repo for installable files and compare against user's existing config.
 
 | Repo Path | Target Path | Category |
 |-----------|-------------|----------|
+| `config/agents/AGENTS.md` | `~/.config/agents/AGENTS.md` | Shared house rules (all CLIs) |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Core config |
 | `claude/CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` | Spec |
 | `claude/settings.json` | `~/.claude/settings.json` | Settings |
@@ -108,12 +109,24 @@ Merge strategy for each section:
 | `trustedWorkspaces` | Keep user's value (never overwrite) |
 | `feedbackSurveyState` | Keep user's value (never overwrite) |
 
-#### CLAUDE.md
+#### AGENTS.md + CLAUDE.md (split structure)
+
+The repo mirrors a **two-file structure**: `config/agents/AGENTS.md` holds the
+tool-agnostic house rules shared by every AI coding CLI, and `claude/CLAUDE.md`
+is a thin file whose first line is `@~/.config/agents/AGENTS.md` plus
+Claude-Code-specific extras (skill/agent triggers).
 
 Merge strategy:
-1. The repo CLAUDE.md contains **generic placeholders** (e.g., "Your Name", "your-github-username")
-2. If user has a customized CLAUDE.md, keep user's version and **report new sections** the repo has that the user doesn't
-3. If user's CLAUDE.md matches repo structure, offer to add any missing sections
+1. Both files contain **generic placeholders** (e.g., "Your Name", "your-github-username")
+2. Install `AGENTS.md` to `~/.config/agents/AGENTS.md` (create the directory:
+   `mkdir -p ~/.config/agents`)
+3. If the user has a customized CLAUDE.md **without** an `@import` line, offer to
+   migrate: move their house rules content into `~/.config/agents/AGENTS.md` and
+   reduce CLAUDE.md to the `@import` + tool-specific extras — or keep their
+   monolith and just **report new sections** the repo has that they don't
+4. If user's files match the repo structure, offer to add any missing sections
+5. Other CLIs (Codex, Copilot, Gemini, Pi) can point at the same AGENTS.md —
+   see the `unify-agents-md` skill for per-tool wiring
 
 #### mcp.json
 

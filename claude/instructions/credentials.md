@@ -8,7 +8,7 @@ Reference for managing API keys, passwords, and secrets securely.
 
 Store credentials in platform-specific user config directories **outside the project**:
 
-- **Windows**: `%APPDATA%\Roaming\{AppName}\config.json`
+- **Windows**: `%APPDATA%\{AppName}\config.json` (`%APPDATA%` already expands to `...\AppData\Roaming`)
 - **macOS**: `~/Library/Application Support/{AppName}/config.json`
 - **Linux**: `~/.config/{AppName}/config.json`
 

@@ -329,3 +329,8 @@ When updating the code map:
 6. Update architectural diagrams if structure changed
 7. Verify all cross-references still valid
 8. Update the `Last Updated` date
+
+## Examples
+
+- **C#/.NET**: `/path/to/your/CSharpProject/Docs/CodeMap.md`
+- **Web/TypeScript**: `/path/to/your/WebProject/Docs/CodeMap.md`

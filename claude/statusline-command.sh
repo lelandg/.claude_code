@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code statusLine command
-# Derived from ~/.bashrc PS1: bold green user@host, colon, bold blue cwd
-# Plus Claude Code session info (model, context usage, git branch, vim mode, PR)
-# Plus messaging service indicators (Discord, Telegram) when connected
+# Line 1: user@host:cwd (branch) [worktree]
+# Line 2: [Model] ctx:N%  rate-limits  PR#N  session-name  vim-mode
 
 input=$(cat)
 
@@ -11,9 +10,8 @@ host=$(hostname -s)
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
 [ -z "$cwd" ] && cwd=$(pwd)
 
-# Substitute /mnt/d/Documents/Code/ -> ~/code for brevity
+# Shorten /mnt/d/Documents/Code/ -> ~/code for brevity
 cwd="${cwd/#\/mnt\/d\/Documents\/Code\//\~\/code\/}"
-# Trim trailing slash introduced by substitution when it's exactly the base path
 cwd="${cwd%/}"
 
 model=$(echo "$input" | jq -r '.model.display_name // empty')
@@ -21,13 +19,19 @@ used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 vim_mode=$(echo "$input" | jq -r '.vim.mode // empty')
 pr_num=$(echo "$input" | jq -r '.pr.number // empty')
 pr_state=$(echo "$input" | jq -r '.pr.review_state // empty')
+session_name=$(echo "$input" | jq -r '.session_name // empty')
+worktree_name=$(echo "$input" | jq -r '.worktree.name // empty')
+five_h=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+seven_d=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+
+# Git branch: prefer worktree.branch, then live git
 branch=$(echo "$input" | jq -r '.worktree.branch // empty')
-# Fall back to git branch when not in a worktree session
 if [ -z "$branch" ]; then
-  branch=$(git -C "${cwd/#\~\/code\///mnt/d/Documents/Code/}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  real_cwd="${cwd/#\~\/code\///mnt/d/Documents/Code/}"
+  branch=$(git -C "$real_cwd" --no-optional-locks rev-parse --abbrev-ref HEAD 2>/dev/null || true)
 fi
 
-# Line 1: Bold green user@host, colon, bold blue cwd, git branch
+# ── Line 1: user@host:cwd (branch) [worktree] ──────────────────────────────
 printf '\033[01;32m%s@%s\033[00m' "$user" "$host"
 printf ':\033[01;34m%s\033[00m' "$cwd"
 
@@ -35,19 +39,46 @@ if [ -n "$branch" ] && [ "$branch" != "HEAD" ]; then
   printf ' \033[00;35m(%s)\033[00m' "$branch"
 fi
 
+if [ -n "$worktree_name" ]; then
+  printf ' \033[00;33m[wt:%s]\033[00m' "$worktree_name"
+fi
+
 printf '\n'
 
-# Line 2: Model, context %, PR badge, vim mode — stays visible even when path is long
+# ── Line 2: [Model] ctx:N%  limits  PR  session  vim ───────────────────────
 line2=""
+
 if [ -n "$model" ]; then
   line2+=$(printf '\033[00;36m[%s]\033[00m' "$model")
 fi
 
 if [ -n "$used" ]; then
-  line2+=$(printf ' \033[00;33mctx:%.0f%%\033[00m' "$used")
+  # Color: green <50%, yellow 50-79%, red >=80%
+  used_int=$(printf '%.0f' "$used")
+  if [ "$used_int" -ge 80 ]; then
+    ctx_color='\033[01;31m'
+  elif [ "$used_int" -ge 50 ]; then
+    ctx_color='\033[00;33m'
+  else
+    ctx_color='\033[00;32m'
+  fi
+  line2+=$(printf " ${ctx_color}ctx:%d%%\033[00m" "$used_int")
 fi
 
-# Open PR badge (green=approved, yellow=pending, red=changes_requested, white=draft/open)
+# Rate-limit badges (only shown when present — Claude.ai subscribers)
+rl_str=""
+if [ -n "$five_h" ]; then
+  rl_str+=$(printf '5h:%.0f%%' "$five_h")
+fi
+if [ -n "$seven_d" ]; then
+  [ -n "$rl_str" ] && rl_str+=" "
+  rl_str+=$(printf '7d:%.0f%%' "$seven_d")
+fi
+if [ -n "$rl_str" ]; then
+  line2+=$(printf ' \033[00;33m[%s]\033[00m' "$rl_str")
+fi
+
+# PR badge (green=approved, yellow=pending/open, red=changes_requested, grey=draft)
 if [ -n "$pr_num" ]; then
   case "$pr_state" in
     approved)          pr_color='\033[01;32m' ;;
@@ -58,42 +89,14 @@ if [ -n "$pr_num" ]; then
   line2+=$(printf " ${pr_color}PR#%s\033[00m" "$pr_num")
 fi
 
-# Vim mode indicator (bold white)
+# Session name (only when /rename has been used)
+if [ -n "$session_name" ]; then
+  line2+=$(printf ' \033[00;37m"%s"\033[00m' "$session_name")
+fi
+
+# Vim mode (bold white)
 if [ -n "$vim_mode" ]; then
   line2+=$(printf ' \033[01;37m[%s]\033[00m' "$vim_mode")
 fi
 
-# Messaging channel indicators — Discord blue 63 (#5865F2), Telegram blue 39 (#2AABEE).
-# Shown ONLY while the CURRENT session has the channel attached (live), not merely
-# paired. The claude session process that spawned this statusline runs each attached
-# channel plugin as a direct child (bun .../claude-plugins-official/<service>/...),
-# so walk up our ancestor chain and look for such a child.
-channel_live() {
-  local pattern="$1" pid=$$ i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-    [ "$pid" -le 1 ] && return 1
-    if pgrep -P "$pid" -f "$pattern" >/dev/null 2>&1; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-messaging=""
-if channel_live "claude-plugins-official/discord"; then
-  messaging+=$(printf '\033[38;5;63mDiscord\033[00m')
-fi
-if channel_live "claude-plugins-official/telegram"; then
-  [ -n "$messaging" ] && messaging+=" "
-  messaging+=$(printf '\033[38;5;39mTelegram\033[00m')
-fi
-# Single "active" suffix, only when at least one channel is shown
-[ -n "$messaging" ] && messaging+=$(printf '\033[00;37m active\033[00m')
-
-if [ -n "$messaging" ]; then
-  printf '%s %s\n' "$line2" "$messaging"
-else
-  printf '%s\n' "$line2"
-fi
+printf '%s\n' "$line2"

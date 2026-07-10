@@ -8,6 +8,7 @@ The installable content is in the `claude/` subdirectory of this repo. Each path
 
 | Repo Path | Target Path |
 |-----------|-------------|
+| `config/agents/AGENTS.md` | `~/.config/agents/AGENTS.md` |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` |
 | `claude/CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` |
 | `claude/settings.json` | `~/.claude/settings.json` |

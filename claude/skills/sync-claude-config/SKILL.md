@@ -1,6 +1,6 @@
 ---
 name: sync-claude-config
-description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, plugins, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
+description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, statusline, plugins, MCP servers, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
 ---
 
 # Sync Claude Code Config to a Remote Host
@@ -48,9 +48,11 @@ claude --version                            # local, for comparison
 | `skills/` | `rsync -a --exclude '*-workspace' --exclude '*.skill' --exclude '*.zip'` — **additive, NO --delete** (preserve remote-only skills) |
 | `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. commands that need an admin CLI or virtualenv present only on the dev machine). Never delete remote-only command dirs. |
 | `settings.json` | **Programmatic merge, never replace** (§5) |
+| `statusline-command.sh` + `statusLine` settings block | **Copy + ADAPT** (§5b) — portable script; rewrite the local path-shortening for the remote's project root; back up any host-customized remote copy first |
 | Plugins/marketplaces | Reconcile via `claude plugin` CLI (§6) |
+| MCP servers | **Reconcile user-scope only** (§6b) — plugin MCP servers ride along with §6; skip browser/account-bound ones on a VPS; never touch local/project-scope servers |
 | Claude Code version | `bash -lc "claude update"` on remote to match local |
-| **NEVER sync** | `.credentials.json`, `history.jsonl`, `projects/` (memory!), `sessions/`, `session-env/`, `file-history/`, `shell-snapshots/`, `tasks/`, `teams/`, `daemon/`, `jobs/`, `policy-limits.json`, `statusline-command.sh` (often host-customized), `my-projects.yaml` (local paths), security/ |
+| **NEVER sync** | `.credentials.json`, `history.jsonl`, `projects/` (memory!), `sessions/`, `session-env/`, `file-history/`, `shell-snapshots/`, `tasks/`, `teams/`, `daemon/`, `jobs/`, `policy-limits.json`, `my-projects.yaml` (local paths), security/, `.claude.json` (holds local/project MCP scopes + per-project state — see §6b) |
 
 ## 3. Backup first — always
 
@@ -147,7 +149,32 @@ Never overwrite. Python-merge with these rules:
   `aws iam delete-access-key`). When unsure whether a rule is write-capable, leave it out.
 - `extraKnownMarketplaces`: add missing ones. Directory-source marketplaces must be
   re-pointed at a remote-local clone (§6), never at a local-only path.
+- `statusLine`: set to the local block. It points at the home-relative
+  `~/.claude/statusline-command.sh` (portable), so the settings entry itself needs no
+  rewrite — the *script* is handled in §5b.
 - Validate before push: `python3 -m json.tool`. Push, then re-validate on remote.
+
+## 5b. Statusline script (`statusline-command.sh`)
+
+The local script is portable bash (reads the status JSON from stdin via `jq`, prints
+two colored lines). One machine-specific bit: it shortens your local project root
+(e.g. `/path/to/projects/`) → `~/code` for display (and reverses it to run `git -C`).
+That substitution is a no-op on a remote where the path never matches, so it's
+*harmless* if left — but adapt it so the remote's own project root gets the same
+brevity treatment.
+
+1. **Back up any existing remote script** (it may be host-customized — that's why this was
+   previously a NEVER-sync item): `ssh <host> 'cp -n ~/.claude/statusline-command.sh ~/.claude/statusline-command.sh.bak-$(date +%Y%m%d-%H%M%S) 2>/dev/null'`.
+   If the remote copy differs meaningfully, show the user the diff and confirm before overwriting.
+2. **Adapt the path-shortening** to the remote project root (the same root you used for
+   CLAUDE.md/AGENTS.md in §4 — e.g. `~/code/`). Edit a `/tmp` copy: replace the local
+   project-root literal (both the forward shorten and the reverse expand) with the
+   remote's actual code path, or drop the substitution entirely if the remote has no
+   single canonical root.
+3. **Push** the adapted script: `scp /tmp/statusline-command.sh <host>:~/.claude/`, then
+   `ssh <host> 'chmod +x ~/.claude/statusline-command.sh'`.
+4. Confirm `jq` exists on the remote (`ssh <host> 'bash -lc "command -v jq"'`); the script
+   silently prints empty fields without it. Flag as ACTION REQUIRED if missing.
 
 ## 6. Plugins & marketplaces (on the remote, via `bash -lc`)
 
@@ -166,6 +193,38 @@ Never overwrite. Python-merge with these rules:
 
 Gotcha: compare plugin content with `diff`/content checks, not md5 — CRLF on Windows/WSL
 working trees makes hashes lie.
+
+## 6b. MCP servers — reconcile user-scope only, skip what a VPS can't use
+
+`claude mcp list` aggregates **five** scopes; only one is genuinely syncable. Enumerate
+first (`ssh <host> 'bash -lc "claude mcp list"'` and local `claude mcp list`), then:
+
+| Scope | Where it lives | Sync action |
+|-------|----------------|-------------|
+| **Plugin-provided** (`plugin:*` prefix) | inside each plugin | **None here** — they ride along with the plugin sync (§6). If the plugin synced, its MCP server did too. |
+| **claude.ai account-bound** (e.g. Gmail, Calendar, Drive — OAuth/HTTP) | tied to the logged-in claude.ai account, not a file | **Never sync.** They auto-connect when that account logs in (and may be absent in headless/cron runs anyway). Re-auth follows §7, not this step. |
+| **Local-scope** (`~/.claude.json` → `projects[<path>].mcpServers`) | per-project, keyed by absolute local path | **Never sync** — the path doesn't exist on the remote, and `.claude.json` also holds memory/session state. Leave it. |
+| **Project-scope** (`.mcp.json` checked into a repo) | travels with the repo via git | **Not this skill's job** — it ships when the repo is cloned on the remote. |
+| **User-scope** (`claude mcp add -s user`; top-level `mcpServers` in `~/.claude.json`) | user-global, host-portable | **The one syncable category.** Re-create the *portable* ones on the remote (below). |
+
+For each **user-scope** server, decide per the VPS's capabilities — **skip the ones that
+don't make sense on a headless box**:
+
+- **Skip browser-driven servers** (`playwright`, `chrome-devtools`) — they need a real
+  Chrome/display; pointless on a headless VPS unless it's explicitly set up for headless
+  browser testing (deps installed). Note the skip in the report.
+- **Skip anything whose toolchain or creds the VPS lacks** — `uvx`/`npx` not installed,
+  cloud-credential-dependent servers on a box with no cloud role, a bot-token server on a
+  host that isn't the bot host. When unsure, leave it out and flag it.
+- **Re-create the portable, useful ones** (doc/knowledge fetchers like `context7`,
+  `huggingface`, `mintlify`; `github`) with the **same scope** on the remote:
+  `ssh <host> 'bash -lc "claude mcp add -s user <name> -- <command…>"'` (or
+  `claude mcp add -s user --transport http <name> <url>` for HTTP servers). Read the
+  local definition out of `claude mcp get <name>` first; **never** transcribe a server
+  that carries an inline token/secret — re-add it with the secret resolved on the remote
+  (env var / `claude mcp add … -e KEY=...` typed by the user), never paste the value.
+- Verify: `ssh <host> 'bash -lc "claude mcp list"'` — the re-created ones should connect;
+  account-bound ones will show their own auth state (expected).
 
 ## 7. Verify end-to-end
 
@@ -187,6 +246,9 @@ ssh <host> 'bash -lc "claude --version; cd ~ && claude -p \"Reply with exactly: 
 Write a summary to the current project's `Notes/` (check casing conventions):
 what synced, what was skipped and why, dropped permission rules, **which non-Claude
 CLIs were wired to the shared house-rules file** (and any — e.g. `agy` — left
-pending a probe), repo housekeeping flags found along the way (unpushed commits,
-diverged branches — flag, don't fix), backup location, and any ACTION REQUIRED
-items (auth) with exact commands inline.
+pending a probe), **statusline** result (adapted path root, or host-customized copy
+preserved + `jq` presence), **MCP servers** reconciled vs. skipped (which user-scope
+servers were re-created, which were skipped as browser/account/cred-bound), repo
+housekeeping flags found along the way (unpushed commits, diverged branches — flag,
+don't fix), backup location, and any ACTION REQUIRED items (auth, missing `jq`/`uvx`)
+with exact commands inline.

@@ -22,9 +22,18 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 ├── .claude/
 │   └── commands/
 │       ├── install-claude-config.md  # Bootstrap command (run after cloning)
+│       ├── sync-claude-config.md     # /sync-claude-config slash command
+│       ├── unify-agents-md.md        # /unify-agents-md slash command
+│       ├── feature-team.md           # Multi-task plan with review loop + model ladder
+│       ├── rename-code.md            # Safe cross-codebase symbol rename
 │       └── yt-transcript.md          # /yt-transcript slash command
+├── config/
+│   └── agents/
+│       └── AGENTS.md                  # Shared house rules for EVERY AI coding CLI
+│                                      #   (mirrors ~/.config/agents/AGENTS.md)
 ├── claude/                            # Mirrors ~/.claude/ — install this
-│   ├── CLAUDE.md                      # Global instructions (loaded every session)
+│   ├── CLAUDE.md                      # Thin Claude-Code-specific file; line 1
+│   │                                  #   @imports the shared AGENTS.md above
 │   ├── CLAUDE_CodeMap.md              # CodeMap specification (language-neutral)
 │   ├── settings.json                  # Claude Code settings & permissions
 │   ├── mcp.json                       # MCP server configurations
@@ -54,6 +63,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── time.md                    # Execution time tracking
 │       ├── cl-project-init/           # Sanitized example: company project scaffolder
 │       ├── claude-md-optimizer/       # CLAUDE.md optimization skill
+│       ├── disk-doctor/               # Disk cleanup + install hygiene (safe-trash, undo)
 │       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
 │       ├── feature-documenter/        # Feature documentation skill
 │       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
@@ -63,6 +73,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── raginclude-generator/      # Generate .raginclude file for RAG ingest
 │       ├── sync-claude-config/        # Sync ~/.claude/ to this repo
 │       ├── technical-documenter/      # Developer/support docs generator
+│       ├── unify-agents-md/           # Make AGENTS.md canonical across all AI CLIs
 │       ├── update-code-map/           # CodeMap maintenance skill
 │       └── yt-transcript/             # Download YouTube transcripts
 └── Docs/
@@ -141,19 +152,25 @@ cp claude/instructions/*.md ~/.claude/instructions/
 
 ---
 
-### Option 4: Start from CLAUDE.md Only
+### Option 4: Start from the House Rules Only
 
 ```bash
+mkdir -p ~/.config/agents
+cp .claude_code/config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 cp .claude_code/claude/CLAUDE.md ~/.claude/CLAUDE.md
 ```
 
-Customize it for your workflow. This single file gives you the core benefits: date handling, security rules, work procedures, and project conventions.
+Customize them for your workflow. `AGENTS.md` carries the core benefits — security
+rules, work procedures, issue workflow, and project conventions — shared by every AI
+coding CLI (Claude Code, Codex, Copilot, Gemini, Pi). `CLAUDE.md` is a thin file that
+`@import`s it (line 1) and adds Claude-Code-specific skill/agent triggers. See the
+`unify-agents-md` skill for wiring other CLIs to the same file.
 
 ---
 
 ### Required After Install
 
-**1. Personalize `~/.claude/CLAUDE.md`** — replace the placeholder table at the top:
+**1. Personalize `~/.config/agents/AGENTS.md`** — replace the placeholder table at the top:
 
 ```markdown
 | Your Name | your-github-username | your-discord-username |
@@ -182,15 +199,19 @@ See **[Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md)** for the full guide including 
 
 ## Customization Guide
 
-### CLAUDE.md (Start Here)
-The global `CLAUDE.md` is loaded into every Claude Code session. Customize these sections:
+### AGENTS.md + CLAUDE.md (Start Here)
+The shared `~/.config/agents/AGENTS.md` holds the tool-agnostic house rules every AI
+coding CLI follows; the global `CLAUDE.md` `@import`s it (line 1) and is loaded into
+every Claude Code session. Customize these sections of `AGENTS.md`:
 
 | Section | What to Change |
 |---------|---------------|
-| **User & Contact Info** | Your name, GitHub, Discord handles |
-| **Development Environments** | Your IDE, languages, tools |
-| **Runtime Notes** | Your OS, shell, virtual env setup |
+| **User & Contact** | Your name, GitHub, Discord handles |
+| **Cloud / infrastructure safety** | Your infra tooling and rules |
+| **Environment & file operations** | Your IDE, languages, virtual env setup |
 | **Screenshots** | Your screenshot storage path |
+
+And in `CLAUDE.md`: the skill triggers, if you install a different skill set.
 
 ### settings.json
 - **permissions.allow**: Add Bash patterns for commands you frequently approve
@@ -225,6 +246,8 @@ Custom skills extend Claude Code with repeatable workflows:
 - **claude-md-optimizer** - Reduces CLAUDE.md token usage by extracting rarely-used sections
 - **graphify** - Turns any input (code, docs, papers, images) into a clustered knowledge graph (HTML + JSON)
 - **raginclude-generator** - Generates a `.raginclude` file to curate what a RAG knowledge base should ingest
+- **disk-doctor** - Disk cleanup + install hygiene: scans home/dev/cache locations, proposes a plan, deletes only via an audited safe-trash helper with one-command undo
+- **unify-agents-md** - Restructures instruction files so `AGENTS.md` is the single canonical guide every coding CLI follows (Claude Code, Codex, Copilot, Gemini, Pi), with `CLAUDE.md`/`GEMINI.md` as thin `@import` pointers
 - **cl-project-init** - *(ChameleonLabs-specific, sanitized)* Example project scaffolder (Next.js SaaS / Python / library templates). Fork and rename for your own company — the `cl-` prefix marks it as company-scoped.
 - **yt-transcript** - Download a YouTube transcript into a local `yt-transcript` project
 - **product-manager** - Full PM toolkit (strategy, discovery, market research, GTM, execution)
@@ -253,18 +276,18 @@ Three output styles for different contexts:
 - **Technical Quality** - Comprehensive analysis with systematic problem-solving
 
 ### Status Line
-`statusline-command.sh` renders a two-line status bar: user@host, working directory, and git branch on line 1; model, context usage, PR badge (color-coded by review state), and vim mode on line 2. When the current session has a messaging channel attached (Discord, Telegram), the channel name appears in its brand color with an "active" suffix — detected live via the process tree, not just pairing files.
+`statusline-command.sh` renders a two-line status bar: user@host, working directory, git branch, and worktree badge on line 1; model, context usage (color-coded: green <50%, yellow 50–79%, red ≥80%), rate-limit badges (5h/7d, for Claude.ai subscribers), PR badge (color-coded by review state), session name, and vim mode on line 2.
 
 ## Design Philosophy
 
 ### Context Efficiency
-The `CLAUDE.md` is kept under ~200 lines by extracting detailed reference material to `instructions/` files. This reduces `/resume` time and token usage while keeping critical rules always loaded.
+The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, the shared `AGENTS.md` holds the house rules, and detailed reference material is extracted to `instructions/` files loaded on demand. This reduces `/resume` time and token usage while keeping critical rules always loaded.
 
 ### Security First
 - Credentials are never stored in project directories
 - Bash commands never contain inline secrets
 - All issues/inputs are treated as untrusted (prompt injection awareness)
-- Supply-chain defense: 7-day minimum package age enforced across npm/pnpm/pip/uv/poetry/cargo (see `CLAUDE.md`)
+- Supply-chain defense: 7-day minimum package age enforced across npm/pnpm/pip/uv/poetry/cargo (see `AGENTS.md`)
 - GitHub Actions: `pull_request_target` is banned — the #1 source of Actions supply-chain compromises
 
 ### Convention Over Configuration

@@ -16,7 +16,7 @@ Reference for file operations and cross-directory workflows.
 
 ### For File Operations
 - Reading: Always provide full path: `Read(file_path="/path/to/project/src/main.py")`
-- Listing: Use absolute paths: `LS(path="/path/to/project/src")`
+- Listing: Use `Glob` or Bash `ls` with absolute paths: `ls -la /path/to/project/src`
 - Editing: Full paths required: `Edit(file_path="/full/path/to/file.py", ...)`
 
 ### For Bash Commands
