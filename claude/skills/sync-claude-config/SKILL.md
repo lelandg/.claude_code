@@ -1,6 +1,6 @@
 ---
 name: sync-claude-config
-description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, statusline, plugins, MCP servers, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
+description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, statusline, guard hooks, plugins, MCP servers, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
 ---
 
 # Sync Claude Code Config to a Remote Host
@@ -49,6 +49,8 @@ claude --version                            # local, for comparison
 | `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. commands that need an admin CLI or virtualenv present only on the dev machine). Never delete remote-only command dirs. |
 | `settings.json` | **Programmatic merge, never replace** (§5) |
 | `statusline-command.sh` + `statusLine` settings block | **Copy + ADAPT** (§5b) — portable script; rewrite the local path-shortening for the remote's project root; back up any host-customized remote copy first |
+| `tools/` | `rsync -a` — portable hook/guard scripts (config-secrets-guard, safe-config-reader). Sync **before** the settings merge so hook commands resolve on the remote |
+| Portable hooks in `settings.json` + cross-CLI hook wiring | **Merge, never clobber** (§5c) — the `hooks` block entries whose commands live under `~/.claude/tools/`, plus `~/.codex/hooks.json`, `~/.gemini/config/hooks.json`, `~/.pi/agent/extensions/*.ts`. Machine-specific hooks NEVER sync. Codex needs a manual per-host trust step (ACTION REQUIRED) |
 | Plugins/marketplaces | Reconcile via `claude plugin` CLI (§6) |
 | MCP servers | **Reconcile user-scope only** (§6b) — plugin MCP servers ride along with §6; skip browser/account-bound ones on a VPS; never touch local/project-scope servers |
 | Claude Code version | `bash -lc "claude update"` on remote to match local |
@@ -152,6 +154,10 @@ Never overwrite. Python-merge with these rules:
 - `statusLine`: set to the local block. It points at the home-relative
   `~/.claude/statusline-command.sh` (portable), so the settings entry itself needs no
   rewrite — the *script* is handled in §5b.
+- `hooks`: handled in §5c — never copy the block wholesale. Local hooks may mix portable
+  guard hooks (commands under `~/.claude/tools/`) with machine-specific ones (absolute
+  local paths outside `~/.claude`); only the former travel, with commands rewritten to
+  `~`-relative form.
 - Validate before push: `python3 -m json.tool`. Push, then re-validate on remote.
 
 ## 5b. Statusline script (`statusline-command.sh`)
@@ -175,6 +181,51 @@ brevity treatment.
    `ssh <host> 'chmod +x ~/.claude/statusline-command.sh'`.
 4. Confirm `jq` exists on the remote (`ssh <host> 'bash -lc "command -v jq"'`); the script
    silently prints empty fields without it. Flag as ACTION REQUIRED if missing.
+
+## 5c. Guard tools + hooks — Claude, Codex, Antigravity, Pi
+
+`~/.claude/tools/config-secrets-guard.py` is a PreToolUse guard (blocks printing
+`config*.yaml` / `.env*` secrets into the transcript) wired into **four** CLIs. It
+speaks two protocols: Claude Code's (which Codex hooks share verbatim) and
+Antigravity's (`--agy` flag). Pi uses a TypeScript port. Sync order matters:
+**tools first, wiring second** — a hook whose script is missing fails on every call.
+
+1. **Sync the tools dir:** `rsync -a ~/.claude/tools/ <host>:~/.claude/tools/` and
+   `ssh <host> 'chmod +x ~/.claude/tools/*.py'`. Confirm `python3` exists on the remote.
+2. **Claude Code (settings.json `hooks`, part of the §5 merge):** carry over local hook
+   entries whose command references `~/.claude/tools/` (rewrite any absolute
+   `/home/<localuser>/` prefix to `~`). PRESERVE every remote hook; NEVER copy
+   machine-specific local hooks (anything referencing paths outside `~/.claude`).
+3. **Codex** (if `codex` on remote): merge into `~/.codex/hooks.json` — same schema as
+   Claude Code hooks. If the file exists, ADD the guard entry, don't replace the file:
+   ```json
+   {"hooks": {"PreToolUse": [{"matcher": "Bash|shell|local_shell|Read|read_file|view_file",
+     "hooks": [{"type": "command", "command": "python3 ~/.claude/tools/config-secrets-guard.py",
+                "timeout": 10, "statusMessage": "Checking for secret-bearing config access"}]}]}}
+   ```
+   **ACTION REQUIRED per host:** Codex trusts hooks per-machine against the file's hash —
+   the user must run `/hooks` in an interactive `codex` session on that host and trust
+   `config-secrets-guard`, and re-trust after any script change. Until then Codex
+   **silently skips** the hook (headless timers included) — say so in the report.
+4. **Antigravity/agy** (if `agy` on remote): merge into `~/.gemini/config/hooks.json`
+   (named-hook schema; preserve other named hooks):
+   ```json
+   {"config-secrets-guard": {"PreToolUse": [{"matcher": ".*",
+     "hooks": [{"type": "command", "command": "python3 ~/.claude/tools/config-secrets-guard.py --agy",
+                "timeout": 10}]}]}}
+   ```
+5. **Pi** (if `pi` on remote): `ssh <host> 'mkdir -p ~/.pi/agent/extensions'` then
+   `scp ~/.pi/agent/extensions/config-secrets-guard.ts <host>:~/.pi/agent/extensions/`.
+   Pi loads global extensions automatically; a broken extension errors at startup, and
+   `tool_call` handler errors fail-safe (block).
+6. **Verify without tripping the local guard:** any inline command containing both a
+   print-tool word (`cat`, `sed`, …) and a secret filename (`config.yaml`, `.env`) gets
+   blocked by the LOCAL guard before it ever reaches ssh. So build fixtures indirectly —
+   write the test JSON with the Write tool or a python one-liner that string-concatenates
+   the filename (`'config' + '.yaml'`) — scp them over, then run
+   `ssh <host> 'python3 ~/.claude/tools/config-secrets-guard.py < /tmp/fx-claude.json'`
+   (expect the `permissionDecision: deny` JSON) and the same with `--agy` against an
+   agy-shaped fixture (expect `{"decision": "deny", ...}`).
 
 ## 6. Plugins & marketplaces (on the remote, via `bash -lc`)
 
@@ -246,7 +297,9 @@ ssh <host> 'bash -lc "claude --version; cd ~ && claude -p \"Reply with exactly: 
 Write a summary to the current project's `Notes/` (check casing conventions):
 what synced, what was skipped and why, dropped permission rules, **which non-Claude
 CLIs were wired to the shared house-rules file** (and any — e.g. `agy` — left
-pending a probe), **statusline** result (adapted path root, or host-customized copy
+pending a probe), **guard hooks** (§5c: tools synced, which CLIs got hook wiring,
+fixture-test results, and the standing Codex-trust ACTION REQUIRED), **statusline**
+result (adapted path root, or host-customized copy
 preserved + `jq` presence), **MCP servers** reconciled vs. skipped (which user-scope
 servers were re-created, which were skipped as browser/account/cred-bound), repo
 housekeeping flags found along the way (unpushed commits, diverged branches — flag,

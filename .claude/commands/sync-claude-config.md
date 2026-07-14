@@ -1,5 +1,5 @@
 ---
-description: Sync Claude Code + cross-CLI config (AGENTS.md, CLAUDE.md, GEMINI.md, agents, skills, settings, statusline, plugins, MCP servers) from this machine to an SSH host
+description: Sync Claude Code + cross-CLI config (AGENTS.md, CLAUDE.md, GEMINI.md, agents, skills, settings, statusline, guard hooks, plugins, MCP servers) from this machine to an SSH host
 argument-hint: "[host] — ssh alias from ~/.ssh/config; omit to discover and choose"
 ---
 
