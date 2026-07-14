@@ -59,6 +59,8 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   └── plan-templates.md          # Implementation plan format
 │   ├── tools/                         # Hook scripts wired in settings.json
 │   │   ├── config-secrets-guard.py    # PreToolUse hook: blocks printing config*.yaml / .env* secrets
+│   │   │                              #   (also speaks Codex hooks + Antigravity --agy protocols)
+│   │   ├── config-secrets-guard.pi.ts # Same guard as a Pi extension (~/.pi/agent/extensions/)
 │   │   └── safe-config-reader.py      # Masked config reader (structure only, strings hidden)
 │   ├── output-styles/                 # Output formatting styles
 │   │   ├── genui.md                   # Generative UI (HTML output)
@@ -287,6 +289,21 @@ Three output styles for different contexts:
 
 ### Config Secrets Guard
 A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) blocks any Bash command or Read call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript — where it could be logged or shared. The companion `tools/safe-config-reader.py` prints a config file's structure with every string value masked, so agents can debug configuration without ever seeing the secrets. A human-approved `# config-ok` suffix is the escape hatch for write-only commands (e.g. `sed -i`).
+
+The same guard extends to the other agent CLIs:
+
+- **Codex CLI** — Codex hooks speak the same protocol as Claude Code. Add to `~/.codex/hooks.json`:
+  ```json
+  {"hooks": {"PreToolUse": [{"matcher": "Bash|shell|local_shell|Read|read_file|view_file",
+    "hooks": [{"type": "command", "command": "python3 /home/<USER>/.claude/tools/config-secrets-guard.py", "timeout": 10}]}]}}
+  ```
+  Then run `/hooks` inside Codex once to review and **trust** the hook (untrusted hooks are silently skipped).
+- **Antigravity CLI (`agy`)** — different hook protocol (`toolCall.args` in, `{"decision": "deny"}` out); the script handles it via the `--agy` flag. Add to `~/.gemini/config/hooks.json`:
+  ```json
+  {"config-secrets-guard": {"PreToolUse": [{"matcher": ".*",
+    "hooks": [{"type": "command", "command": "python3 /home/<USER>/.claude/tools/config-secrets-guard.py --agy", "timeout": 10}]}]}}
+  ```
+- **Pi** — no external-command hooks; `tools/config-secrets-guard.pi.ts` is a TypeScript port of the same rules as a Pi extension. Copy it to `~/.pi/agent/extensions/` and it blocks `bash`/`read` tool calls globally.
 
 ## Design Philosophy
 
