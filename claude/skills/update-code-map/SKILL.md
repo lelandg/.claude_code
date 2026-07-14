@@ -1,294 +1,110 @@
 ---
 name: update-code-map
-description: Update or maintain the CodeMap.md file based on recent code changes. Use this skill when users ask to update the code map, refresh documentation line numbers, document new files, or keep the codebase navigation guide current. Triggers on requests like "update the code map", "refresh CodeMap", "the code map is outdated", or "update line numbers in documentation".
+description: Use when users ask to update or create the code map / CodeMap.md, refresh documentation line numbers, document new files, or when Docs/CodeMap.md is missing or older than 7 days. Triggers on "update the code map", "refresh CodeMap", "the code map is outdated", "update line numbers in documentation".
 ---
 
 # Update Code Map
 
-Update or create a comprehensive CodeMap.md file for navigating the codebase.
+Create or update `Docs/CodeMap.md`, the codebase navigation guide.
 
-## What This Skill Does
+## Core Principle
 
-This skill creates or updates the `Docs/CodeMap.md` file, which serves as the definitive navigation guide for the codebase. It provides:
-- Exact line numbers for all classes, methods, and functions
-- Visual architecture diagrams
-- Cross-module dependencies
-- Quick navigation to primary entry points
+**Line numbers come from a deterministic extractor; agents write prose; a
+separate verify pass checks the result.** An LLM must never estimate a line
+number — estimated numbers drift by hundreds of lines and nothing catches it.
 
-## Process Overview
+## Process
 
-### 1. Check Current State
-
-First, determine what needs to be done:
+### 1. Scout (inline, no agents)
 
 ```bash
-# Check if CodeMap exists and when it was last updated
-if [ -f Docs/CodeMap.md ]; then
-    head -5 Docs/CodeMap.md
-    echo "CodeMap exists. Checking for updates needed..."
-else
-    echo "No CodeMap found. Will create new one."
-fi
-
-# Get current timestamp for the update
-date +"%Y-%m-%d %H:%M:%S"
+date +"%Y-%m-%d %H:%M:%S"                      # real timestamp — never guess
+head -3 Docs/CodeMap.md                        # last-updated, if it exists
+git log --since="<last-updated>" --name-only --pretty=format: | sort -u  # changed files
 ```
 
-### 2. Analyze Recent Changes
+Exclude vendored/generated trees everywhere: `.venv*`, `node_modules`,
+`__pycache__`, `.repo_cache`, `bin`, `obj`, `dist`, `build`, `.git`.
 
-If updating an existing CodeMap:
+### 2. Build the symbol inventory (ground truth)
 
 ```bash
-# Get the last update timestamp from CodeMap
-# Then check git history since that date
-git log --since="YYYY-MM-DD HH:MM:SS" --name-status --oneline
-
-# Get summary of changes
-git diff --stat HEAD~10
+python3 ~/.claude/skills/update-code-map/references/extract_symbols.py \
+    --root . --out <scratchpad>/inventory.json
 ```
 
-Identify:
-- New files added
-- Files deleted or renamed
-- Files with significant changes (structure, classes, methods)
+Python is parsed with `ast` (exact lines + end lines + signatures); JS/TS/C#/XAML
+fall back to regex scanning. Every line number in the CodeMap is copied from
+this file. Spot-check two entries with `sed -n '<line>p' <file>` before trusting
+a fresh run on a new language.
 
-### 3. Detect Programming Languages
+### 3. Pick the execution mode
 
-Scan the project to identify primary languages:
+| Condition | Mode |
+|---|---|
+| < ~30 source files AND < ~10k source lines | **SINGLE-AGENT** — skip the workflow; document directly from the inventory, following the spec |
+| CodeMap exists and < ~25% of source files changed since last update | **INCREMENTAL** — regenerate only the module groups containing changed files; splice into the existing map |
+| No CodeMap, placeholder line numbers found, or widespread changes | **FULL** — regenerate all sections |
 
-```bash
-# Find language distribution
-find . -type f -name "*.py" | wc -l    # Python
-find . -type f -name "*.cs" | wc -l    # C#
-find . -type f -name "*.xaml" | wc -l  # XAML
-find . -type f -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | wc -l  # JavaScript/TypeScript
-```
+### 4. Orchestrate with the Workflow tool (INCREMENTAL / FULL)
 
-### 4. Apply Language-Specific Guidelines
+Group files into module groups of ≤ ~8k source lines (a file > 5k lines gets
+its own group; group by package/subsystem, not alphabetically). Then adapt the
+script in `references/workflow-template.md`:
 
-Based on detected languages, reference the appropriate guideline files:
+- **Document phase** — `pipeline()` over groups, one agent each; agents read
+  the inventory for line numbers and the source for prose only.
+- **Dependencies phase** — one agent, after a barrier (it needs all sections).
+- **Verify phase** — an independent spot-checker per section runs
+  `sed -n '<line>p' <file>` against ≥12 sampled claims and reports mismatches.
 
-**Available Language Guidelines:**
-- `@update-code-map/python-guidelines.md` - For Python projects
-- `@update-code-map/csharp-guidelines.md` - For C# projects
-- `@update-code-map/xaml-guidelines.md` - For XAML files
-- `@update-code-map/javascript-guidelines.md` - For JavaScript/TypeScript
+Fix reported mismatches from the inventory; don't re-run the workflow.
 
-**How to use these guidelines:**
-1. Read the relevant language guideline file(s) based on project languages
-2. Follow the table structures and documentation patterns specified
-3. Use the language-specific sections (properties, methods, etc.) as defined
-4. Document language-specific patterns (async, generics, LINQ, etc.)
+### 5. Assemble mechanically
 
-### 5. Follow Base Specification
+Follow the required structure in the base spec —
+`~/.claude/agents/specs/CLAUDE_CodeMap.md` — and the language guidelines in
+`references/` (`python-guidelines.md`, `csharp-guidelines.md`,
+`javascript-guidelines.md`, `xaml-guidelines.md`).
 
-**CRITICAL**: Always adhere to the base specification at:
-- `@~/.claude/agents/specs/CLAUDE_CodeMap.md`
+- Timestamp: `*Last Updated: YYYY-MM-DD HH:MM:SS*` from `date`, not memory.
+- ASCII diagram boxes: compute padding mathematically (max content width + 4);
+  verify every line of a box has identical width with a python one-liner —
+  including diagrams carried over from the previous CodeMap.
+- INCREMENTAL: splice regenerated sections in place; keep untouched sections;
+  update the timestamp and TOC for the whole file.
+- TOC line numbers **last**, after every other edit: `grep -n "^## "` on the
+  final content, fill in the numbers, verify each entry points at its heading.
+  Any later content change — even removing a duplicate heading — shifts every
+  number. Never leave `[ACTUAL_LINE]` placeholders.
+- Final gate before installing: random-sample ~25 `file:line` claims and check
+  each with `sed -n '<line>p' <file>`.
 
-This specification defines:
-- Required structure and section order
-- Table of contents with line numbers
-- Visual architecture diagrams
-- Quality standards
+### 6. Report
 
-### 6. Generate Visual Architecture Diagram
+Summarize: files/symbols documented, mode used, verification stats
+(claims checked, mismatches found and fixed), CodeMap location and total lines.
 
-**MANDATORY BOX ALIGNMENT ALGORITHM:**
+## Red Flags — STOP
 
-When creating ASCII diagrams, follow this EXACT algorithm:
+- You are about to write a line number you didn't copy from the inventory or a
+  `grep -n`/`sed -n` result. **Stop — re-extract.**
+- "The file barely changed, the old line numbers are probably close." Close is
+  wrong. A 22k-line file drifts +3,000 lines in a few months.
+- "Reading the whole 20k-line file to document it." Read selectively around
+  inventory line numbers.
+- Skipping the verify phase "because the inventory is deterministic." Prose
+  agents still mis-copy; verification is cheap.
+- Running a FULL rebuild when only a handful of files changed — that cost is
+  why code maps go stale. Prefer INCREMENTAL.
 
-```python
-def create_box(lines):
-    # Step 1: Find maximum line length
-    max_length = max(len(line) for line in lines)
+## Common Mistakes
 
-    # Step 2: Calculate box width (add 4 for borders and padding)
-    box_width = max_length + 4
-
-    # Step 3: Create borders
-    top = "┌" + "─" * (box_width - 2) + "┐"
-    bottom = "└" + "─" * (box_width - 2) + "┘"
-
-    # Step 4: Create padded lines
-    middle = []
-    for line in lines:
-        padding = " " * (box_width - len(line) - 4)
-        middle.append("│ " + line + padding + " │")
-
-    return [top] + middle + [bottom]
-```
-
-**Verification checklist:**
-- [ ] All lines in a box have EXACT same character count
-- [ ] Closing `│` aligns perfectly in same column
-- [ ] Top and bottom borders have same length
-- [ ] Boxes in same row have identical widths
-- [ ] Used mathematical padding calculation, not visual estimation
-
-### 7. Extract Code Elements with Line Numbers
-
-For each significant file, extract:
-
-**For Python:**
-- Module-level: imports, constants, variables
-- Classes: properties, methods (regular, @classmethod, @staticmethod, @property)
-- Functions: module-level functions
-- Data structures: @dataclass, NamedTuple, TypedDict
-
-**For C#:**
-- Namespaces, classes, interfaces, structs, enums, records
-- Properties (auto, computed, init-only)
-- Methods (regular, async, generic, extension)
-- Events, delegates, constructors
-
-**For XAML:**
-- Root element properties
-- Named elements (x:Name)
-- Data bindings
-- Resources (styles, templates, brushes)
-- Event handlers
-
-**For JavaScript/TypeScript:**
-- Imports/exports
-- Classes, interfaces, types, enums
-- Functions (regular, async, arrow)
-- React: components, hooks, props, state
-- Node.js: routes, middleware, controllers
-
-### 8. Document Cross-File Dependencies
-
-Track how modules/classes interact:
-
-```markdown
-## Cross-File Dependencies
-
-### Authentication State
-**Managed by**: `core/auth.py:45` (AuthManager class)
-**Consumed by**:
-- `gui/main_window.py:120` - Shows user info
-- `api/endpoints.py:30` - Validates requests
-- `middleware/auth.py:15` - JWT middleware
-```
-
-### 9. Update Line Number Tables of Contents
-
-**CRITICAL TWO-PASS APPROACH:**
-
-**Pass 1:** Generate all content
-**Pass 2:** Count actual line numbers and update TOCs
-
-```bash
-# After writing Docs/CodeMap.md
-# Read it back and count line numbers where ## sections appear
-grep -n "^## " Docs/CodeMap.md
-
-# Update the main TOC with these actual line numbers
-```
-
-**NEVER leave placeholder values** like `[ACTUAL_LINE]` in the final document.
-
-### 10. Quality Assurance
-
-Before finalizing, verify:
-
-- [ ] Timestamp updated: `*Last Updated: YYYY-MM-DD HH:MM:SS*` (use `date +"%Y-%m-%d %H:%M:%S"`)
-- [ ] All line numbers verified and accurate
-- [ ] New files documented with line numbers
-- [ ] Deleted files removed
-- [ ] Cross-references validated
-- [ ] Visual diagrams follow box alignment algorithm
-- [ ] TOC has real line numbers (not placeholders)
-- [ ] Language-specific patterns documented per guidelines
-- [ ] Every public method/function has line number
-- [ ] File sizes (line counts) included
-
-## Required CodeMap Structure
-
-Follow this exact order:
-
-1. **Header** - Title and timestamp
-2. **Table of Contents** - Main TOC with line numbers
-3. **Quick Navigation** - Primary entry points
-4. **Visual Architecture Overview** - ASCII diagram
-5. **Project Structure** - Directory tree
-6. **Core Configuration Files** - Config file listings
-7. **Detailed Component Documentation** - File-by-file breakdown
-8. **Cross-File Dependencies** - Module relationships
-9. **Configuration Files** - Build/package configs
-10. **Architecture Patterns** - Design patterns used
-11. **Development Guidelines** - How to extend
-12. **Performance Considerations** - Optimization notes
-
-## Example Workflow
-
-```bash
-# 1. Get current timestamp
-TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-
-# 2. Check existing CodeMap
-if [ -f Docs/CodeMap.md ]; then
-    LAST_UPDATE=$(grep "Last Updated:" Docs/CodeMap.md | head -1)
-    echo "Last updated: $LAST_UPDATE"
-fi
-
-# 3. Scan for languages
-echo "Detecting languages..."
-PY_COUNT=$(find . -name "*.py" -type f | wc -l)
-CS_COUNT=$(find . -name "*.cs" -type f | wc -l)
-XAML_COUNT=$(find . -name "*.xaml" -type f | wc -l)
-JS_COUNT=$(find . -name "*.js" -o -name "*.ts" -type f | wc -l)
-
-echo "Python files: $PY_COUNT"
-echo "C# files: $CS_COUNT"
-echo "XAML files: $XAML_COUNT"
-echo "JS/TS files: $JS_COUNT"
-
-# 4. Read appropriate language guidelines
-# (Based on detected languages, read the corresponding guideline files)
-
-# 5. Extract file structure
-tree -L 3 -I '__pycache__|node_modules|.venv*|bin|obj'
-
-# 6. Generate CodeMap content
-# (Follow base spec + language-specific guidelines)
-
-# 7. Verify line numbers
-grep -n "^## " Docs/CodeMap.md
-
-# 8. Present to user for review
-```
-
-## Important Notes
-
-- **Never guess dates** - Always use `date +"%Y-%m-%d %H:%M:%S"`
-- **Verify line numbers** - Use `grep -n` or editor line counts
-- **Mathematical box padding** - Calculate, don't estimate visually
-- **Language-specific tables** - Use appropriate columns for each language
-- **Two-pass TOC** - Generate content first, then update line numbers
-- **Quality over speed** - Completeness and accuracy are critical
-
-## Output
-
-Present a summary when done:
-
-```
-Code Map Update Complete
-========================
-
-✓ Updated timestamp: YYYY-MM-DD HH:MM:SS
-✓ Analyzed N files across M languages
-✓ Documented X classes, Y methods, Z functions
-✓ Created/updated visual architecture diagram
-✓ Updated all line numbers in TOCs
-✓ Verified all cross-references
-
-Languages detected and documented:
-- Python: N files
-- C#: M files
-- XAML: P files
-
-CodeMap location: Docs/CodeMap.md
-Total lines: NNNN
-```
-
-Ready for review!
+| Mistake | Fix |
+|---|---|
+| LLM-estimated line numbers | Copy from `inventory.json` only |
+| One agent reads the whole repo | Fan out per module group via Workflow |
+| Documenting `.repo_cache`/vendored clones | Use the extractor's default excludes |
+| TOC written before content | Two-pass: content, then `grep -n "^## "` |
+| Box borders eyeballed | Mathematical padding + width check |
+| Guessed timestamp | `date +"%Y-%m-%d %H:%M:%S"` |

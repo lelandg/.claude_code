@@ -54,8 +54,12 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │       └── CLAUDE_CodeMap.md      # CodeMap spec (copy for agent access)
 │   ├── instructions/                  # On-demand reference docs
 │   │   ├── credentials.md             # Secrets management patterns
+│   │   ├── file-dispositions.md       # Standing approvals for working-tree files (template)
 │   │   ├── file-operations.md         # File operation guidelines
 │   │   └── plan-templates.md          # Implementation plan format
+│   ├── tools/                         # Hook scripts wired in settings.json
+│   │   ├── config-secrets-guard.py    # PreToolUse hook: blocks printing config*.yaml / .env* secrets
+│   │   └── safe-config-reader.py      # Masked config reader (structure only, strings hidden)
 │   ├── output-styles/                 # Output formatting styles
 │   │   ├── genui.md                   # Generative UI (HTML output)
 │   │   ├── html.md                    # HTML/web development focus
@@ -240,7 +244,7 @@ Six specialized agents for different tasks. Each has a focused system prompt, sp
 ### Skills
 Custom skills extend Claude Code with repeatable workflows:
 
-- **update-code-map** - Maintains a comprehensive CodeMap.md for codebase navigation
+- **update-code-map** - Maintains a comprehensive CodeMap.md for codebase navigation; line numbers come from a deterministic symbol extractor (`references/extract_symbols.py`) with a parallel document/verify workflow — never LLM-estimated
 - **feature-documenter** - Generates user-facing feature documentation from code analysis
 - **project-documenter** - Per-project user-facing feature docs + sitemap
 - **technical-documenter** - Developer and support-staff documentation (APIs, data models, errors)
@@ -280,6 +284,9 @@ Three output styles for different contexts:
 
 ### Status Line
 `statusline-command.sh` renders a two-line status bar: user@host, working directory, git branch, and worktree badge on line 1; model, context usage (color-coded: green <50%, yellow 50–79%, red ≥80%), rate-limit badges (5h/7d, for Claude.ai subscribers), PR badge (color-coded by review state), session name, and vim mode on line 2.
+
+### Config Secrets Guard
+A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) blocks any Bash command or Read call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript — where it could be logged or shared. The companion `tools/safe-config-reader.py` prints a config file's structure with every string value masked, so agents can debug configuration without ever seeing the secrets. A human-approved `# config-ok` suffix is the escape hatch for write-only commands (e.g. `sed -i`).
 
 ## Design Philosophy
 

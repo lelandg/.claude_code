@@ -52,6 +52,7 @@ Scan the repo for installable files and compare against user's existing config.
 | `claude/skills/*/SKILL.md` | `~/.claude/skills/*/SKILL.md` | Skills |
 | `claude/skills/*/references/*` | `~/.claude/skills/*/references/*` | Skill refs |
 | `claude/skills/time.md` | `~/.claude/skills/time.md` | Skill |
+| `claude/tools/*.py` | `~/.claude/tools/*.py` | Hook tools (secrets guard; wired via `hooks` in settings.json) |
 
 **Skip these files** (repo-specific, not user config):
 - `README.md`, `claude/agents/README.md` - repo documentation

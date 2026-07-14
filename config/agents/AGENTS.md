@@ -100,6 +100,32 @@ guess or hallucinate one.
 - Prefer a specialized agent/subagent when one fits the task.
 - Keep changes scoped; verify before claiming done (see Pre-commit checks).
 
+### Branching & working-tree hygiene (CRITICAL)
+
+Local `main` and the working tree often carry things that must not leak into
+a PR — unpushed commit-not-push commits (e.g. generated snapshot files kept
+local on purpose), WIP script edits from the user running tools locally,
+untracked scratch files.
+
+1. **Always cut feature branches from `origin/main`, never local `main`:**
+   `git fetch && git checkout -b feat/x origin/main`.
+2. **Before branching, triage the working tree.** If `git status` shows
+   modified or untracked files, consult
+   `~/.claude/instructions/file-dispositions.md`: apply any standing default
+   silently; for everything else, **prompt the user** to commit to main / add
+   to .gitignore / leave as WIP — with your recommendation — and **record the
+   answer in that file** so no one asks twice.
+3. **Before pushing any branch**, check `git log --oneline origin/main..HEAD`
+   for commits that aren't yours; drop or rebase them out rather than
+   publishing them.
+4. **Small, low-impact changes go straight to `main` — no branch, no PR.**
+   Docs/comments, config tweaks, one-file fixes, generated-file housekeeping:
+   commit on `main` and push directly (once the user has asked for the change,
+   that includes the push). Reserve feature branches + PRs for substantial or
+   risky work — multi-file features, behavior changes, anything that could
+   break production or that wants review. When genuinely unsure which side a
+   change falls on, default to a branch.
+
 ### Delegating to subagents
 
 If you spawn a subagent and it reports creating a file, **verify the file
