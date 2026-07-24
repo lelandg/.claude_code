@@ -251,9 +251,9 @@
     <table>
       <tr><th>Component</th><th>What it gives you</th></tr>
       <tr><td>6 custom agents</td><td>Specialists for code review, engineering, performance, docs, research, and testing</td></tr>
-      <tr><td>14+ skills</td><td>Repeatable workflows like CodeMap maintenance, doc generation, and knowledge graphs</td></tr>
-      <tr><td><code class="inline">CLAUDE.md</code></td><td>Global instructions Claude reads every session — security rules, date handling, conventions</td></tr>
-      <tr><td><code class="inline">settings.json</code></td><td>Sensible permissions, enabled plugins, and a custom status line</td></tr>
+      <tr><td>20+ skills</td><td>Repeatable workflows like CodeMap maintenance, doc generation, disk cleanup, and knowledge graphs</td></tr>
+      <tr><td><code class="inline">AGENTS.md</code> + <code class="inline">CLAUDE.md</code></td><td>Shared house rules every AI coding CLI follows, plus a thin Claude-Code-specific file that imports them</td></tr>
+      <tr><td><code class="inline">settings.json</code></td><td>Sensible permissions, enabled plugins, a secrets-guard hook, and a custom status line</td></tr>
       <tr><td>Output styles</td><td>Three formatting modes: GenUI, HTML, and Technical Quality</td></tr>
     </table>
     <div class="callout tip">
@@ -341,8 +341,12 @@ claude .</pre>
       <div class="code">
         <div class="code-label"><span>terminal</span><button class="copy-btn" type="button">Copy</button></div>
         <pre data-copy="git clone https://github.com/lelandg/.claude_code.git
-cp -r .claude_code/claude/* ~/.claude/">git clone https://github.com/lelandg/.claude_code.git
-cp -r .claude_code/claude/* ~/.claude/</pre>
+cp -r .claude_code/claude/* ~/.claude/
+mkdir -p ~/.config/agents
+cp .claude_code/config/agents/AGENTS.md ~/.config/agents/AGENTS.md">git clone https://github.com/lelandg/.claude_code.git
+cp -r .claude_code/claude/* ~/.claude/
+mkdir -p ~/.config/agents
+cp .claude_code/config/agents/AGENTS.md ~/.config/agents/AGENTS.md</pre>
       </div>
       <div class="callout warn">
         <span class="ico">⚠️</span>
@@ -364,7 +368,9 @@ cp -r claude/skills/* ~/.claude/skills/
 # Just the output styles
 cp claude/output-styles/*.md ~/.claude/output-styles/
 
-# Just the global instructions file
+# Just the house rules + global instructions file
+mkdir -p ~/.config/agents
+cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 cp claude/CLAUDE.md ~/.claude/CLAUDE.md"><span class="c"># Just the agents</span>
 cp claude/agents/*.md ~/.claude/agents/
 
@@ -374,7 +380,9 @@ cp -r claude/skills/* ~/.claude/skills/
 <span class="c"># Just the output styles</span>
 cp claude/output-styles/*.md ~/.claude/output-styles/
 
-<span class="c"># Just the global instructions file</span>
+<span class="c"># Just the house rules + global instructions file</span>
+mkdir -p ~/.config/agents
+cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 cp claude/CLAUDE.md ~/.claude/CLAUDE.md</pre>
       </div>
     </div>
@@ -387,11 +395,13 @@ cp claude/CLAUDE.md ~/.claude/CLAUDE.md</pre>
       <p>The config ships with placeholders so no one's personal info leaks into the repo.
       Make these four changes and you're done.</p>
 
-      <h3>3a · Put your name in CLAUDE.md</h3>
-      <p>Open <code class="inline">~/.claude/CLAUDE.md</code> in any editor and replace the placeholder
+      <h3>3a · Put your name in AGENTS.md</h3>
+      <p>Your contact info lives in the shared house-rules file that every AI coding CLI reads
+      (<code class="inline">~/.claude/CLAUDE.md</code> imports it on line 1). Open
+      <code class="inline">~/.config/agents/AGENTS.md</code> in any editor and replace the placeholder
       contact table at the top with your own details:</p>
       <div class="code">
-        <div class="code-label"><span>~/.claude/CLAUDE.md</span><button class="copy-btn" type="button">Copy</button></div>
+        <div class="code-label"><span>~/.config/agents/AGENTS.md</span><button class="copy-btn" type="button">Copy</button></div>
         <pre data-copy="| Your Name | your-github-username | your-discord-username |">| Your Name | your-github-username | your-discord-username |</pre>
       </div>
 
@@ -454,7 +464,7 @@ cp claude/CLAUDE.md ~/.claude/CLAUDE.md</pre>
         <tr><td><code class="inline">code-review</code></td><td>Code review workflow with PR integration</td></tr>
         <tr><td><code class="inline">commit-commands</code></td><td>Git commit, push, and PR creation skills</td></tr>
         <tr><td><code class="inline">frontend-design</code></td><td>Frontend design skills and workflows</td></tr>
-        <tr><td><code class="inline">feature-dev</code></td><td>Guided feature development workflow</td></tr>
+        <tr><td><code class="inline">hookify</code></td><td>Turn observed mistakes into guard hooks that prevent repeats</td></tr>
         <tr><td><code class="inline">security-guidance</code></td><td>Security best practices and vulnerability analysis</td></tr>
         <tr><td><code class="inline">context7</code></td><td>Fetches up-to-date library documentation</td></tr>
         <tr><td><code class="inline">example-skills</code></td><td>Anthropic's example skill collection (PDF, DOCX, design…)</td></tr>
@@ -487,7 +497,7 @@ cp claude/CLAUDE.md ~/.claude/CLAUDE.md</pre>
         <li><strong>Skills loaded</strong> — type <code class="inline">/</code> and you should see commands like <code class="inline">/install-claude-config</code> in the list</li>
         <li><strong>Agents working</strong> — ask <em>"review this code"</em> on any file; the code-reviewer agent should activate</li>
         <li><strong>GitHub MCP</strong> — ask Claude about one of your GitHub repos; it should fetch real data</li>
-        <li><strong>No placeholders</strong> — your name is in <code class="inline">CLAUDE.md</code>, your username is in <code class="inline">settings.json</code></li>
+        <li><strong>No placeholders</strong> — your name is in <code class="inline">~/.config/agents/AGENTS.md</code>, your username is in <code class="inline">settings.json</code></li>
       </ul>
       <div class="callout tip">
         <span class="ico">✅</span>

@@ -94,8 +94,11 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── update-code-map/           # CodeMap maintenance skill
 │       ├── update-hermes/             # Backup-first Hermes Agent updater
 │       └── yt-transcript/             # Download YouTube transcripts
-└── Docs/
-    └── SETUP_GUIDE.md                 # Full setup & configuration guide
+├── Docs/
+│   ├── SETUP_GUIDE.md                 # Full setup & configuration guide
+│   ├── install-guide.html             # Beginner-friendly visual install guide
+│   └── plans/                         # Design docs for features built in this repo
+└── CHANGELOG.md                       # Plain-English history of what changed and why
 ```
 
 ## Installation
@@ -144,9 +147,11 @@ The command is available immediately after cloning — no pre-installation neede
 ```bash
 git clone https://github.com/lelandg/.claude_code.git
 cp -r .claude_code/claude/* ~/.claude/
+mkdir -p ~/.config/agents
+cp .claude_code/config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 ```
 
-> **Note:** This overwrites existing files without merging. Back up `~/.claude/` first if you have existing config.
+> **Note:** This overwrites existing files without merging. Back up `~/.claude/` first if you have existing config. The `AGENTS.md` copy matters — `CLAUDE.md` line 1 `@import`s it.
 
 ---
 
