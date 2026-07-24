@@ -222,7 +222,7 @@ allowance, not API price — re-rate from your own observed work):
 | model | quota | intelligence | taste |
 |---|---:|---:|---:|
 | fable-5 | 6 | 9 | 9 |
-| opus-4.8 | 7 | 8 | 8 |
+| opus-5 | 7 | 9 | 8 |
 | sonnet-5 | 8 | 7 | 7 |
 | gpt-5.6-sol | 8 | 9 | 9 |
 | gpt-5.6-terra | 9 | 9 | 8 |
