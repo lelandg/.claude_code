@@ -42,9 +42,29 @@ At startup, if `./CLAUDE.md` exists and there's no project-level
 When presenting non-visual options to me, use the `AskUserQuestion` tool. (Visual
 artifacts → HTML file, per the shared output rules.)
 
+## Codex delegation (GPT-5.6) — plugin mechanics
+
+The shared rules' "Model delegation & cross-provider review" section is
+implemented here by the `codex` plugin (full guide:
+`~/.claude/instructions/model-delegation.md`):
+
+- `/codex:review [--base <ref>]` and `/codex:adversarial-review [focus ...]` —
+  read-only reviews; they inherit Sol from `~/.codex/config.toml` (the only
+  place Sol is allowed). Commit everything first.
+- `/codex:rescue --model gpt-5.6-terra|gpt-5.6-luna --effort <e> [--background] <task>`
+  — **`--model` is mandatory** (unpinned would inherit Sol, which is
+  review-only). Plugin caps effort at `xhigh` (`max` exists in the CLI/API but
+  the plugin rejects it — workaround in the guide); multi-file jobs → `--background`.
+- `/codex:status` / `/codex:result` / `/codex:cancel` — background jobs;
+  `/codex:setup` — health check. There is no `/codex:transfer`.
+- Leave the stop-review gate disabled (`/codex:setup` shows its state).
+
 ## Custom skill triggers
 
 - `/sync-claude-config [host]` — push this machine's Claude Code config (agents,
   skills, CLAUDE.md, settings, plugins) to an SSH host (`skill: sync-claude-config`;
   discovers hosts from `~/.ssh/config`).
 - `/graphify` — any input → knowledge graph (`skill: graphify`).
+- `/model-registry [install|migrate|status|refresh-fallback]` — wire current LLM
+  model IDs from the published registry into any project (`skill: model-registry`;
+  clients: https://github.com/Chameleon-Labs-LLC/model-registry-client).

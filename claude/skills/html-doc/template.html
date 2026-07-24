@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}} | ChameleonLabs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Albert+Sans:ital,wght@0,300..800;1,300..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME SYSTEM ============
+     :root = this document's default theme. The [data-theme] block = the other.
+     Pick which is default per document; BOTH must be complete.
+     Every color in the document must come from these variables. */
+  :root {
+    /* dark editorial palette */
+    --bg: #10140f;
+    --bg-2: #1f2719;
+    --card: #181e16;
+    --edge: #2c3527;
+    --text: #eef0e8;
+    --text-soft: #aab4a2;
+    --text-faint: #7d8579;
+    --accent: #6fdc6f;       /* chameleon leaf */
+    --accent-2: #3f8f44;     /* dimmer accent for borders */
+    --warn: #f2b13c;
+    --danger: #e0654f;
+    --dot: rgba(238,240,232,0.035);   /* background dot grid */
+    --glow: rgba(111,220,111,0.10);   /* radial accent glow */
+    --shadow: rgba(0,0,0,0.4);
+    --mono: 'IBM Plex Mono', monospace;
+    color-scheme: dark;
+  }
+  [data-theme="light"] {
+    /* light "paper" palette */
+    --bg: #f6f3ec;
+    --bg-2: #efeadf;
+    --card: #fffdf8;
+    --edge: #d8d2c2;
+    --text: #1d231c;
+    --text-soft: #4a5347;
+    --text-faint: #7d8579;
+    --accent: #2e7d32;
+    --accent-2: #7cb87f;
+    --warn: #b97309;
+    --danger: #b03a2e;
+    --dot: rgba(29,35,28,0.05);
+    --glow: rgba(67,160,71,0.10);
+    --shadow: rgba(29,35,28,0.10);
+    color-scheme: light;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Albert Sans', sans-serif;
+    font-size: 17px;
+    line-height: 1.66;
+    transition: background-color 0.35s ease, color 0.35s ease;
+  }
+  /* atmosphere: dot grid + top accent glow */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% -5%, var(--glow), transparent 60%),
+      radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
+    background-size: auto, 28px 28px;
+  }
+  .sheet { max-width: 900px; margin: 0 auto; padding: 0 28px 90px; position: relative; z-index: 1; }
+
+  /* ============ MASTHEAD ============ */
+  header.masthead { padding: 56px 0 36px; }
+  .kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 28px;
+  }
+  .kicker .brand::before { content: "◆ "; color: var(--warn); }
+  .kicker a { color: var(--accent); text-decoration: none; }
+  .kicker a:hover { text-decoration: underline; }
+  .kicker-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .theme-toggle {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+    background: var(--card); border: 1px solid var(--edge); border-radius: 99px;
+    color: var(--text-soft); padding: 3px 12px; cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  h1 {
+    font-family: 'Fraunces', serif; font-weight: 850;
+    font-size: clamp(40px, 7vw, 72px); line-height: 1.04; letter-spacing: -0.015em;
+  }
+  h1 em { font-style: italic; font-weight: 460; color: var(--accent); }
+  .dek { margin-top: 22px; font-size: clamp(18px, 2.3vw, 21px); font-weight: 330; color: var(--text-soft); max-width: 680px; }
+  .dek strong { color: var(--text); }
+
+  /* ============ SECTIONS ============ */
+  section { margin-top: 80px; }
+  .sec-head { display: flex; align-items: baseline; gap: 18px; border-bottom: 2px solid var(--edge); padding-bottom: 12px; margin-bottom: 28px; }
+  .sec-head h2 { font-family: 'Fraunces', serif; font-weight: 800; font-size: clamp(26px, 4vw, 38px); }
+  .sec-head .no { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.15em; }
+  section > p { max-width: 700px; color: var(--text-soft); margin-bottom: 16px; }
+  section > p strong, section li strong { color: var(--text); }
+  section a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-2); }
+  section a:hover { border-bottom-color: var(--accent); }
+  code.t { font-family: var(--mono); font-size: 0.88em; background: var(--bg-2); border: 1px solid var(--edge); border-radius: 4px; padding: 1px 6px; color: var(--accent); }
+
+  /* card grid — defs, guardrails, tiers */
+  .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 28px; }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 6px; padding: 22px; }
+  .card h3 { font-family: 'Fraunces', serif; font-size: 19px; font-weight: 720; margin-bottom: 8px; color: var(--text); }
+  .card p { font-size: 15px; color: var(--text-soft); }
+
+  /* pull quote */
+  .pull {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 480;
+    font-size: clamp(21px, 3vw, 28px); line-height: 1.35;
+    border-left: 3px solid var(--accent); padding-left: 24px; margin: 36px 0; max-width: 660px;
+  }
+
+  /* ============ FOOTER ============ */
+  footer {
+    margin-top: 90px; padding-top: 22px; border-top: 2px solid var(--edge);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* entrance */
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  header.masthead, section, footer { animation: rise 0.7s cubic-bezier(0.22,1,0.36,1) both; }
+  section:nth-of-type(1){animation-delay:.08s} section:nth-of-type(2){animation-delay:.14s}
+  section:nth-of-type(3){animation-delay:.2s}
+</style>
+<script>
+/* THEME INIT — must stay in <head> so first paint has the right theme. */
+(function(){
+  var t;
+  try { t = localStorage.getItem('cl.docs.theme'); } catch(e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+</head>
+<body>
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="brand">Chameleon Labs — {{DOC_KIND}}</span>
+      <span class="kicker-right">
+        <a href="https://chameleonlabs.ai">chameleonlabs.ai</a>
+        <a href="https://discord.gg/chameleonlabs">Discord</a>
+        <span>{{DATE_HUMAN}}</span>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">☾ dark</button>
+      </span>
+    </div>
+    <h1>{{HEADLINE with an <em>accent word.</em>}}</h1>
+    <p class="dek">{{One-paragraph dek: the outcome first, then why it matters. <strong>Bold the load-bearing phrase.</strong>}}</p>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="no">01 /</span><h2>{{Section title}}</h2></div>
+    <p>{{Lead paragraph.}}</p>
+    <div class="cards">
+      <div class="card"><h3>{{Card}}</h3><p>{{Body}}</p></div>
+      <div class="card"><h3>{{Card}}</h3><p>{{Body}}</p></div>
+      <div class="card"><h3>{{Card}}</h3><p>{{Body}}</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">02 /</span><h2>{{Section title}}</h2></div>
+    <p class="pull">"{{Pull quote — the one sentence a reader should remember.}}"</p>
+    <p>{{Body.}}</p>
+  </section>
+
+  <footer>
+    <span>Chameleon Labs LLC · <a href="https://chameleonlabs.ai">chameleonlabs.ai</a> · <a href="https://discord.gg/chameleonlabs">Join our Discord</a></span>
+    <span>{{Companion/repo links if any}}</span>
+    <span>Compiled {{DATE_ISO}}</span>
+  </footer>
+
+</div>
+<script>
+/* THEME TOGGLE — persists to the shared key so all CL docs stay in sync. */
+(function(){
+  var btn = document.getElementById('themeToggle');
+  function sync(){
+    btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀ light' : '☾ dark';
+  }
+  btn.addEventListener('click', function(){
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('cl.docs.theme', next); } catch(e) {}
+    sync();
+  });
+  sync();
+})();
+</script>
+</body>
+</html>

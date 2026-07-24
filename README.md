@@ -56,7 +56,13 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── credentials.md             # Secrets management patterns
 │   │   ├── file-dispositions.md       # Standing approvals for working-tree files (template)
 │   │   ├── file-operations.md         # File operation guidelines
+│   │   ├── model-delegation.md        # Cross-provider routing: Claude + Codex/GPT-5.6
+│   │   │                              #   (ratings, effort ladder, Sol review-only lockdown)
 │   │   └── plan-templates.md          # Implementation plan format
+│   ├── hookify-rules/                 # Hookify guard rules (symlink into a project's .claude/)
+│   │   ├── hookify.block-unpinned-codex-rescue.local.md  # Blocks Codex rescue/exec without
+│   │   │                              #   an explicit --model pin (enforces the Sol lockdown)
+│   │   └── test-codex-guard.sh        # 8-case test harness for the rule
 │   ├── tools/                         # Hook scripts wired in settings.json
 │   │   ├── config-secrets-guard.py    # PreToolUse hook: blocks printing config*.yaml / .env* secrets
 │   │   │                              #   (also speaks Codex hooks + Antigravity --agy protocols)
@@ -70,11 +76,15 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── time.md                    # Execution time tracking
 │       ├── cl-project-init/           # Sanitized example: company project scaffolder
 │       ├── claude-md-optimizer/       # CLAUDE.md optimization skill
+│       ├── discord-post/              # Draft community posts/announcements to Discord/ dir
 │       ├── disk-doctor/               # Disk cleanup + install hygiene (safe-trash, undo)
 │       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
 │       ├── feature-documenter/        # Feature documentation skill
 │       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
+│       ├── html-doc/                  # Standalone HTML deliverables (reports, explainers)
+│       ├── imageai-cli/               # Drive the ImageAI CLI (images/video/layouts, any provider)
 │       ├── install-claude-config/     # Install config into ~/.claude/
+│       ├── model-registry/            # Wire current LLM model IDs from a published registry
 │       ├── product-manager/           # Product management toolkit
 │       ├── project-documenter/        # Per-project user-facing docs generator
 │       ├── raginclude-generator/      # Generate .raginclude file for RAG ingest
@@ -277,6 +287,9 @@ On-demand reference files that Claude Code reads only when needed (reduces conte
 - **credentials.md** - Platform-specific secret storage patterns
 - **file-operations.md** - Absolute path conventions and parallel search patterns
 - **plan-templates.md** - Implementation checklist format with status markers
+
+### Cross-Provider Model Delegation (Claude + Codex/GPT-5.6)
+`instructions/model-delegation.md` is a full routing guide for pairing Claude with OpenAI's Codex through the official `openai-codex` Claude Code plugin: per-model routing scores (quota/intelligence/taste), a reasoning-effort ladder with quota impact, and the shipping loop — *write with Claude, audit with Codex, reconcile the findings*. It encodes a hard safety policy: **`gpt-5.6-sol` is review-only** (it inherits from `~/.codex/config.toml` on the un-pinnable review commands, which are read-only), so every `/codex:rescue` must pin `--model gpt-5.6-terra|luna` explicitly. `hookify-rules/hookify.block-unpinned-codex-rescue.local.md` enforces that mechanically — it denies any Bash invocation of the Codex rescue/exec path without an allowed model pin (symlink it into a project's `.claude/` to arm it; `test-codex-guard.sh` verifies all 8 allow/deny cases). The compact version of the policy lives in `AGENTS.md` § "Model delegation & cross-provider review".
 
 ### Output Styles
 Three output styles for different contexts:

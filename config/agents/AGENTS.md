@@ -99,6 +99,12 @@ guess or hallucinate one.
   the appropriate project directory (respecting the conventions below).
 - Prefer a specialized agent/subagent when one fits the task.
 - Keep changes scoped; verify before claiming done (see Pre-commit checks).
+- **Always fully specify instructions** (runbooks, PR/issue steps, handoffs):
+  every step executable exactly as written, zero inference. If a step opens an
+  editor, show the exact content to type; if it prompts, say what to answer;
+  state the expected output for verification steps. Lead with `cd` when the
+  directory matters; remote steps are `ssh <host>` then the command on its own
+  line; use the user's aliases (`~/.bash_aliases`, `~/.ssh/config`, justfiles).
 
 ### Branching & working-tree hygiene (CRITICAL)
 
@@ -202,6 +208,64 @@ path has a privacy gap, check all search paths).
 
 ---
 
+## Model delegation & cross-provider review
+
+A second model family doesn't share the author's assumptions: **write with
+Claude, audit with Codex (GPT-5.6), reconcile the findings.** The OpenAI pool
+is separate from Claude's, so self-contained Codex work also preserves Claude
+headroom. Full guide (ratings rationale, effort table, plugin mechanics):
+`~/.claude/instructions/model-delegation.md`.
+
+Routing scores (higher is better; quota = how gently it uses the plan
+allowance, not API price — re-rate from your own observed work):
+
+| model | quota | intelligence | taste |
+|---|---:|---:|---:|
+| fable-5 | 6 | 9 | 9 |
+| opus-4.8 | 7 | 8 | 8 |
+| sonnet-5 | 8 | 7 | 7 |
+| gpt-5.6-sol | 8 | 9 | 9 |
+| gpt-5.6-terra | 9 | 9 | 8 |
+| gpt-5.6-luna | 10 | 8 | 7 |
+
+### Sol is REVIEW-ONLY — CRITICAL (standing policy; lift it deliberately)
+
+`gpt-5.6-sol` has a record of destructive autonomous action elsewhere
+(deleted home dirs, intrusion into other systems in pursuit of a goal). So:
+
+- Sol runs **only** through read-only review commands
+  (`/codex:review`, `/codex:adversarial-review`) — never on `/codex:rescue`
+  or anything that can write.
+- **Commit everything first** — clean `git status` before any Sol run; review
+  the committed work (`--base <ref>` for branch review).
+- `~/.codex/config.toml` defaults to Sol *on purpose* (review commands can't
+  pin a model), which means a bare `/codex:rescue` would inherit Sol too —
+  so **every `/codex:rescue` must pin `--model gpt-5.6-terra` or
+  `gpt-5.6-luna` explicitly.** Never the bare `gpt-5.6` alias (= Sol).
+
+### Routing defaults
+
+- Work that ships: intelligence > taste > quota. Retry stronger without asking
+  if output misses the bar — judge the result, not the label.
+- Bulk/mechanical: Luna (or Claude Haiku/Sonnet when live session context
+  beats preserving Claude allowance). Default delegation: Terra + `medium`.
+  Difficult/high-stakes: Terra + `high`/`xhigh` (not Sol, per above).
+  `max` and `ultra` sit above `xhigh` and burn allowance fastest (ultra =
+  proactive multi-agent). A Sol + `max` config default is workable when
+  reviews are the only unflagged path and plan credits absorb it — drop to
+  `high` if limits hit. `ultra`: never as config default, never with Sol;
+  details in the guide.
+- UI, copy, or API design final pass: taste ≥ 8 — Fable, or Sol as reviewer.
+- Auth, billing, or data-migration work: Claude review **plus** an independent
+  `/codex:adversarial-review`; reconcile disagreements explicitly.
+- The Claude-side spawned-agent ladder (Haiku = mechanical implementers,
+  Sonnet = integration/low-risk review, Fable/Opus = prod-gating + orchestration)
+  is unchanged by this section.
+- Keep the Codex stop-review gate **off**; invoke reviews deliberately at
+  commit/PR boundaries.
+
+---
+
 ## Issues (GitHub)
 
 When a new issue, report, error, or user suggestion comes up:
@@ -288,6 +352,10 @@ Applies to chat output **and** prompts/agents built into products/Lambdas:
 - **Never use `cd`** — always use absolute paths. Details:
   `~/.claude/instructions/file-operations.md`.
 - **IDEs:** customize for your setup (e.g. JetBrains, VS Code, Vim).
+- **Version picks:** prefer **even-numbered minor versions** of open-source
+  software (e.g. Python 3.12, not 3.11/3.13; Node.js LTS majors are even) —
+  treat the even line as stable. If a needed package doesn't support the even
+  version yet, use the odd one and say so.
 - **Python:** `python3` in bash/WSL. Customize versions and environments for
   your setup (e.g. separate Windows `.venv` vs Linux `.venv_linux` when a repo
   is used from both).

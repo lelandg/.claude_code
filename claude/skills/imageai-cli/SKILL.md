@@ -1,0 +1,479 @@
+---
+name: imageai-cli
+description: Use when generating, editing, batching, or scripting images, videos, or page layouts with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, key management, video generation (Gemini Omni + Veo: refs, extend, frame interpolation, conversational refine, edit-your-own-video, --json output contract), and the publication layout engine (--layout-design/--layout-fill/--layout-export for comics, magazines, PDFs). Trigger whenever the user wants to make or edit an image, video, or layout (or set up/test a provider key) from the command line in this working directory.
+---
+
+# imageai-cli
+
+The cheat-sheet for driving **everything** the ImageAI CLI can do from
+`python main.py`. Four image providers, two video providers, the publication
+layout engine, the lyrics-to-prompts pipeline, the OpenAI Batch API, and
+key/auth management — all from one entry point.
+
+> GUI is the default when no action flag is given. Add `--gui` to force it, or
+> pass `-p/--prompt`, `--video`, `-t/--test`, `-s/--set-key`,
+> `--lyrics-to-prompts`, or any `--layout-*` action to stay in the CLI.
+
+Full documentation (agent recipes, output contracts, exit codes):
+`Docs/ImageAI-CLI-Guide.md`.
+
+## Pick a provider first
+
+| Provider        | `--provider` | Auth                          | Best for                                              |
+|-----------------|--------------|-------------------------------|-------------------------------------------------------|
+| Google Gemini   | `google` (default) | API key **or** `gcloud` ADC | Nano Banana family; fast, high-quality, up to 4K (NBP) |
+| OpenAI          | `openai`     | API key                       | gpt-image-2 "thinking" model, DALL·E 3                 |
+| Stability AI    | `stability`  | API key (hosted)              | SDXL / SD hosted endpoints                             |
+| Local SD        | `local_sd`   | none (local GPU/CPU)          | offline generation, no per-image cost                  |
+
+Default provider is **google**, default model **`gemini-2.5-flash-image`**.
+
+## Universal invocation
+
+```bash
+# Minimal: default provider/model, auto-named output in the images dir
+python main.py -p "a red fox in snow"
+
+# Explicit provider + model + output path
+python main.py --provider <prov> -m <model> -p "your prompt" -o out.png
+
+# N images in one call
+python main.py --provider openai -m gpt-image-2 -n 4 -p "logo ideas" -o logo.png
+```
+
+`-o/--out` is optional — without it, images auto-save with a sanitized,
+prompt-derived filename under the platform images dir. Each image gets a `.json`
+metadata sidecar.
+
+---
+
+## Google Gemini (Nano Banana)
+
+| Model                              | Alias            | Max output |
+|------------------------------------|------------------|------------|
+| `gemini-3-pro-image-preview`       | Nano Banana Pro  | 4K         |
+| `gemini-3.1-flash-image-preview`   | Nano Banana 2    | 2K         |
+| `gemini-2.5-flash-image` (default) | Nano Banana      | 1024px     |
+
+```bash
+# Default Nano Banana
+python main.py -p "watercolor harbor at dawn" -o harbor.png
+
+# Nano Banana Pro at 16:9 (provider maps --size to an aspect ratio)
+python main.py -m gemini-3-pro-image-preview --size 1920x1080 \
+    -p "cinematic desert highway" -o road.png
+
+# gcloud Application Default Credentials instead of an API key
+python main.py --auth-mode gcloud -p "..." -o out.png
+```
+
+- **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; the
+  provider converts to an aspect ratio (`image_config`). Never bake dimensions
+  like "(1024x768)" into prompt text — Gemini renders them as literal text.
+- **Supported aspect ratios:** 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
+- **Scaling:** NB caps at 1024px; the app scales proportionally (max edge 1024)
+  then upscales. NB2 → 2K native, NBP → 4K native.
+- **gcloud auth** (`--auth-mode gcloud`) works for the Gemini image models with
+  no API key; run `gcloud auth application-default login` first.
+- Operations: **generate**, **edit**, **compose** (pass `--reference` for edit/compose).
+
+## OpenAI
+
+| Model            | Notes                                                            |
+|------------------|------------------------------------------------------------------|
+| `gpt-image-2`    | "Thinking" model — `--quality` drives reasoning. Best quality.   |
+| `gpt-image-1.5`  | Latest non-thinking; supports `--output-format`.                 |
+| `gpt-image-1`    | Prior gen.                                                        |
+| `gpt-image-1-mini` | Fast/cheap.                                                     |
+| `dall-e-3`       | `--quality standard|hd`, fixed size presets, `style` (legacy).   |
+| `dall-e-2`       | Legacy.                                                          |
+
+```bash
+# gpt-image-2, explicit reasoning
+python main.py --provider openai -m gpt-image-2 --quality high \
+    -p "complex composition with legible text" -o gen.png
+
+# DALL·E 3 in HD
+python main.py --provider openai -m dall-e-3 --quality hd \
+    -p "isometric city" -o city.png
+```
+
+See the **gpt-image-2 deep-dive** below for custom sizes, masks, streaming,
+and batch — it has the most surface area.
+
+## Stability AI (hosted)
+
+| Model                            | Label              |
+|----------------------------------|--------------------|
+| `stable-diffusion-xl-1024-v1-0` (default) | SDXL 1.0  |
+| `stable-diffusion-xl-beta-v2-2-2`| SDXL Beta          |
+| `stable-diffusion-512-v2-1`      | SD 2.1             |
+| `stable-diffusion-v1-6`          | SD 1.6             |
+
+```bash
+python main.py --provider stability -m stable-diffusion-xl-1024-v1-0 \
+    -p "fantasy castle, concept art" -o castle.png
+```
+
+Needs a Stability API key (`--provider stability -s` to store one; `-t` to test).
+
+## Local Stable Diffusion (offline)
+
+| Model                                    | Label            |
+|------------------------------------------|------------------|
+| `stabilityai/stable-diffusion-xl-base-1.0` | SDXL Base 1.0  |
+| `segmind/SSD-1B`                         | SSD-1B (Fast SDXL) |
+| `stabilityai/stable-diffusion-2-1` (default) | SD 2.1       |
+| `runwayml/stable-diffusion-v1-5`         | SD 1.5           |
+| `CompVis/stable-diffusion-v1-4`          | SD 1.4           |
+
+```bash
+python main.py --provider local_sd -m segmind/SSD-1B \
+    -p "studio portrait, soft light" -o portrait.png
+```
+
+- No API key. First run **downloads weights from Hugging Face** (slow, large).
+- Uses GPU (CUDA / Apple MPS) when available, falls back to CPU (slow).
+- Requires the local-SD extras (`torch`, `diffusers`) to be installed; if they're
+  missing, tell the user what to install rather than installing it yourself.
+
+---
+
+## gpt-image-2 deep-dive
+
+ImageAI ships first-class support for OpenAI's `gpt-image-2` (released 2026-04-21).
+
+```bash
+# Custom size (edges multiples of 16, max 3840, aspect ≤3:1, pixels 655K-8.3M)
+python main.py --provider openai -m gpt-image-2 \
+    --custom-size 2048x1152 -p "ultrawide wallpaper" -o gen.png
+
+# Multi-reference compose (up to 10 images) → /v1/images/edits
+python main.py --provider openai -m gpt-image-2 \
+    --reference ref/a.png --reference ref/b.png \
+    -p "combine these styles" -o composed.png
+
+# Mask inpainting (transparent pixels in mask = edit zone)
+python main.py --provider openai -m gpt-image-2 \
+    --reference base.png --mask mask.png \
+    -p "replace the sky with stormy clouds" -o edited.png
+
+# Streaming partials (writes gen.p0.png, gen.p1.png, then gen.png)
+python main.py --provider openai -m gpt-image-2 \
+    --stream-partials --quality high \
+    -p "intricate technical diagram" -o gen.png
+
+# JPEG output with compression
+python main.py --provider openai -m gpt-image-2 \
+    --output-format jpeg --output-compression 85 \
+    -p "photorealistic landscape" -o landscape.jpg
+
+# Permissive moderation
+python main.py --provider openai -m gpt-image-2 --moderation low -p "..." -o gen.png
+```
+
+### Cost estimator (1024×1024)
+
+| Quality | Per image | At n=10 |
+|---------|-----------|---------|
+| low     | ~$0.006   | ~$0.06  |
+| medium  | ~$0.053   | ~$0.53  |
+| high    | ~$0.211   | ~$2.11  |
+| Batch   | 50% off all of the above |
+
+Costs scale with output tokens; custom sizes bigger than 1024² cost more.
+
+### Snapshot pinning
+
+```python
+from core.constants import GPT_IMAGE_2_SNAPSHOT  # "gpt-image-2-2026-04-21"
+```
+
+Pass the snapshot ID as `-m` when you need bit-for-bit reruns across releases.
+
+---
+
+## Batch API (OpenAI)
+
+```bash
+# Submit (50% discount, up to 24h turnaround) — prints a job ID
+python main.py --provider openai -m gpt-image-2 --batch -p "your prompt" -o gen.png
+# → Submitted batch job: batch_abc123...
+
+python main.py --provider openai --batch-status batch_abc123
+python main.py --provider openai --batch-fetch  batch_abc123
+```
+
+Jobs are tracked in `~/.imageai/batch_jobs.json` (also surfaced in the GUI's
+**Batch Jobs** tab).
+
+## Lyrics → prompts (LLM pipeline)
+
+Turns a lyrics file into a set of image prompts using an LLM (not an image model).
+
+```bash
+python main.py --lyrics-to-prompts song.txt \
+    --lyrics-model gpt-4o \
+    --lyrics-style cinematic \
+    --lyrics-temperature 0.7 \
+    --lyrics-output prompts.json
+```
+
+`--lyrics-model` accepts any LiteLLM id (`gpt-4o`, `gemini/gemini-2.0-flash-exp`,
+`claude-sonnet-4-6`, …). Feed the resulting prompts back into image generation.
+
+## Video generation (`--video`)
+
+Two providers: `--video-provider omni` (Gemini Omni, conversational, audio
+baked in) and `veo` (default). Reuses `-p/--prompt` and `-o/--out`.
+
+```bash
+# Veo text-to-video (default provider)
+python main.py --video -p "a fox running through snow" -o fox.mp4
+
+# Omni text-to-video (16:9 default; audio auto-generated)
+python main.py --video --video-provider omni -p "a marble run, smooth shot" -o marble.mp4
+
+# Subject references (up to 3 images for either provider)
+python main.py --video --video-provider omni -p "the cat bats the yarn ball" \
+    --ref-image cat.png --ref-image yarn.png -o cat.mp4
+
+# Extend an existing clip (Veo only; extensions render at 720p)
+python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp4
+
+# Frame-to-frame interpolation (Veo only: start ref + end frame)
+python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
+    --ref-image start.png --last-frame end.png
+
+# Conversationally refine the previous clip (Omni; id = operation_id in the sidecar)
+python main.py --video --video-provider omni --refine-from int_abc123 \
+    -p "make the violin invisible" -o v2.mp4
+
+# Edit your own footage (Omni; uploads via the Files API first)
+python main.py --video --video-provider omni --edit-video input.mp4 \
+    -p "make the mirror ripple like liquid" -o edited.mp4
+
+# Large/720p clips: ask for URI delivery (Omni only)
+python main.py --video --video-provider omni --delivery uri -p "city timelapse" -o city.mp4
+
+# Machine-readable result (exactly one JSON object on stdout; logs on stderr)
+python main.py --video -p "a fox in snow" -o fox.mp4 --json
+```
+
+### Provider capability split
+
+| Capability | Omni | Veo (default) |
+|------------|------|---------------|
+| `--ref-image` (≤3) | ✅ | ✅ |
+| `--last-frame` interpolation | ❌ | ✅ |
+| `--extend` existing clip | ❌ | ✅ (720p) |
+| `--refine-from` / `--edit-video` / `--delivery uri` | ✅ | ❌ |
+| Audio in output | ✅ always | ✅ (Veo 3) |
+| Aspect ratios | 16:9, 9:16 | 16:9, 9:16, 1:1 |
+| `--auth-mode gcloud` | ❌ (API key only) | ✅ |
+
+Clip length is model-fixed (~8 s) — no `--duration` knob; chain `--extend`
+(Veo) for longer sequences. `--video-model` overrides the resolved default
+model. Wrong provider/flag pairings fail fast with exit code 2.
+
+### Omni prompt superpowers (in the prompt text, not flags)
+
+- **Image roles**: `<FIRST_FRAME>` (start frame) vs `<IMAGE_REF_N>` (subject refs,
+  N=0,1,2); declare with `[# Sources <FIRST_FRAME>@Image1]`.
+- **Timing**: natural language ("after 3 seconds, ...") or timecodes
+  (`[0-3s] a woman enters`, "every 2s cut to a new angle").
+- **Audio direction**: describe music/sound design in the prompt — Omni
+  soundtracks every clip by default.
+- **On-screen text**: Omni renders readable/animated text ("a neon sign that
+  reads OPEN").
+- Aspect ratio goes in `--aspect` (16:9 or 9:16), **never** in the prompt.
+
+Omni does **not** support: video extension (`--extend` is Veo-only), video
+references > 3s, negative-prompt configs, temperature/system instructions.
+
+## Publication layout engine (`--layout-*`)
+
+Design a page from a text description, fill its image regions, export to
+PDF/PNG — fully headless.
+
+```bash
+# Design a layout project (.json) from a description (requires -o)
+python main.py --layout-design "3-panel comic, action scene" -o comic.json \
+    --content-kind comic --page-size "US Comic" --orientation portrait --dpi 300
+
+# Generate images for every prompted region in the project
+python main.py --layout-fill comic.json
+
+# Render to PDF or PNG (the -o extension picks the format)
+python main.py --layout-export comic.json -o comic.pdf
+```
+
+- `--content-kind`: `children | comic | comic_strip | magazine | newspaper |
+  scientific | custom` (default custom).
+- `--page-size` (Letter, A4, A5, Tabloid, US Comic, …), `--orientation`
+  (portrait/landscape), `--dpi` (default 300).
+- `--layout-design` uses a **text** LLM; override with `--layout-llm-provider`
+  (`openai | anthropic | google | ollama | lmstudio`) and `--layout-llm-model`.
+- `--layout-fill` uses the normal image `--provider`/`-m` selection.
+
+### The project JSON is hand-editable (schema 2.0)
+
+For fine placement fixes, edit the project file directly and re-export — no
+GUI needed. Layout: `pages[N].regions[]` and `pages[N].overlays[]`.
+
+- Page pixels = inches × dpi (e.g. 6.625×10.25 in @ 300 → 1988×3075).
+- Region `bbox` is `[x, y, w, h]` in page pixels.
+- Regions carry `image_ref` (absolute path to the art; fills land in the
+  platform images dir, e.g. `~/.config/ImageAI/images/`), `prompt`, `z`.
+- Overlays (caption/speech/sfx) place by `anchor` `[x, y]` + `anchor_mode`:
+  `center` centers the whole text block on the anchor (so "move the title" =
+  set the anchor to the midpoint of the space it should occupy); `topleft`
+  pins the block's corner. Text look lives in `text_style`; box look and
+  `max_width_px` in `style`.
+
+### Region images are cover-cropped — match aspect or lose art
+
+`--layout-export` fills each region by scaling + **center-cropping** the art
+to the region's aspect. Art whose aspect ≠ bbox aspect silently loses its
+edges — 16:9 art in a ~6:5 comic panel loses ~35% of its width, amputating
+any off-center subject (symptom: "this panel looks cropped weird").
+
+- **Prevent:** before filling, compute each region's `w/h` and generate its
+  art at the closest supported ratio (Google: 1:1, 3:2, 4:3, 5:4, 16:9, …).
+- **Prevent (Nano Banana):** alternatively, tell the model the target
+  resolution in the prompt as a composition instruction — e.g. "compose the
+  scene to fill an 858×720 area" — and it confines the content to that area,
+  so the renderer's crop can't cut anything that matters. This is a *where to
+  put content* instruction, distinct from the sizing footgun below.
+- **Repair without regenerating:** pre-crop the source to exactly the bbox
+  aspect — full source height, width = height × (w/h), slide the x-window to
+  protect the subject — save as a **new** file and point `image_ref` at it.
+  The renderer's center-crop then becomes a no-op. Never overwrite the
+  original art.
+
+### Verify visually, headless
+
+After any placement change: `--layout-export proj.json -o page.png`, crop the
+area of interest with PIL, and look at it. Edit JSON → export → inspect is a
+cheap loop; don't trust coordinates alone.
+
+### `.iaibundle` is GUI-only
+
+The CLI exports PNG/PDF only. A project's `.iaibundle` is saved from the GUI
+and goes stale when the CLI edits the project — re-save it there if it must
+stay in sync.
+
+## Agent output contract
+
+- **`--json` (video):** stdout carries exactly one JSON object
+  (`status, output_path, provider, model, aspect_ratio, operation_id, error`);
+  all logs/progress go to **stderr**. Parse stdout only.
+- **Exit codes (video):** `0` success, `1` generation failed, `2` validation /
+  user error (bad flag combo, missing key), `3` unexpected exception.
+- **Sidecars:** every image and video gets a `<output>.json` sidecar with
+  prompt, resolved model, and ids — durable metadata even without `--json`.
+
+## Keys, testing & auth
+
+```bash
+# Store a key for the selected provider (interactive)
+python main.py --provider openai -s
+
+# Provide a key inline or from a file for a one-off run
+python main.py --provider stability -k "$STABILITY_KEY" -p "..." -o out.png
+python main.py --provider openai -K /path/to/key.txt -p "..." -o out.png
+
+# Verify the configured key works
+python main.py --provider openai -t
+
+# Setup instructions
+python main.py --help-api-key
+```
+
+Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
+`--auth-mode gcloud` is Google-only and bypasses API keys via ADC.
+
+---
+
+## Full flag reference
+
+| Flag | Values | Notes |
+|------|--------|-------|
+| `--provider` | `google` \| `openai` \| `stability` \| `local_sd` | Default `google`. |
+| `-m`, `--model` | provider model id | See per-provider tables. |
+| `-p`, `--prompt` | text | Triggers CLI generation. |
+| `-o`, `--out` | path | Optional; auto-named if omitted. |
+| `-n`, `--num-images` | int | Default 1. gpt-image-2 up to 10. |
+| `--size` | `WxH` or preset | Mutex with `--custom-size`. Google maps to aspect. |
+| `--custom-size` | `WxH` | **gpt-image-2 only.** Edges ×16, max 3840, aspect ≤3:1, pixels 655K–8.3M. |
+| `--quality` | `auto` \| `low` \| `medium` \| `high` \| `standard` \| `hd` | gpt-image-2: `auto/low/medium/high`; dall-e-3: `standard/hd`. |
+| `--output-format` | `png` \| `jpeg` \| `webp` | gpt-image-2 / gpt-image-1.5 only. |
+| `--output-compression` | `0..100` | jpeg/webp only. |
+| `--moderation` | `auto` \| `low` | gpt-image-2 only; `low` = permissive. |
+| `--reference` | path (repeatable ≤10) | Routes to `/v1/images/edits`. |
+| `--mask` | PNG path | Alpha mask inpainting; transparent = edit zone. |
+| `--stream-partials` | flag | gpt-image-2 only; writes `out.pN.png`. |
+| `--batch` / `--batch-status` / `--batch-fetch` | flag / JOB_ID | OpenAI Batch API. |
+| `--lyrics-to-prompts` | LYRICS_FILE | Plus `--lyrics-model/-temperature/-style/-output`. |
+| `--video` | flag | Video mode; reuses `-p`/`-o`. |
+| `--video-provider` | `omni` \| `veo` | Default `veo`. |
+| `--video-model` | model id | Optional override of the resolved default. |
+| `--aspect` | e.g. `16:9`, `9:16` | Validated per video provider. |
+| `--ref-image` | path (repeatable ≤3) | Video reference images. |
+| `--last-frame` | path | Veo-only end frame (interpolation). |
+| `--extend` | path | Veo-only: extend this existing clip. |
+| `--delivery` | `inline` \| `uri` | Omni-only; `uri` for large/720p clips. |
+| `--refine-from` | INTERACTION_ID | Omni-only conversational refine. |
+| `--edit-video` | path | Omni-only: upload + edit your own footage. |
+| `--json` | flag | Video: one JSON object on stdout. |
+| `--layout-design` | DESCRIPTION | New layout project (requires `-o`). |
+| `--layout-fill` | PROJECT | Generate images for prompted regions. |
+| `--layout-export` | PROJECT | Render to PDF/PNG (requires `-o`). |
+| `--content-kind` / `--page-size` / `--orientation` / `--dpi` | see layout section | `--layout-design` options. |
+| `--layout-llm-provider` / `--layout-llm-model` | see layout section | Text-LLM override for design. |
+| `--auth-mode` | `api-key` \| `gcloud` | Google-only (images + Veo; not Omni). |
+| `-k`/`-K`/`-s`/`-t` | — | Key inline / from file / store / test. |
+| `--help-api-key` | flag | API-key setup instructions. |
+| `--version` | flag | Print version and exit. |
+| `--gui` | flag | Force the GUI. |
+
+## Anti-footguns
+
+- **Provider/model mismatch.** A model id only works with its provider. `dall-e-3`
+  needs `--provider openai`; `gemini-*` needs `--provider google` (or default).
+- **gpt-image-2 has no transparent background, no `input_fidelity`, no
+  variations endpoint, no `style`.** The provider raises clear errors. For alpha
+  PNG output use `gpt-image-1.5`/`gpt-image-1`.
+- **gpt-image-2 custom-size:** the #1 mistake is non-multiple-of-16 edges. Pre-flight
+  validation rejects it; the GUI shows a live red label.
+- **gpt-image-2 reasoning is just `--quality`** (`auto/low/medium/high`) — there is no
+  separate `reasoning_effort` knob. Higher quality = more thinking compute.
+- **Org Verification gate:** gpt-image-2 requires OpenAI Organization Verification.
+  If `--provider openai -t` returns a verification message, complete it at
+  https://platform.openai.com/settings/organization/general.
+- **Google sizing:** never put pixel dimensions in the prompt text as a size
+  request ("(1024x768)" renders as literal text in the image); use `--size`.
+  The one sanctioned use of dimensions in a prompt is the Nano Banana
+  fill-area composition instruction in the layout section.
+- **`--quality standard/hd`** are DALL·E values; `--quality auto/low/medium/high`
+  are gpt-image-2 values. Don't cross them.
+- **local_sd first run** downloads multi-GB weights and may need GPU extras — warn
+  the user; don't `pip install` system deps without asking.
+- **Video flag/provider pairing:** `--extend`/`--last-frame` need `veo`;
+  `--refine-from`/`--edit-video`/`--delivery` need `omni`. Mismatches exit 2.
+- **In `--json` mode, parse stdout only** — logs and progress are on stderr by
+  design; never grep stdout for progress text.
+- **Layout art is cover-cropped to the region's bbox aspect.** Generate panel
+  art at a matching ratio (or pre-crop and swap `image_ref`) — a mismatch
+  silently cuts content off the panel edges.
+- **`--layout-design` and `--layout-export` require `-o`**; `--layout-fill`
+  writes into the project file in place.
+
+## GUI entry points
+
+- **Generate tab** — provider + model pickers; for gpt-image-2 the quality buttons
+  flip to `Low | Medium | High | Auto`, and output-format / moderation rows appear.
+- **Resolution selector** — "Custom…" opens a W/H dialog with live validation.
+- **Generate → Submit as Batch Job…** — submits via the OpenAI Batch API.
+- **Batch Jobs tab** — lists jobs from `~/.imageai/batch_jobs.json` with Check/Download.
+- **Settings tab** — per-provider API keys and auth mode.
