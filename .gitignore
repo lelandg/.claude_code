@@ -55,4 +55,4 @@ Notes/
 .claude/skills/gpt-image-2/
 
 # Machine-personal skill: publishes THIS repo — never mirror it into itself
-claude/skills/publish-config-repo/
+claude/skills/publish-claude-config/
