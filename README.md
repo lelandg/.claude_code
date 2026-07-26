@@ -93,6 +93,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── unify-agents-md/           # Make AGENTS.md canonical across all AI CLIs
 │       ├── update-code-map/           # CodeMap maintenance skill
 │       ├── update-hermes/             # Backup-first Hermes Agent updater
+│       ├── version-manager/           # Standardized version bumps + changelog currency
 │       └── yt-transcript/             # Download YouTube transcripts
 ├── Docs/
 │   ├── SETUP_GUIDE.md                 # Full setup & configuration guide
@@ -277,6 +278,7 @@ Custom skills extend Claude Code with repeatable workflows:
 - **product-manager** - Full PM toolkit (strategy, discovery, market research, GTM, execution)
 - **install-claude-config** - Merges this repo's config into `~/.claude/` with diff-and-ask conflict resolution
 - **sync-claude-config** - Syncs `~/.claude/` back to this repo with automatic sanitization of private info
+- **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default.
 - **time** - Tracks execution time for each step in a workflow
 
 ### CodeMap System

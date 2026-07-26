@@ -68,3 +68,9 @@ implemented here by the `codex` plugin (full guide:
 - `/model-registry [install|migrate|status|refresh-fallback]` — wire current LLM
   model IDs from the published registry into any project (`skill: model-registry`;
   clients: https://github.com/Chameleon-Labs-LLC/model-registry-client).
+- `/version-manager [check|backfill|release <major|minor|patch>]` — standardized
+  version bump + changelog for any repo, auto-detecting where the version lives
+  (`skill: version-manager`; tool: `~/.claude/skills/version-manager/version_tool.py`).
+  Dry-run by default, `--apply` to write. `backfill` is once per repo (reconstructs
+  git tags from history, fills changelog gaps). Required before every PR per the
+  versioning rule in `~/.config/agents/AGENTS.md`.

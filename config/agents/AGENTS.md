@@ -192,6 +192,27 @@ final sub-project is done** before opening the PR. Commit freely along the way; 
 don't open the PR until the feature as a whole is complete. (Still: commit/push/PR
 only when asked, and branch off the default branch first.)
 
+### Versioning & changelog (every repo, every CLI)
+
+Before opening a PR — and before pushing a small change straight to `main` —
+bump the version and add the changelog entry **in the same commit**, using the
+version-manager tool:
+
+```bash
+T=~/.claude/skills/version-manager/version_tool.py
+python3 $T --repo /abs/path/to/repo release <major|minor|patch>          # dry run first
+python3 $T --repo /abs/path/to/repo release <level> --notes /tmp/n.md --apply
+```
+
+- `major` = breaking change, `minor` = feature, `patch` = fixes/docs. The dry run
+  prints the level the commits suggest; it never picks silently.
+- The generated changelog draft is raw commit subjects — **rewrite it into prose**
+  and pass `--notes FILE`. Generated draft, curated release.
+- **Never hand-edit a version number or a changelog heading.** The tool owns both;
+  hand edits are how the two records drift apart.
+- First time in a repo: `check`, then `backfill --apply` (reconstructs tags from
+  history and fills gaps). Once per repo, not per release.
+
 ### Bug-fixing philosophy
 
 Fix the **systemic root cause**, not just the symptom. Check whether the issue is

@@ -56,3 +56,7 @@ Notes/
 
 # Machine-personal skill: publishes THIS repo — never mirror it into itself
 claude/skills/publish-claude-config/
+
+# Python bytecode (generated when running skill test suites)
+__pycache__/
+*.pyc
