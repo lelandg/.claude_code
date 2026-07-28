@@ -31,7 +31,8 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 ├── config/
 │   └── agents/
 │       └── AGENTS.md                  # Shared house rules for EVERY AI coding CLI
-│                                      #   (mirrors ~/.config/agents/AGENTS.md)
+│                                      #   (mirrors ~/.config/agents/AGENTS.md; slim —
+│                                      #   hard rules inline, detail via instructions/ pointers)
 ├── claude/                            # Mirrors ~/.claude/ — install this
 │   ├── CLAUDE.md                      # Thin Claude-Code-specific file; line 1
 │   │                                  #   @imports the shared AGENTS.md above
@@ -54,11 +55,15 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │       └── CLAUDE_CodeMap.md      # CodeMap spec (copy for agent access)
 │   ├── instructions/                  # On-demand reference docs
 │   │   ├── credentials.md             # Secrets management patterns
+│   │   ├── environment.md             # IDEs, Python/.NET/Node, debugging, screenshots
 │   │   ├── file-dispositions.md       # Standing approvals for working-tree files (template)
 │   │   ├── file-operations.md         # File operation guidelines
+│   │   ├── github-issues.md           # Issue workflow mechanics + label conventions
 │   │   ├── model-delegation.md        # Cross-provider routing: Claude + Codex/GPT-5.6
 │   │   │                              #   (ratings, effort ladder, Sol review-only lockdown)
-│   │   └── plan-templates.md          # Implementation plan format
+│   │   ├── package-min-age.md         # 7-day min package age: per-manager config
+│   │   ├── plan-templates.md          # Implementation plan format
+│   │   └── runbook-standards.md       # Fully-specified runbooks (zero-inference steps)
 │   ├── hookify-rules/                 # Hookify guard rules (symlink into a project's .claude/)
 │   │   ├── hookify.block-unpinned-codex-rescue.local.md  # Blocks Codex rescue/exec without
 │   │   │                              #   an explicit --model pin (enforces the Sol lockdown)
@@ -186,9 +191,21 @@ cp .claude_code/claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 Customize them for your workflow. `AGENTS.md` carries the core benefits — security
 rules, work procedures, issue workflow, and project conventions — shared by every AI
-coding CLI (Claude Code, Codex, Copilot, Gemini, Pi). `CLAUDE.md` is a thin file that
+coding CLI (Claude Code, Codex, Copilot, Gemini, Antigravity/`agy`, Pi). It is
+deliberately **slim**: hard security rules stay inline, and situational detail lives in
+`claude/instructions/*.md` files it points to (models read them on demand — install the
+instructions dir alongside it so no pointer dangles). `CLAUDE.md` is a thin file that
 `@import`s it (line 1) and adds Claude-Code-specific skill/agent triggers. See the
-`unify-agents-md` skill for wiring other CLIs to the same file.
+`unify-agents-md` skill for wiring other CLIs to the same file. Wiring summary:
+
+- **Codex:** `ln -s ~/.config/agents/AGENTS.md ~/.codex/AGENTS.md`
+- **Copilot CLI:** `ln -s ~/.config/agents/AGENTS.md ~/.copilot/copilot-instructions.md`,
+  plus in `~/.bash_aliases`: `copilot() { command copilot --add-dir "$HOME/.claude/instructions" "$@"; }`
+  (lets it follow the pointer files outside the working dir)
+- **Antigravity/agy:** `ln -s ~/.config/agents/AGENTS.md ~/.gemini/AGENTS.md`
+  (its global rules root is `~/.gemini/`; it does not resolve `@import` lines)
+- **Gemini CLI:** `GEMINI.md` line 1 = `@/home/<you>/.config/agents/AGENTS.md`
+- **Pi:** in `~/.bash_aliases`: `pi() { command pi --append-system-prompt "$HOME/.config/agents/AGENTS.md" "$@"; }`
 
 ---
 
@@ -328,7 +345,7 @@ The same guard extends to the other agent CLIs:
 ## Design Philosophy
 
 ### Context Efficiency
-The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, the shared `AGENTS.md` holds the house rules, and detailed reference material is extracted to `instructions/` files loaded on demand. This reduces `/resume` time and token usage while keeping critical rules always loaded.
+The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a slim (~2,500-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
 
 ### Security First
 - Credentials are never stored in project directories

@@ -1,6 +1,6 @@
 ---
 name: sync-claude-config
-description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, statusline, guard hooks, plugins, MCP servers, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
+description: Sync Claude Code config (CLAUDE.md, agents, skills, commands, instructions, settings, statusline, guard hooks, plugins, MCP servers, CC version) AND the shared cross-CLI house-rules — canonical ~/.config/agents/AGENTS.md plus the per-CLI instruction files that @import it (CLAUDE.md, GEMINI.md) and Codex/Copilot/agy/Pi wiring — from THIS machine to any SSH-reachable host so every AI coding CLI works the same there. Discovers targets from ~/.ssh/config. Use on /sync-claude-config [host], or when asked to "sync claude config to <host>", "mirror my agents/skills to <machine>", "make Claude Code (or my agents) work the same on <host>". Push-only (local → remote); never copies credentials or machine state.
 ---
 
 # Sync Claude Code Config to a Remote Host
@@ -42,8 +42,8 @@ claude --version                            # local, for comparison
 |------|--------|
 | `~/.config/agents/AGENTS.md` | **MERGE/adapt by hand** (§4b) — canonical house rules every CLI reads via `@import` |
 | `CLAUDE.md` & `GEMINI.md` | **MERGE by hand, never copy** (§4) — each = `@import` of AGENTS.md (line 1) + tool-specific extras (Claude triggers / Gemini memories) |
-| Other-CLI wiring (Codex/Copilot/Pi) | Symlink/append on the remote to point at the shared file (§4b); guarded, never clobber |
-| `instructions/` | `rsync -a` (full overwrite — they're reference docs) |
+| Other-CLI wiring (Codex/Copilot/agy/Pi) | Symlink/append on the remote to point at the shared file (§4b); guarded, never clobber |
+| `instructions/` | `rsync -a` (full overwrite — they're reference docs). **Load-bearing since the 2026-07-28 split:** the slim AGENTS.md points into this dir, so sync it before/with AGENTS.md — every CLI reads these on demand |
 | `agents/` | `rsync -aL --delete --exclude .git --exclude .idea` — **`-L` is mandatory**: some local agents may be symlinks into a source repo; the remote needs materialized files. `--delete` mirrors archivals. |
 | `skills/` | `rsync -a --exclude '*-workspace' --exclude '*.skill' --exclude '*.zip'` — **additive, NO --delete** (preserve remote-only skills) |
 | `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. commands that need an admin CLI or virtualenv present only on the dev machine). Never delete remote-only command dirs. |
@@ -103,10 +103,10 @@ Edge cases:
 
 Your global house rules now live in `~/.config/agents/AGENTS.md` — the
 canonical file every CLI reads. `~/.claude/CLAUDE.md` `@import`s it; Codex,
-Copilot, Gemini, and Pi point at it too. Sync this so **non-Claude** agents
+Copilot, Gemini, agy, and Pi point at it too. Sync this so **non-Claude** agents
 behave the same on the remote. (See the `unify-agents-md` skill — esp. its
-`references/tool-matrix.md` — for the per-tool paths, the `@import`-vs-symlink
-reasoning, and the `agy` probe. Reuse that knowledge here.)
+`references/tool-matrix.md` — for the per-tool paths and the
+`@import`-vs-symlink reasoning. Reuse that knowledge here.)
 
 If the local machine has no `~/.config/agents/AGENTS.md` (older setup, everything
 still in CLAUDE.md), skip this section — there's nothing shared to push yet.
@@ -126,12 +126,21 @@ still in CLAUDE.md), skip this section — there's nothing shared to push yet.
    Guard every symlink (`[ -e <t> ] || [ -L <t> ]` before `ln -s`), never clobber,
    back up anything pre-existing:
    - **Codex:** `ln -s ~/.config/agents/AGENTS.md ~/.codex/AGENTS.md` (no import — concatenates).
-   - **Copilot:** `ln -s ~/.config/agents/AGENTS.md ~/.copilot/copilot-instructions.md`.
+   - **Copilot:** `ln -s ~/.config/agents/AGENTS.md ~/.copilot/copilot-instructions.md`,
+     PLUS append to remote `~/.bash_aliases` (idempotent — grep before adding; `bash -n`
+     after): `copilot(){ command copilot --add-dir "$HOME/.claude/instructions" "$@"; }` —
+     Copilot denies out-of-cwd reads non-interactively, and the slim AGENTS.md points
+     into `~/.claude/instructions/`.
    - **Gemini:** do NOT symlink — GEMINI.md keeps Gemini-only memories, so merge it by
-     hand per §4 (`@import` line 1 + preserved extras).
+     hand per §4 (`@import` line 1 + preserved extras). Note: Google cut gemini-cli's
+     free tier (2026-07 — "migrate to Antigravity"); the CLI may be dead on a host
+     unless it has an API key or paid tier.
    - **Pi:** append to remote `~/.bash_aliases` (idempotent — grep before adding;
      `bash -n` after): `pi(){ command pi --append-system-prompt "$HOME/.config/agents/AGENTS.md" "$@"; }`.
-   - **agy:** probe before wiring (don't guess); report findings if unclear.
+   - **agy:** `ln -s ~/.config/agents/AGENTS.md ~/.gemini/AGENTS.md` (guarded). agy's
+     global customization root is `~/.gemini/`; it loads a standalone `AGENTS.md` there
+     alongside `GEMINI.md` with no conflict, but does NOT resolve GEMINI.md's `@import`
+     line — the symlink is required. (Verified 2026-07-28, agy 1.1.2.)
 4. **Same NEVER-sync discipline:** push only instruction files / wiring for these
    CLIs — never their `auth.json`/credentials, `sessions/`, `history*`, or memory.
 
@@ -296,8 +305,8 @@ ssh <host> 'bash -lc "claude --version; cd ~ && claude -p \"Reply with exactly: 
 
 Write a summary to the current project's `Notes/` (check casing conventions):
 what synced, what was skipped and why, dropped permission rules, **which non-Claude
-CLIs were wired to the shared house-rules file** (and any — e.g. `agy` — left
-pending a probe), **guard hooks** (§5c: tools synced, which CLIs got hook wiring,
+CLIs were wired to the shared house-rules file** (Codex/Copilot/Gemini/agy/Pi —
+symlinks, aliases, and the `~/.gemini/AGENTS.md` agy link), **guard hooks** (§5c: tools synced, which CLIs got hook wiring,
 fixture-test results, and the standing Codex-trust ACTION REQUIRED), **statusline**
 result (adapted path root, or host-customized copy
 preserved + `jq` presence), **MCP servers** reconciled vs. skipped (which user-scope

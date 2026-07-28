@@ -17,6 +17,7 @@ touch, don't carry into branches) · **ask** (genuinely per-case).
 |---------|---------|-----|-------|
 | `Docs/plans/`, `Plans/` design/handoff docs | **commit** immediately | Existing house rule (plan files are part of the implementation record) | 2026-07-10 |
 | `Notes/` summaries/reports agents wrote | **commit** | Written as deliverables; same reasoning as plans | 2026-07-10 |
+| Discord posts in `Notes/` or `Discord/` (from the discord-post skill) | **commit** — default yes, don't ask | Drafted deliverables the user usually approves | 2026-07-10 |
 | `_screenshots` symlink | **gitignore** | Machine-local symlink to the screenshots drive | 2026-07-10 |
 | `.env*`, credentials, key files | **never commit** | Security rules | 2026-07-10 |
 | Script WIP the user edited (e.g. `Scripts/*.py` with uncommitted tweaks) | **ask** — recommend commit if it's a finished functional change, leave if half-done | Users often have modified files from running/tweaking scripts | 2026-07-10 |
