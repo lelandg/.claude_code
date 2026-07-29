@@ -80,7 +80,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   └── skills/                        # Custom skills (slash commands)
 │       ├── time.md                    # Execution time tracking
 │       ├── cl-project-init/           # Sanitized example: company project scaffolder
-│       ├── claude-md-optimizer/       # CLAUDE.md optimization skill
+│       ├── claude-md-optimizer/       # Rightsize CLAUDE.md/skills (Claude 5 context-engineering rules)
 │       ├── discord-post/              # Draft community posts/announcements to Discord/ dir
 │       ├── disk-doctor/               # Disk cleanup + install hygiene (safe-trash, undo)
 │       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
@@ -284,7 +284,7 @@ Custom skills extend Claude Code with repeatable workflows:
 - **project-documenter** - Per-project user-facing feature docs + sitemap
 - **technical-documenter** - Developer and support-staff documentation (APIs, data models, errors)
 - **doc-all-projects** - Parallel sweep that regenerates stale docs across every registered project
-- **claude-md-optimizer** - Reduces CLAUDE.md token usage by extracting rarely-used sections
+- **claude-md-optimizer** - Audits and rightsizes CLAUDE.md/AGENTS.md and skills per Anthropic's Claude 5 context-engineering guidance (the six shifts: rules→judgment, examples→interface design, upfront→progressive disclosure, repetition→single source, memory dump→auto-memory, specs→rich references), with a classification-first workflow, `/doctor` reconciliation, and eval-verified cuts
 - **graphify** - Turns any input (code, docs, papers, images) into a clustered knowledge graph (HTML + JSON)
 - **raginclude-generator** - Generates a `.raginclude` file to curate what a RAG knowledge base should ingest
 - **disk-doctor** - Disk cleanup + install hygiene: scans home/dev/cache locations, proposes a plan, deletes only via an audited safe-trash helper with one-command undo

@@ -1,63 +1,94 @@
-# CLAUDE.md Extraction Checklist
+# CLAUDE.md audit rubric — keep/cut, extraction, and token math
 
-Use this checklist to identify sections that should be extracted to reference files.
+Companion to the six shifts in SKILL.md (source: Anthropic's Claude 5
+context-engineering guidance, Thariq 2026-07-24).
 
-## High-Value Extraction Candidates
+## Keep vs. cut
 
-These section types typically have high token cost but low usage frequency:
+**KEEP (always loaded):**
 
-| Section Type | Typical Size | Extract When... |
-|--------------|--------------|-----------------|
-| AWS/Cloud Infrastructure | 200-400 lines | Only needed for cloud work |
-| API Reference | 100-300 lines | Only needed for API integration |
-| Database Schemas | 50-200 lines | Only needed for DB work |
-| Deployment Commands | 50-150 lines | Only needed for deploys |
-| Plan/Template Formats | 100-200 lines | Reference material, rarely modified |
-| Credential Management | 50-100 lines | Reference patterns, not daily use |
-| Platform-Specific Notes | 50-100 lines | Only applies to subset of work |
+- Purpose paragraph — one paragraph on what the repo/setup is *for*.
+- Codebase-specific **gotchas** Claude cannot infer from the file structure —
+  the highest-value content in the whole file.
+- **Hard constraints**: security/money/data-loss rules, regulatory/compliance
+  requirements (finance, healthcare, audited environments). Verbatim.
+- Skill/instruction **pointers** (1–2 lines each).
+- Identity/contact and small always-relevant facts.
 
-## What to Keep in Core CLAUDE.md
+**CUT:**
 
-Always keep these in the main file (high usage, critical):
+- Folder structure and tech-stack descriptions (observable from the repo).
+- Standard build/tool commands already in config files.
+- Generic safety sermons the model handles inherently.
+- Full playbooks and multi-step procedures (→ skills).
+- Style rules phrased as absolute bans (→ one adaptive line, or delete).
+- Prose few-shot examples of tool/format usage (→ schemas, enums, real artifacts).
+- Duplicates of rules whose canonical home is another layer.
+- Session diary content accumulated via the `#` hotkey (→ auto-memory).
 
-- **Identity/Contact Info** - Always relevant, small
-- **Date Handling Rules** - Critical, prevents errors
-- **Security Rules (condensed)** - Safety-critical, brief version
-- **Work Procedures** - Daily workflow guidance
-- **Local Conventions** - Every file operation uses this
-- **Development Environment** - Every session needs this
-- **Project Locations** - Frequently referenced
-
-## Extraction Decision Matrix
+## Extraction decision matrix
 
 ```
-Is this section used in >50% of sessions?
-├─ YES → Keep in core CLAUDE.md
-└─ NO → Is it >50 lines?
-         ├─ YES → Extract to references/
-         └─ NO → Keep (low token cost)
+Is it a hard security/money/data-loss/compliance rule?
+├─ YES → keep verbatim in the core file
+└─ NO → Can the model infer it from the repo or its own judgment?
+         ├─ YES → delete (or one adaptive line if there's a real preference)
+         └─ NO → Is it a multi-step procedure with a natural trigger?
+                  ├─ YES → skill (description = when to trigger, ~80 tokens at startup)
+                  └─ NO → instructions/ reference file + 1–2 line pointer
 ```
 
-## Reference File Naming
+Old size heuristic (still useful): a section >50 lines used in <50% of
+sessions is an extraction candidate; instruction blocks of ~275–8,000 tokens
+are the classic skill-migration range.
 
-Use descriptive names matching the content:
+## High-value extraction candidates
 
-| Content | Suggested Filename |
-|---------|-------------------|
-| AWS Infrastructure | `aws-{project}.md` |
-| Plan Templates | `plan-templates.md` |
-| Credential Patterns | `credentials.md` |
-| File Operations | `file-operations.md` |
-| API Documentation | `api-{service}.md` |
-| Deployment Guide | `deployment.md` |
+| Section type | Typical size | Destination |
+|--------------|--------------|-------------|
+| Cloud/infra runbooks | 200–400 lines | `instructions/aws-{project}.md` or an ops skill |
+| API reference | 100–300 lines | `instructions/api-{service}.md` |
+| DB schemas / migration procedure | 50–400 lines | skill (procedure) or reference (schema) |
+| Deployment commands | 50–150 lines | skill with safety guardrails |
+| Plan/template formats | 100–200 lines | `instructions/plan-templates.md` |
+| Credential patterns | 50–100 lines | `instructions/credentials.md` |
+| Issue/label workflow | 30–80 lines | `instructions/github-issues.md` |
+| Environment/tooling detail | 30–80 lines | `instructions/environment.md` |
 
-## Reference Pointer Format
-
-After extraction, add a reference pointer in the core file:
+## Pointer format
 
 ```markdown
-## AWS Infrastructure
-For AWS infrastructure reference (Amplify, RDS, SES), see `~/.claude/instructions/aws-<yourcompany>.md`
+- Detailed {topic}: `~/.claude/instructions/{topic}.md`.
 ```
 
-Keep the pointer brief (1-2 lines) with just enough context to know when to read the full reference.
+Brief (1–2 lines), plain backticked path, just enough context to know when to
+read it. Shared-file caveats (files also read by Codex/Copilot/agy/Pi): no
+`@`-prefixed lines (Claude/Gemini auto-inline them), no skill-name-only
+pointers (other CLIs can't invoke skills — name the underlying script/file),
+and remember Copilot needs `--add-dir` (alias) to read outside the cwd.
+
+## Interface-over-example conversions
+
+| Before (prose in CLAUDE.md) | After |
+|---|---|
+| "status must be pending, in_progress, or completed" | `enum: ["pending","in_progress","completed"]` in the tool schema |
+| Three worked examples of a commit message | one-line convention + the repo's own `git log` as the exemplar |
+| A pasted "good output" sample | pointer to a real golden file / passing test / HTML mockup |
+
+## Token math (why this matters)
+
+- Tokens ≈ bytes/4. An 8,000-token CLAUDE.md cut to 1,500 saves ~6,500 tokens
+  **per request** — ~1.3M tokens over a 200-turn session.
+- Skill metadata costs ~80 tokens at startup; the body loads only on trigger.
+- More context ≠ better: focused inputs measurably beat full-history dumps.
+- Documented upside: prompt rightsizing alone produced ~+10% on SWE-Bench-class
+  evals for the Claude Code team.
+
+## Verification checklist
+
+- [ ] Before/after token counts reported
+- [ ] Every pointer target exists on disk
+- [ ] No rule now exists in two layers (grep the changed value everywhere)
+- [ ] Hard (a)-class rules survived verbatim
+- [ ] `/doctor` run and reconciled
+- [ ] Private evals re-run (or the user explicitly waived it)
