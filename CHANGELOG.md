@@ -3,6 +3,14 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## 2026-07-31
+
+- **New skill: `repo-doctor`.** A read-only checkup for everything an AI agent actually reads in a repo. It measures rather than guesses: instruction-file topology (is `AGENTS.md` canonical, do `CLAUDE.md`/`GEMINI.md` `@import` it), the token cost you pay on every single request, how old the CodeMap is *and* whether its line numbers still resolve to the symbols they name, pointers that no longer exist, and a changelog that disagrees with the version in the code. It fixes nothing itself — it reports, then hands off to `unify-agents-md` → `claude-md-optimizer` → `update-code-map` → `version-manager`, always in that order. The order is the point: rightsizing a `CLAUDE.md` that is about to be replaced by a one-line `@import` pointer throws the work away, so topology gets settled first. A repo carrying only a `CLAUDE.md` is called out loudly, because Codex, Copilot, and the other CLIs read `AGENTS.md` and are getting no repo rules at all.
+
+## 2026-07-29
+
+- **`claude-md-optimizer` rewritten around Anthropic's Claude 5 context-engineering guidance.** The skill now teaches six shifts — rules→judgment, examples→interface design, upfront→progressive disclosure, repetition→single source, memory dump→auto-memory, specs→rich references — and runs classification-first: every instruction is sorted into keep-verbatim (security and data-loss rules), compress-to-judgment, move-to-a-skill-or-reference, or delete-as-duplicate, and you see that table before anything is edited. Also gained `/doctor` reconciliation, layer-model placement guidance, keep/cut audit tables, and the token math that justifies the cuts.
+
 ## 2026-07-24
 
 - **Documentation refresh + this changelog.** Brought `Docs/SETUP_GUIDE.md` up to date with everything added since February (the AGENTS.md house-rules split, all 21 skills, the secrets-guard hook, the hookify Codex guard, current plugins and MCP servers). Fixed the HTML install guide's stale bits — personal info now goes in `~/.config/agents/AGENTS.md`, and the manual-copy commands now install that file too. Refreshed the plugins-and-skills inventory in `Notes/`. Added this file.

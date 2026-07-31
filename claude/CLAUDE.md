@@ -74,3 +74,9 @@ implemented here by the `codex` plugin (full guide:
   Dry-run by default, `--apply` to write. `backfill` is once per repo (reconstructs
   git tags from history, fills changelog gaps). Required before every PR per the
   versioning rule in `~/.config/agents/AGENTS.md`.
+- `/repo-doctor [path | all] [--fix]` — read-only audit of a repo's agent-docs
+  layer: AGENTS.md/CLAUDE.md topology, always-loaded token cost, CodeMap age +
+  sampled line-number accuracy, broken pointers, changelog-vs-code drift
+  (`skill: repo-doctor`; tool: `~/.claude/skills/repo-doctor/audit.py`).
+  Triage only — dispatches `/unify-agents-md` → `/claude-md-optimizer` →
+  `/update-code-map` → `/version-manager` in that dependency order.

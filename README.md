@@ -26,6 +26,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── unify-agents-md.md        # /unify-agents-md slash command
 │       ├── feature-team.md           # Multi-task plan with review loop + model ladder
 │       ├── rename-code.md            # Safe cross-codebase symbol rename
+│       ├── repo-doctor.md            # /repo-doctor slash command
 │       ├── update-hermes.md          # /update-hermes slash command
 │       └── yt-transcript.md          # /yt-transcript slash command
 ├── config/
@@ -93,6 +94,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── product-manager/           # Product management toolkit
 │       ├── project-documenter/        # Per-project user-facing docs generator
 │       ├── raginclude-generator/      # Generate .raginclude file for RAG ingest
+│       ├── repo-doctor/               # Audit a repo's agent-docs layer; dispatch the right fix
 │       ├── sync-claude-config/        # Sync ~/.claude/ to this repo
 │       ├── technical-documenter/      # Developer/support docs generator
 │       ├── unify-agents-md/           # Make AGENTS.md canonical across all AI CLIs
@@ -289,6 +291,7 @@ Custom skills extend Claude Code with repeatable workflows:
 - **raginclude-generator** - Generates a `.raginclude` file to curate what a RAG knowledge base should ingest
 - **disk-doctor** - Disk cleanup + install hygiene: scans home/dev/cache locations, proposes a plan, deletes only via an audited safe-trash helper with one-command undo
 - **unify-agents-md** - Restructures instruction files so `AGENTS.md` is the single canonical guide every coding CLI follows (Claude Code, Codex, Copilot, Gemini, Pi), with `CLAUDE.md`/`GEMINI.md` as thin `@import` pointers
+- **repo-doctor** - Read-only triage over the whole agent-docs layer of a repo: instruction-file topology, always-loaded token cost, CodeMap age plus *sampled line-number accuracy* (claims are checked against the source, not assumed), broken pointers, and changelog-vs-code version drift. Reports first, then dispatches `unify-agents-md` → `claude-md-optimizer` → `update-code-map` → `version-manager` in dependency order — topology before content, because rightsizing a `CLAUDE.md` that is about to become an `@import` pointer throws the work away
 - **update-hermes** - Backup-first updater for a Hermes Agent install: patch/tarball backup of source customizations (the built-in backup excludes the source repo), `hermes update --backup`, post-update verification, and a documented restore path
 - **cl-project-init** - *(ChameleonLabs-specific, sanitized)* Example project scaffolder (Next.js SaaS / Python / library templates). Fork and rename for your own company — the `cl-` prefix marks it as company-scoped.
 - **yt-transcript** - Download a YouTube transcript into a local `yt-transcript` project
