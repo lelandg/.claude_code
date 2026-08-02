@@ -1,0 +1,44 @@
+{
+  "name": "lelandg-claude-config",
+  "owner": {
+    "name": "Leland Green",
+    "url": "https://github.com/lelandg"
+  },
+  "metadata": {
+    "description": "Installable skills from lelandg/.claude_code \u2014 a production-tested Claude Code configuration. Add with: /plugin marketplace add lelandg/.claude_code",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "claude-config-skills",
+      "source": "./",
+      "skills": [
+        "./claude/skills/claude-md-optimizer",
+        "./claude/skills/unify-agents-md",
+        "./claude/skills/project-documenter",
+        "./claude/skills/technical-documenter",
+        "./claude/skills/feature-documenter",
+        "./claude/skills/raginclude-generator",
+        "./claude/skills/graphify",
+        "./claude/skills/model-registry"
+      ],
+      "description": "General-purpose skills from this config, installable without cloning: claude-md-optimizer, unify-agents-md, project-documenter, technical-documenter, feature-documenter, raginclude-generator, graphify, model-registry. For version-manager, repo-doctor, update-code-map, and yt-transcript (which ship bundled tools), install repo-hygiene / docs-toolkit / yt-transcript from the Chameleon Labs marketplace (Chameleon-Labs-LLC/plugins) \u2014 or clone this repo and follow the README.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Leland Green"
+      },
+      "homepage": "https://github.com/lelandg/.claude_code",
+      "repository": "https://github.com/lelandg/.claude_code",
+      "license": "MIT",
+      "category": "development",
+      "keywords": [
+        "skills",
+        "claude-code",
+        "config",
+        "documentation",
+        "knowledge-graph",
+        "agents-md"
+      ]
+    }
+  ]
+}

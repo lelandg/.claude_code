@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## 2026-08-02
+
+- **This repo is now a plugin marketplace too.** Added `.claude-plugin/marketplace.json`, so `/plugin marketplace add lelandg/.claude_code` works directly — no clone needed. One plugin, `claude-config-skills`, exposes the eight general-purpose skills that run self-contained (claude-md-optimizer, unify-agents-md, project-documenter, technical-documenter, feature-documenter, raginclude-generator, graphify, model-registry). The four skills that ship bundled tools (`version-manager`, `repo-doctor`, `update-code-map`, `yt-transcript`) reference `~/.claude/skills/...` paths that only exist after a full config install, so they're published separately — with plugin-relative paths — on the [Chameleon Labs marketplace](https://github.com/Chameleon-Labs-LLC/plugins) as `repo-hygiene`, `docs-toolkit`, and `yt-transcript`. The README's Installation section explains both routes. Cloning and `/install-claude-config` remain the way to get the *full* config (agents, commands, CLAUDE.md, instructions, settings).
+
 ## 2026-07-31
 
 - **New skill: `repo-doctor`.** A read-only checkup for everything an AI agent actually reads in a repo. It measures rather than guesses: instruction-file topology (is `AGENTS.md` canonical, do `CLAUDE.md`/`GEMINI.md` `@import` it), the token cost you pay on every single request, how old the CodeMap is *and* whether its line numbers still resolve to the symbols they name, pointers that no longer exist, and a changelog that disagrees with the version in the code. It fixes nothing itself — it reports, then hands off to `unify-agents-md` → `claude-md-optimizer` → `update-code-map` → `version-manager`, always in that order. The order is the point: rightsizing a `CLAUDE.md` that is about to be replaced by a one-line `@import` pointer throws the work away, so topology gets settled first. A repo carrying only a `CLAUDE.md` is called out loudly, because Codex, Copilot, and the other CLIs read `AGENTS.md` and are getting no repo rules at all.

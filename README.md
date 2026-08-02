@@ -113,6 +113,24 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 
 > **New to Claude Code?** There's a beginner-friendly visual walkthrough with copy buttons for every command: **[open the HTML install guide](https://htmlpreview.github.io/?https://github.com/lelandg/.claude_code/blob/master/Docs/install-guide.html)** (or open [`Docs/install-guide.html`](Docs/install-guide.html) locally in your browser after cloning).
 
+### Just want the skills? One-command install, no clone
+
+This repo doubles as a Claude Code plugin marketplace. To install the general-purpose skills (claude-md-optimizer, unify-agents-md, the documenter suite, raginclude-generator, graphify, model-registry) without cloning anything:
+
+```
+/plugin marketplace add lelandg/.claude_code
+/plugin install claude-config-skills@lelandg-claude-config
+```
+
+Four skills ship bundled tools and are packaged separately on the [Chameleon Labs marketplace](https://github.com/Chameleon-Labs-LLC/plugins) instead: `version-manager` + `repo-doctor` (in `repo-hygiene`), `update-code-map` (in `docs-toolkit`), and `yt-transcript`:
+
+```
+/plugin marketplace add Chameleon-Labs-LLC/plugins
+/plugin install repo-hygiene@chameleon-labs
+```
+
+For the full config — agents, commands, CLAUDE.md, instructions, settings — use the options below.
+
 ### Prerequisites
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and working (`claude --version`)
