@@ -115,7 +115,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 
 ### Just want the skills? One-command install, no clone
 
-This repo doubles as a Claude Code plugin marketplace. To install the general-purpose skills (claude-md-optimizer, unify-agents-md, the documenter suite, raginclude-generator, graphify, model-registry) without cloning anything:
+This repo doubles as a Claude Code plugin marketplace. To install the general-purpose skills (claude-md-optimizer, unify-agents-md, the documenter suite, raginclude-generator, model-registry) without cloning anything:
 
 ```
 /plugin marketplace add lelandg/.claude_code
