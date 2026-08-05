@@ -80,6 +80,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   └── technical-quality.md       # Comprehensive technical analysis
 │   └── skills/                        # Custom skills (slash commands)
 │       ├── time.md                    # Execution time tracking
+│       ├── astrocade-game-creation/   # Design, prompt-plan, playtest & ship games on Astrocade
 │       ├── cl-project-init/           # Sanitized example: company project scaffolder
 │       ├── claude-md-optimizer/       # Rightsize CLAUDE.md/skills (Claude 5 context-engineering rules)
 │       ├── discord-post/              # Draft community posts/announcements to Discord/ dir
@@ -115,7 +116,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 
 ### Just want the skills? One-command install, no clone
 
-This repo doubles as a Claude Code plugin marketplace. To install the general-purpose skills (claude-md-optimizer, unify-agents-md, the documenter suite, raginclude-generator, model-registry) without cloning anything:
+This repo doubles as a Claude Code plugin marketplace. To install the general-purpose skills (claude-md-optimizer, unify-agents-md, the documenter suite, raginclude-generator, model-registry, astrocade-game-creation) without cloning anything:
 
 ```
 /plugin marketplace add lelandg/.claude_code
@@ -314,6 +315,7 @@ Custom skills extend Claude Code with repeatable workflows:
 - **cl-project-init** - *(ChameleonLabs-specific, sanitized)* Example project scaffolder (Next.js SaaS / Python / library templates). Fork and rename for your own company — the `cl-` prefix marks it as company-scoped.
 - **yt-transcript** - Download a YouTube transcript into a local `yt-transcript` project
 - **product-manager** - Full PM toolkit (strategy, discovery, market research, GTM, execution)
+- **astrocade-game-creation** - Design, prompt-plan, playtest, and ship casual games on [Astrocade](https://www.astrocade.com), the wish-based AI game-creation platform: staged wish plans, a game-design-doc template, and the Astro Academy silent-observation playtest method
 - **install-claude-config** - Merges this repo's config into `~/.claude/` with diff-and-ask conflict resolution
 - **sync-claude-config** - Syncs `~/.claude/` back to this repo with automatic sanitization of private info
 - **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default.

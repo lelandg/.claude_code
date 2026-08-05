@@ -19,10 +19,11 @@
         "./claude/skills/technical-documenter",
         "./claude/skills/feature-documenter",
         "./claude/skills/raginclude-generator",
-        "./claude/skills/model-registry"
+        "./claude/skills/model-registry",
+        "./claude/skills/astrocade-game-creation"
       ],
-      "description": "General-purpose skills from this config, installable without cloning: claude-md-optimizer, unify-agents-md, project-documenter, technical-documenter, feature-documenter, raginclude-generator, model-registry. For version-manager, repo-doctor, update-code-map, and yt-transcript (which ship bundled tools), install repo-hygiene / docs-toolkit / yt-transcript from the Chameleon Labs marketplace (Chameleon-Labs-LLC/plugins) — or clone this repo and follow the README.",
-      "version": "0.1.0",
+      "description": "General-purpose skills from this config, installable without cloning: claude-md-optimizer, unify-agents-md, project-documenter, technical-documenter, feature-documenter, raginclude-generator, model-registry, astrocade-game-creation. For version-manager, repo-doctor, update-code-map, and yt-transcript (which ship bundled tools), install repo-hygiene / docs-toolkit / yt-transcript from the Chameleon Labs marketplace (Chameleon-Labs-LLC/plugins) — or clone this repo and follow the README.",
+      "version": "0.2.0",
       "author": {
         "name": "Leland Green"
       },

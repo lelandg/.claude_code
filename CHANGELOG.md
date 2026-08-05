@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## 2026-08-05
+
+- **New skill: `astrocade-game-creation`.** Design, prompt-plan, playtest, and ship casual games on [Astrocade](https://www.astrocade.com), the wish-based AI game-creation platform. Ships a staged wish-prompt pattern library (`references/wish-patterns.md`), the Astro Academy method — including the silent-observation playtest protocol with its binary build/abandon decision rule (`references/academy-method.md`) — and a one-page game-design-doc template (`assets/gdd-template.md`). Pure markdown with relative paths, so it's also packaged into the `claude-config-skills` marketplace plugin (now at 0.2.0, eight skills).
+
 ## 2026-08-02
 
 - **This repo is now a plugin marketplace too.** Added `.claude-plugin/marketplace.json`, so `/plugin marketplace add lelandg/.claude_code` works directly — no clone needed. One plugin, `claude-config-skills`, exposes the seven general-purpose skills that run self-contained (claude-md-optimizer, unify-agents-md, project-documenter, technical-documenter, feature-documenter, raginclude-generator, model-registry). `graphify` is deliberately not packaged — it is third-party work by Safi Shamsi ([Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify), MIT/Apache-2.0) that ships its own installer; install it from upstream. The four skills that ship bundled tools (`version-manager`, `repo-doctor`, `update-code-map`, `yt-transcript`) reference `~/.claude/skills/...` paths that only exist after a full config install, so they're published separately — with plugin-relative paths — on the [Chameleon Labs marketplace](https://github.com/Chameleon-Labs-LLC/plugins) as `repo-hygiene`, `docs-toolkit`, and `yt-transcript`. The README's Installation section explains both routes. Cloning and `/install-claude-config` remain the way to get the *full* config (agents, commands, CLAUDE.md, instructions, settings).
