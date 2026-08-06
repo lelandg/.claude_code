@@ -1,7 +1,7 @@
 """Tests for version_tool, one fixture per real-world shape found in the
 eight-repo survey (design §10).
 
-Each synthetic repo reproduces a failure actually present in the surveyed projects,
+Each synthetic repo reproduces a failure actually present in Leland's projects,
 so a regression here means the tool would mishandle a real repository.
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ CHANGELOG = """# Changelog
 # --------------------------------------------------------------------------
 
 def test_pointer_comment_wins_over_packaging_metadata(tmp_path):
-    """A Python service: pyproject and setup.py both name src/version.py canonical,
+    """RealtyShield: pyproject and setup.py both name src/version.py canonical,
     and src/version.py (0.9.0) disagrees with everything else (0.2.0)."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {
@@ -88,7 +88,7 @@ def test_pointer_comment_wins_over_packaging_metadata(tmp_path):
 
 
 def test_empty_package_json_is_skipped_not_filled(tmp_path):
-    """A CLI tool: package.json is `{}` — a stub, not a version location."""
+    """ChatMaster: package.json is `{}` — a stub, not a version location."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {"package.json": "{}\n", "VERSION": "0.2.0\n"})
     canonical, _mirrors, notes = vt.detect(repo)
@@ -98,8 +98,76 @@ def test_empty_package_json_is_skipped_not_filled(tmp_path):
     assert any("empty stub" in n for n in notes)
 
 
+MARKETPLACE = """{
+  "name": "example-marketplace",
+  "owner": { "name": "Example" },
+  "metadata": {
+    "description": "catalog of plugins",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "example-plugin",
+      "source": "./",
+      "skills": ["./claude/skills/version-manager"],
+      "description": "one plugin",
+      "version": "0.3.0"
+    }
+  ]
+}
+"""
+
+
+def test_marketplace_plugin_version_is_detected(tmp_path):
+    """.claude_code: the only version home is the plugin entry in
+    .claude-plugin/marketplace.json — metadata.version is the catalog's own
+    series and must not be picked (or later overwritten) as the repo version."""
+    repo = new_repo(tmp_path)
+    commit(repo, "init", {".claude-plugin/marketplace.json": MARKETPLACE})
+    canonical, mirrors, notes = vt.detect(repo)
+    assert canonical is not None
+    assert canonical.path == Path(".claude-plugin/marketplace.json")
+    assert canonical.kind == "marketplace"
+    assert canonical.value == "0.3.0"
+    assert not mirrors
+    assert any("metadata.version" in n for n in notes)
+
+
+def test_marketplace_with_many_plugins_is_noted_not_tracked(tmp_path):
+    """Chameleon-Labs-LLC/plugins: seven plugins, each with its own version —
+    no single repo version exists, so the tool must not pick plugins[0]."""
+    repo = new_repo(tmp_path)
+    market = json.loads(MARKETPLACE)
+    market["plugins"].append(dict(market["plugins"][0],
+                                  name="second-plugin", version="1.4.0"))
+    commit(repo, "init",
+           {".claude-plugin/marketplace.json": json.dumps(market, indent=2)})
+    canonical, _mirrors, notes = vt.detect(repo)
+    assert canonical is None
+    assert any("2 plugins" in n for n in notes)
+
+
+def test_release_bumps_marketplace_plugin_not_metadata(tmp_path):
+    repo = new_repo(tmp_path)
+    commit(repo, "init", {
+        ".claude-plugin/marketplace.json": MARKETPLACE,
+        "CHANGELOG.md": CHANGELOG.format(v="0.3.0", d="2026-08-01"),
+    }, when="2026-08-01T10:00:00")
+    commit(repo, "feat: new skill", when="2026-08-06T10:00:00")
+
+    assert vt.main(["--repo", str(repo), "release", "minor", "--apply"]) == 0
+
+    text = (repo / ".claude-plugin/marketplace.json").read_text()
+    data = json.loads(text)
+    assert data["plugins"][0]["version"] == "0.4.0"
+    assert data["metadata"]["version"] == "0.2.0", "metadata.version overwritten"
+    assert '"description": "catalog of plugins"' in text, "file was reserialised"
+    assert "## [0.4.0]" in (repo / "CHANGELOG.md").read_text()
+    assert "v0.4.0" in vt.existing_tags(repo)
+
+
 def test_version_file_with_trailing_comments_is_detected(tmp_path):
-    """A Python service's VERSION has explanatory comments under the number;
+    """RealtyShield's VERSION has explanatory comments under the number;
     requiring a bare file left it undetected and it would go stale."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {
@@ -167,8 +235,8 @@ def test_ledger_recovers_relocated_version_home(tmp_path):
 
 
 def test_generated_client_version_never_enters_the_ledger(tmp_path):
-    """A Next.js app tracked a generated Prisma client; its bundled package.json
-    says "version": "6.19.0", which surfaced as a release of the app itself."""
+    """QuickStock tracked a generated Prisma client; its bundled package.json
+    says "version": "6.19.0", which surfaced as a QuickStock release."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {"package.json": json.dumps({"version": "1.0.0"})},
            when="2025-11-20T10:00:00")
@@ -211,7 +279,7 @@ def test_reconcile_finds_gaps_mismatches_and_unlocatable(tmp_path):
 # --------------------------------------------------------------------------
 
 def test_sparse_real_record_invents_nothing(tmp_path):
-    """A Next.js app: 3 real bumps across many commits stays 3 versions."""
+    """QuickStock: 3 real bumps across many commits stays 3 versions."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {"package.json": json.dumps({"version": "0.0.0"})},
            when="2025-11-20T10:00:00")
@@ -231,7 +299,7 @@ def test_sparse_real_record_invents_nothing(tmp_path):
 
 
 def test_placeholder_version_is_classified_and_synthesized(tmp_path):
-    """A busy web app: 0.1.0 set once and never moved is a default, not a record."""
+    """ChameleonLabs: 0.1.0 set once and never moved is a default, not a record."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {"package.json": json.dumps({"version": "0.1.0"})},
            when="2025-11-10T10:00:00")
@@ -261,7 +329,7 @@ def test_synthesis_is_per_boundary_never_per_commit(tmp_path):
 
 
 def test_boundary_guard_groups_by_month(tmp_path):
-    """A busy web app' 348 PRs must not become 0.348.0."""
+    """ChameleonLabs' 348 PRs must not become 0.348.0."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {"VERSION": "0.1.0\n"}, when="2025-11-10T10:00:00")
     n = vt.BOUNDARY_GUARD + 20
@@ -276,7 +344,7 @@ def test_boundary_guard_groups_by_month(tmp_path):
 
 
 def test_changelog_record_is_not_a_placeholder(tmp_path):
-    """A small service: app/__init__.py never moved off 0.1.0, but the changelog
+    """Heimdallr: app/__init__.py never moved off 0.1.0, but the changelog
     shipped 0.1.0 and 0.2.0. Synthesizing here produced 0.0.1 — below what
     already shipped."""
     repo = new_repo(tmp_path)
@@ -441,7 +509,7 @@ def test_release_refuses_on_dirty_tree(tmp_path):
 
 
 def test_release_refuses_when_locations_disagree(tmp_path):
-    """A Python service today: 0.9.0 vs 0.2.0 must block, not silently pick one."""
+    """RealtyShield today: 0.9.0 vs 0.2.0 must block, not silently pick one."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {
         "pyproject.toml": '[project]\nversion = "0.2.0"\n',
@@ -487,7 +555,7 @@ def test_check_never_writes(tmp_path):
 
 
 def test_version_behind_changelog_is_reported(tmp_path, capsys):
-    """A small service: code says 0.1.0, changelog shipped 0.2.0."""
+    """Heimdallr: code says 0.1.0, changelog shipped 0.2.0."""
     repo = new_repo(tmp_path)
     commit(repo, "init", {
         "app/__init__.py": '__version__ = "0.1.0"\n',

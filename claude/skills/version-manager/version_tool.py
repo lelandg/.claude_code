@@ -105,15 +105,22 @@ PATTERNS: dict[str, re.Pattern[str]] = {
         r"(?P<pre>\"version\"\s*:\s*\")(?P<v>\d+\.\d+\.\d+)(?P<post>\")"),
     "py_const": re.compile(
         r"(?P<pre>^(?:__version__|VERSION)\s*=\s*[\"'])(?P<v>\d+\.\d+\.\d+)(?P<post>[\"'])", re.M),
-    # First line only — some projects put explanatory comments
+    # First line only — RealtyShield's VERSION carries explanatory comments
     # beneath the number, so demanding a bare file misses it entirely.
     "version_file": re.compile(
         r"(?P<pre>\A[ \t]*)(?P<v>\d+\.\d+\.\d+)(?P<post>[ \t]*(?:\r?\n|\Z))"),
     "readme": re.compile(
         r"(?P<pre>\*\*Version\s+)(?P<v>\d+\.\d+\.\d+)(?P<post>\*\*)"),
+    # Claude Code plugin marketplace: the repo version lives on the single
+    # plugin entry, NOT metadata.version (the catalog's own series). First
+    # "version" key after the plugins array opens is plugins[0]'s — detect()
+    # verifies that against parsed JSON before trusting this pattern.
+    "marketplace": re.compile(
+        r"(?P<pre>\"plugins\"[\s\S]*?\"version\"\s*:\s*\")"
+        r"(?P<v>\d+\.\d+\.\d+)(?P<post>\")"),
 }
 
-# Some projects' own files name their canonical source; reading it beats
+# RealtyShield's own files name their canonical source; reading it beats
 # guessing. Two phrasings occur in that repo alone, so match both:
 #   "The actual version is managed in src/version.py"
 #   'version = "0.2.0"  # See src/version.py for centralized version management'
@@ -132,9 +139,9 @@ def _pointer_target(text: str) -> str | None:
     return m.group("managed") or m.group("see")
 
 # Vendored and generated trees carry their own package.json/version files.
-# a Next.js app tracked a generated Prisma client whose bundled package.json says
+# QuickStock tracked a generated Prisma client whose bundled package.json says
 # "version": "6.19.0" — without this, Prisma's version enters the ledger as a
-# a Next.js app release.
+# QuickStock release.
 SKIP_DIRS = {".git", ".venv", ".venv_linux", "node_modules", "__pycache__",
              "dist", "build", ".next", "venv", "site-packages",
              "generated", "vendor", ".prisma", "out", "coverage", "target"}
@@ -179,7 +186,9 @@ def _candidate_files(repo: Path) -> list[tuple[Path, str]]:
     for name, kind in (("pyproject.toml", "pyproject"),
                        ("package.json", "package_json"),
                        ("VERSION", "version_file"),
-                       ("README.md", "readme")):
+                       ("README.md", "readme"),
+                       # dot-dir, so the pruned walk below never reaches it
+                       (".claude-plugin/marketplace.json", "marketplace")):
         if (repo / name).exists():
             out.append((Path(name), kind))
 
@@ -214,6 +223,27 @@ def detect(repo: Path) -> tuple[Location | None, list[Location], list[str]]:
             except json.JSONDecodeError:
                 notes.append(f"{rel}: unparseable, skipped")
                 continue
+        if kind == "marketplace":
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                notes.append(f"{rel}: unparseable, skipped")
+                continue
+            plugins = data.get("plugins") or []
+            if len(plugins) != 1:
+                notes.append(f"{rel}: {len(plugins)} plugins — per-plugin "
+                             "versions, no single repo version; skipped")
+                continue
+            declared = str(plugins[0].get("version") or "") \
+                if isinstance(plugins[0], dict) else ""
+            if parse_version(declared) is None or \
+                    _extract(text, kind) != declared:
+                notes.append(f"{rel}: plugin version missing or pattern "
+                             "mismatch; skipped")
+                continue
+            if (data.get("metadata") or {}).get("version"):
+                notes.append(f"{rel}: metadata.version is the catalog's own "
+                             "series — left unmanaged")
         value = _extract(text, kind)
         if value is None:
             continue
@@ -238,7 +268,7 @@ def detect(repo: Path) -> tuple[Location | None, list[Location], list[str]]:
             return 0
         if loc.mirror_only:
             return 90
-        return {"pyproject": 10, "package_json": 11,
+        return {"pyproject": 10, "package_json": 11, "marketplace": 12,
                 "py_const": 20, "version_file": 30}.get(loc.kind, 50)
 
     real = [loc for loc in found if not loc.mirror_only]
@@ -314,7 +344,7 @@ def git_ledger(repo: Path, canonical: Location | None) -> list[Entry]:
     """Chronological version changes derived from git history.
 
     One `git log -p` pass over every candidate path at once. Walking each path
-    separately with --follow took over two minutes on a Python service; --follow's
+    separately with --follow took over two minutes on RealtyShield; --follow's
     rename detection is redundant anyway, since relocated homes are probed
     explicitly by _history_paths.
     """
@@ -513,7 +543,7 @@ def is_placeholder(git_entries: list[Entry], changelog_count: int = 0) -> bool:
     """A version set once and never moved is a default, not a record (§5.1).
 
     A changelog declaring several versions IS a record even when the version
-    file never moved — a small service shipped 0.1.0 and 0.2.0 while app/__init__.py
+    file never moved — Heimdallr shipped 0.1.0 and 0.2.0 while app/__init__.py
     sat at 0.1.0. Treating that as a placeholder would synthesize a series
     below what already shipped.
     """
@@ -648,7 +678,7 @@ def cmd_check(repo: Path, **_: object) -> int:
     else:
         print(f"  classification: real record — {len(git_entries)} bumps in history")
 
-    # A shipped changelog ahead of the code is a small service's exact failure.
+    # A shipped changelog ahead of the code is Heimdallr's exact failure.
     if canonical and canonical.value and cl:
         highest = max(cl, key=version_key)
         if version_key(highest) > version_key(canonical.value):
