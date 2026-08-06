@@ -52,7 +52,8 @@ Always interview first, **one question at a time** (AskUserQuestion where availa
 plain numbered questions otherwise):
 
 1. **Goal** — what should Claude help with? (business ops, coding, content, research,
-   automation, …)
+   automation, …) If coding is in the mix, follow up: do they already have an IDE
+   installed, and which one?
 2. **Subscriptions** — which Claude plan (free trial / Pro / Max)? Any other AI
    subscriptions (ChatGPT, Copilot, Gemini)?
 3. **Surface & OS** — desktop app or CLI; Windows / macOS / Linux.
@@ -64,8 +65,11 @@ plain numbered questions otherwise):
 - **Other AI subscriptions → adapt + point.** One-paragraph intro to the matching
   companion tool (ChatGPT sub → Codex CLI, etc.) with the official install link only.
   No step-by-step setup for non-Claude tools in v1.
-- **Coding goal → PyCharm Community Edition.** Free IDE; its AI-assistant plugin
-  ecosystem means switching provider subscriptions doesn't mean switching IDEs.
+- **Coding goal, no IDE → PyCharm Community Edition.** Free IDE; its AI-assistant
+  plugin ecosystem means switching provider subscriptions doesn't mean switching IDEs.
+- **Coding goal, IDE already installed → brief mention only.** Respect their existing
+  setup; note PyCharm CE in one sentence as an alternative worth knowing about and
+  move on.
 
 ### Config check
 
