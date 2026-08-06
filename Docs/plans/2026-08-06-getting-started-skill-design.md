@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-06
 **Status:** Approved (design); implementation plan to follow
-**Origin:** `Notes/Josiah-Claude-help.md` — onboarding a newcomer (Josiah) surfaced the need
+**Origin:** onboarding a newcomer (a family member) surfaced the need
 for a concierge skill that interviews new users and sets them up.
 
 ## Purpose
@@ -137,7 +137,7 @@ Generated at the **end** of the interview, following `assets/plan-style.md`:
 
 - Implementation follows the `superpowers:writing-skills` checklist.
 - Role-play three personas in fresh sessions:
-  1. Josiah-style business user on the desktop app (no coding).
+  1. Newcomer-business user on the desktop app (no coding).
   2. Trial user → verify efficiency mode engages.
   3. Coder with a ChatGPT subscription → verify Codex pointer + PyCharm CE rec.
 - Render the generated HTML plan; confirm copy buttons work and page is self-contained.

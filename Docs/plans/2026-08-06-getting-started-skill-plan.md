@@ -673,7 +673,7 @@ Expected: exactly `SKILL.md`, `references/catalog.md`, `references/claude-basics
 
 For each persona, dispatch a fresh subagent whose prompt is: "Read /home/leland/.claude/skills/getting-started/SKILL.md and role-play the concierge for this user, following it exactly. I will play the user: PERSONA. Report: which questions you asked in what order, which adaptation rules fired, which catalog entries you recommended, and whether anything in the skill was ambiguous or contradictory." Personas:
 
-1. *Josiah-style*: runs a small business (warehouse/inventory, SEO), desktop app, Windows, Claude trial via a free pass, no other AI subscriptions, no coding.
+1. *Newcomer-business*: runs a small business (warehouse/inventory, SEO), desktop app, Windows, Claude trial via a free pass, no other AI subscriptions, no coding.
    Expected: efficiency mode fires; Chat/Code/Cowork guidance given; recommends the two marketplaces + Agent Spawner; no PyCharm mention.
 2. *Trial minimalist*: free plan, CLI, Linux, wants research help only.
    Expected: efficiency mode fires; light recommendations (yt-transcript, marketplace); no coding content.
