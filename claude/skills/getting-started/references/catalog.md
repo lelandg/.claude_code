@@ -9,8 +9,8 @@ different GitHub accounts.
 ### Claude Code config + skills marketplace — `lelandg/.claude_code`
 **Audience:** business, coder, power user
 A production-tested Claude Code configuration that doubles as a plugin marketplace.
-Installing the plugin gets you this concierge plus documentation, context-optimization,
-and knowledge-graph skills without cloning anything.
+Installing the plugin gets you this concierge plus documentation and context-optimization
+skills without cloning anything.
 **Install:**
 ```
 /plugin marketplace add lelandg/.claude_code
@@ -74,6 +74,8 @@ Chameleon Labs marketplace (no clone needed):
 ```
 /plugin install yt-transcript@chameleon-labs
 ```
+Requires the Chameleon Labs marketplace from the entry above (`/plugin marketplace add
+Chameleon-Labs-LLC/plugins`) to be added first.
 
 ### karpathy-task-brief — `lelandg/karpathy-task-brief`
 **Audience:** coder
