@@ -40,7 +40,8 @@ Ask in order, one at a time:
 2. **Subscriptions.** "Which Claude plan are you on — free/trial, Pro, or Max? Do you
    have any other AI subscriptions, like ChatGPT, GitHub Copilot, or Gemini?"
 3. **Surface & OS.** "Are you using the Claude desktop app or the terminal (CLI)? And
-   are you on Windows, Mac, or Linux?"
+   are you on Windows, Mac, or Linux?" If Windows, follow up: "Do you use WSL — the
+   Windows Subsystem for Linux — or not sure?" ("Not sure" counts as no WSL.)
 
 ## Step 2 — Adapt
 
@@ -72,6 +73,11 @@ ls ~/.claude/plugins/cache 2>/dev/null # any plugin marketplaces added?
 Report findings in plain language ("You have Claude Code 2.x installed but no global
 instructions file — that's a one-page document that tells Claude how you like to work").
 Offer improvements one at a time; apply only on explicit yes.
+
+On native Windows without WSL, these POSIX probes may fail because the shell is
+different — that is NOT evidence the config is missing. `claude --version` works
+everywhere; for the rest use PowerShell equivalents (`Test-Path $env:USERPROFILE\.claude`,
+`dir $env:USERPROFILE\.claude`) and interpret with care.
 
 ## Step 4 — Recommend
 
