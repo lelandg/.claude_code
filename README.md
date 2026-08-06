@@ -2,6 +2,20 @@
 
 A comprehensive, production-tested configuration for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) - Anthropic's CLI for Claude. This repository mirrors a real-world `~/.claude/` setup with custom agents, skills, output styles, and best-practice instructions.
 
+## New here? Start with `/getting-started`
+
+```
+/plugin marketplace add lelandg/.claude_code
+/plugin install claude-config-skills@lelandg-claude-config
+```
+
+Then say **"help me get started"** (or type `/getting-started`). The concierge interviews
+you — goals, subscriptions, setup — then checks your configuration, recommends the right
+tools from this catalog, and hands you a personalized HTML action plan.
+
+*Maintainers: when a new public repo ships, add a line for it to
+`claude/skills/getting-started/references/catalog.md` before the next publish.*
+
 ## Platform
 
 **This config is written for Linux** (native Linux or WSL on Windows). macOS should work with minimal changes — swap `python3` for `python` where needed and replace `/home/<user>` with `/Users/<user>` in permission entries.
