@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## 2026-08-06
+
+- **New skill: `getting-started`.** Added the `getting-started` concierge — the marketplace's new headline skill. It interviews newcomers one question at a time (goals, subscriptions, surface), adapts (efficiency mode on trial plans, companion-tool pointers for other AI subscriptions, PyCharm CE advice scaled to whether an IDE exists), checks configuration with consent, recommends from a curated catalog of Leland's open source, and generates a personalized HTML action plan with copy-to-clipboard commands. Wired into `.claude-plugin/marketplace.json` (`claude-config-skills` now at 0.3.0, nine skills) and the README.
+
 ## 2026-08-05
 
 - **New skill: `astrocade-game-creation`.** Design, prompt-plan, playtest, and ship casual games on [Astrocade](https://www.astrocade.com), the wish-based AI game-creation platform. Ships a staged wish-prompt pattern library (`references/wish-patterns.md`), the Astro Academy method — including the silent-observation playtest protocol with its binary build/abandon decision rule (`references/academy-method.md`) — and a one-page game-design-doc template (`assets/gdd-template.md`). Pure markdown with relative paths, so it's also packaged into the `claude-config-skills` marketplace plugin (now at 0.2.0, eight skills).
