@@ -1,0 +1,256 @@
+# Ownership manifest for tools/agent-config-sync.
+#
+# WSL is the operational authority for portable intent; this repository is the
+# sanitized record; Windows is a derived target with a protected overlay.
+# Design: Docs/plans/2026-08-08-wsl-authoritative-agent-config-sync-design.md
+#
+# Policies: portable_authoritative | portable_additive | platform_overlay | excluded
+
+schema_version = 1
+
+[roots]
+wsl_home = "/home/leland"
+repo = "/mnt/d/Documents/Code/GitHub/.claude_code"
+windows_home = "/mnt/c/Users/aboog"
+
+[state]
+dir = "~/.local/state/agent-config-sync"
+
+[secrets]
+# Keys whose VALUES are never collected. Matched case-insensitively against
+# each JSON/TOML key on the path to a scalar.
+deny_key_patterns = [
+  "(?i)token",
+  "(?i)secret",
+  "(?i)password",
+  "(?i)passwd",
+  "(?i)api[_-]?key",
+  "(?i)access[_-]?key",
+  "(?i)credential",
+  "(?i)authorization",
+  "(?i)bearer",
+  "(?i)private[_-]?key",
+  "(?i)session[_-]?id",
+]
+# Paths never read at all, relative to any layer root.
+deny_path_globs = [
+  "**/.credentials.json",
+  "**/history.jsonl",
+  "**/*.sqlite",
+  "**/*.db",
+  "**/.env",
+  "**/.env.*",
+  "**/projects/**",
+  "**/sessions/**",
+  "**/session-env/**",
+  "**/shell-snapshots/**",
+  "**/file-history/**",
+  "**/todos/**",
+  "**/tasks/**",
+  "**/statsig/**",
+  "**/telemetry/**",
+  "**/downloads/**",
+  "**/plugins/cache/**",
+  "**/security/**",
+  "**/*.log",
+]
+
+# ---------------------------------------------------------------------------
+# Portable authoritative: WSL intent is the desired value.
+# ---------------------------------------------------------------------------
+
+[[entries]]
+id = "agents-md"
+policy = "portable_authoritative"
+kind = "text"
+wsl = ".config/agents/AGENTS.md"
+repo = "config/agents/AGENTS.md"
+windows = ".config/agents/AGENTS.md"
+
+[[entries]]
+id = "claude-md"
+policy = "portable_authoritative"
+kind = "text"
+wsl = ".claude/CLAUDE.md"
+repo = "claude/CLAUDE.md"
+windows = ".claude/CLAUDE.md"
+
+[[entries]]
+id = "claude-instructions"
+policy = "portable_authoritative"
+kind = "tree"
+wsl = ".claude/instructions"
+repo = "claude/instructions"
+windows = ".claude/instructions"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "claude-agents"
+policy = "portable_authoritative"
+kind = "tree"
+wsl = ".claude/agents"
+repo = "claude/agents"
+windows = ".claude/agents"
+globs = ["**/*.md"]
+
+# ---------------------------------------------------------------------------
+# Portable additive: additions/updates are candidates; deletions need approval.
+# ---------------------------------------------------------------------------
+
+[[entries]]
+id = "claude-skills"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".claude/skills"
+repo = "claude/skills"
+windows = ".claude/skills"
+globs = ["**/*.md", "**/*.py", "**/*.sh", "**/*.json", "**/*.toml"]
+
+[[entries]]
+id = "claude-commands"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".claude/commands"
+repo = "claude/commands"
+windows = ".claude/commands"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "claude-tools"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".claude/tools"
+repo = "claude/tools"
+windows = ".claude/tools"
+globs = ["**/*.py", "**/*.ts", "**/*.sh"]
+
+[[entries]]
+id = "codex-instructions"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".codex"
+repo = "codex"
+windows = ".codex"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "copilot-instructions"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".copilot"
+repo = "copilot"
+windows = ".copilot"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "gemini-instructions"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".gemini"
+repo = "gemini"
+windows = ".gemini"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "pi-instructions"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".pi"
+repo = "pi"
+windows = ".pi"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "agents-dir"
+policy = "portable_additive"
+kind = "tree"
+wsl = ".agents"
+repo = "agents"
+windows = ".agents"
+globs = ["**/*.md"]
+
+# ---------------------------------------------------------------------------
+# Settings: semantic field-level merge.
+# ---------------------------------------------------------------------------
+
+[[entries]]
+id = "claude-settings"
+policy = "portable_authoritative"
+kind = "json"
+wsl = ".claude/settings.json"
+repo = "claude/settings.json"
+windows = ".claude/settings.json"
+
+[entries.fields]
+"model" = "portable_authoritative"
+"outputStyle" = "portable_authoritative"
+"permissions" = "portable_authoritative"
+"hooks" = "portable_authoritative"
+"env" = "portable_authoritative"
+"statusLine.command" = "platform_overlay"
+"awsAuthRefresh" = "excluded"
+"forceLoginMethod" = "platform_overlay"
+
+[[entries]]
+id = "codex-config"
+policy = "portable_authoritative"
+kind = "toml"
+wsl = ".codex/config.toml"
+repo = "codex/config.toml"
+windows = ".codex/config.toml"
+
+[entries.fields]
+"model" = "portable_authoritative"
+"model_reasoning_effort" = "portable_authoritative"
+"projects" = "platform_overlay"
+"desktop" = "platform_overlay"
+"windows" = "platform_overlay"
+"shell" = "platform_overlay"
+
+[[entries]]
+id = "claude-mcp"
+policy = "portable_authoritative"
+kind = "json"
+wsl = ".claude/mcp.json"
+repo = "claude/mcp.json"
+windows = ".claude/mcp.json"
+
+[entries.fields]
+"mcpServers.*.command" = "platform_overlay"
+"mcpServers.*.args" = "portable_authoritative"
+"mcpServers.*.env" = "excluded"
+
+# ---------------------------------------------------------------------------
+# Plugins: identities reconciled through native managers, never copied.
+#
+# The path below is a BASE directory, not a file. plugins.py reads two
+# well-known files under it (verified against the live machine 2026-08-10):
+#   <base>/settings.json                  -> enabledPlugins {"name@market": bool}
+#                                            extraKnownMarketplaces
+#   <base>/plugins/installed_plugins.json -> {"plugins": {"name@market": [
+#                                              {"scope","installPath",
+#                                               "version","installedAt"}]}}
+# installed_plugins.json is native runtime state -- gitignored, never committed,
+# and present only in the wsl/windows layers. The repo layer therefore supplies
+# desired identity + enabled state only, which is exactly the design's rule that
+# plugin code is never copied across the boundary.
+# ---------------------------------------------------------------------------
+
+[[entries]]
+id = "claude-plugins"
+policy = "portable_authoritative"
+kind = "plugins"
+wsl = ".claude"
+repo = "claude"
+windows = ".claude"
+
+# ---------------------------------------------------------------------------
+# Explicitly excluded: never collected (belt-and-braces alongside [secrets]).
+# ---------------------------------------------------------------------------
+
+[[entries]]
+id = "claude-local-state"
+policy = "excluded"
+kind = "tree"
+wsl = ".claude"
+globs = [".claude.json", "my-projects.yaml", "policy-limits.json"]

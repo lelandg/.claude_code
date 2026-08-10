@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Ownership manifest: the single place roots, paths, and policies are declared.
+
+Path literals live here and in config/agent-sync.toml -- never spread through
+the implementation (design section "Paths").
+"""
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+MANIFEST_SCHEMA_VERSION = 1
+
+POLICIES = (
+    "portable_authoritative",
+    "portable_additive",
+    "platform_overlay",
+    "excluded",
+)
+KINDS = ("text", "tree", "json", "toml", "plugins")
+
+
+class ManifestError(ValueError):
+    """Manifest is missing, malformed, or declares something unsupported."""
+
+
+@dataclass(frozen=True)
+class Roots:
+    wsl_home: Path
+    repo: Path
+    windows_home: Path | None = None
+
+    def for_layer(self, layer: str) -> Path | None:
+        return {"wsl": self.wsl_home, "repo": self.repo,
+                "windows": self.windows_home}[layer]
+
+
+@dataclass(frozen=True)
+class Entry:
+    id: str
+    policy: str
+    kind: str
+    wsl: str | None = None
+    repo: str | None = None
+    windows: str | None = None
+    globs: tuple[str, ...] = ()
+    fields: dict[str, str] = field(default_factory=dict)
+
+    def rel_for_layer(self, layer: str) -> str | None:
+        return {"wsl": self.wsl, "repo": self.repo, "windows": self.windows}[layer]
+
+
+@dataclass(frozen=True)
+class SecretPolicy:
+    deny_key_patterns: tuple[str, ...] = ()
+    deny_path_globs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Manifest:
+    schema_version: int
+    roots: Roots
+    state_dir: Path
+    entries: tuple[Entry, ...]
+    secrets: SecretPolicy
+
+    def entry(self, entry_id: str) -> Entry:
+        for candidate in self.entries:
+            if candidate.id == entry_id:
+                return candidate
+        raise ManifestError(f"no entry with id {entry_id!r}")
+
+
+def _expand(value: str) -> Path:
+    return Path(value).expanduser()
+
+
+def load_manifest(path: Path,
+                  *,
+                  root_overrides: dict[str, str] | None = None) -> Manifest:
+    """Load and validate the manifest. Errors name the file, never its bytes."""
+    path = Path(path)
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except FileNotFoundError as exc:
+        raise ManifestError(f"{path.name}: manifest not found at {path}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        # exc carries a line/column, not file content -- but rebuild the message
+        # defensively so no source fragment can ride along.
+        line = getattr(exc, "lineno", None)
+        where = f" at line {line}" if line else ""
+        raise ManifestError(f"{path.name}: invalid TOML{where}") from None
+
+    version = data.get("schema_version")
+    if version != MANIFEST_SCHEMA_VERSION:
+        raise ManifestError(
+            f"{path.name}: schema_version {version!r}; "
+            f"this tool supports {MANIFEST_SCHEMA_VERSION}")
+
+    raw_roots = dict(data.get("roots", {}))
+    raw_roots.update(root_overrides or {})
+    for required in ("wsl_home", "repo"):
+        if not raw_roots.get(required):
+            raise ManifestError(f"{path.name}: roots.{required} is required")
+    windows = raw_roots.get("windows_home")
+    roots = Roots(
+        wsl_home=_expand(raw_roots["wsl_home"]),
+        repo=_expand(raw_roots["repo"]),
+        windows_home=_expand(windows) if windows else None,
+    )
+
+    state_dir = _expand(data.get("state", {}).get(
+        "dir", "~/.local/state/agent-config-sync"))
+
+    raw_secrets = data.get("secrets", {})
+    secrets = SecretPolicy(
+        deny_key_patterns=tuple(raw_secrets.get("deny_key_patterns", [])),
+        deny_path_globs=tuple(raw_secrets.get("deny_path_globs", [])),
+    )
+
+    entries: list[Entry] = []
+    seen: set[str] = set()
+    for raw in data.get("entries", []):
+        entry_id = raw.get("id")
+        if not entry_id:
+            raise ManifestError(f"{path.name}: an entry is missing 'id'")
+        if entry_id in seen:
+            raise ManifestError(f"{path.name}: duplicate entry id {entry_id!r}")
+        seen.add(entry_id)
+        policy = raw.get("policy")
+        if policy not in POLICIES:
+            raise ManifestError(
+                f"{path.name}: entry {entry_id!r} has unknown policy {policy!r}; "
+                f"expected one of {list(POLICIES)}")
+        kind = raw.get("kind")
+        if kind not in KINDS:
+            raise ManifestError(
+                f"{path.name}: entry {entry_id!r} has unknown kind {kind!r}; "
+                f"expected one of {list(KINDS)}")
+        entries.append(Entry(
+            id=entry_id,
+            policy=policy,
+            kind=kind,
+            wsl=raw.get("wsl"),
+            repo=raw.get("repo"),
+            windows=raw.get("windows"),
+            globs=tuple(raw.get("globs", [])),
+            fields=dict(raw.get("fields", {})),
+        ))
+
+    if not entries:
+        raise ManifestError(f"{path.name}: no [[entries]] declared")
+
+    return Manifest(
+        schema_version=version,
+        roots=roots,
+        state_dir=state_dir,
+        entries=tuple(entries),
+        secrets=secrets,
+    )

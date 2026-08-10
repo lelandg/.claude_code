@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "required": ["drift_schema_version", "run_id", "generated_at",
+               "scanner_version", "manifest_version", "roots",
+               "counts", "items", "redactions", "errors"],
+  "properties": {
+    "drift_schema_version": {"type": "integer"},
+    "run_id": {"type": "string"},
+    "generated_at": {"type": "string"},
+    "scanner_version": {"type": "string"},
+    "manifest_version": {"type": "integer"},
+    "roots": {
+      "type": "object",
+      "properties": {
+        "wsl": {"type": "string"},
+        "repo": {"type": "string"},
+        "windows": {"type": "string"}
+      }
+    },
+    "layer_fingerprints": {
+      "type": "object",
+      "properties": {
+        "wsl": {"type": "string"},
+        "repo": {"type": "string"},
+        "windows": {"type": "string"}
+      }
+    },
+    "counts": {"type": "object"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "entry_id", "kind", "classification",
+                     "severity", "path", "detail"],
+        "properties": {
+          "id": {"type": "string"},
+          "entry_id": {"type": "string"},
+          "kind": {"type": "string",
+                   "enum": ["text", "tree_file", "json_field",
+                            "toml_field", "plugin"]},
+          "classification": {
+            "type": "string",
+            "enum": ["unchanged", "publish_to_repo", "reconcile_windows",
+                     "conflict", "wsl_only", "windows_only",
+                     "protected_overlay",
+                     "additive_delete_requires_approval",
+                     "plugin_missing", "plugin_extra",
+                     "plugin_enabled_differs", "plugin_version_differs",
+                     "plugin_pin_violation", "plugin_incompatible",
+                     "error"]
+          },
+          "severity": {"type": "string",
+                       "enum": ["info", "review", "conflict", "error"]},
+          "path": {"type": "string"},
+          "policy": {"type": "string"},
+          "detail": {"type": "string"},
+          "wsl_fingerprint": {"type": "string"},
+          "repo_fingerprint": {"type": "string"},
+          "windows_fingerprint": {"type": "string"}
+        }
+      }
+    },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pointer", "reason", "value_type", "value_fingerprint"],
+        "properties": {
+          "pointer": {"type": "string"},
+          "reason": {"type": "string"},
+          "value_type": {"type": "string"},
+          "value_fingerprint": {"type": "string"}
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "message"],
+        "properties": {
+          "path": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  }
+}
