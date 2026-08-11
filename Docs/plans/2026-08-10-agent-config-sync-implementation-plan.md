@@ -535,10 +535,12 @@ def load_manifest(path: Path,
     except FileNotFoundError as exc:
         raise ManifestError(f"{path.name}: manifest not found at {path}") from exc
     except tomllib.TOMLDecodeError as exc:
-        # exc carries a line/column, not file content -- but rebuild the message
-        # defensively so no source fragment can ride along.
-        line = getattr(exc, "lineno", None)
-        where = f" at line {line}" if line else ""
+        # TOMLDecodeError has no .lineno; the location lives in str(exc).
+        # Extract ONLY line/column and rebuild the message, so no source
+        # fragment can ride along. (Review ruling, 2026-08-11.)
+        match = re.search(r"at line (\d+), column (\d+)", str(exc))
+        where = (f" at line {match.group(1)}, column {match.group(2)}"
+                 if match else "")
         raise ManifestError(f"{path.name}: invalid TOML{where}") from None
 
     version = data.get("schema_version")
@@ -1344,11 +1346,21 @@ def normalize_json(raw: str) -> str:
 
 
 def normalize_toml(raw: str) -> str:
+    """Canonicalize TOML onto the shared JSON comparison surface.
+
+    ONE-WAY: this accepts raw TOML bytes and emits JSON-shaped text, so a
+    .toml and a .json file holding the same intent compare equal. It must
+    never be applied to its own output. (Review ruling, 2026-08-11.)
+    """
     try:
         data = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
-        line = getattr(exc, "lineno", None)
-        where = f" at line {line}" if line else ""
+        # TOMLDecodeError has no .lineno; the location lives in str(exc).
+        # Extract ONLY line/column and discard the rest of the message, so
+        # no fragment of the source can ride along. (Review ruling.)
+        match = re.search(r"at line (\d+), column (\d+)", str(exc))
+        where = (f" at line {match.group(1)}, column {match.group(2)}"
+                 if match else "")
         raise NormalizeError(f"invalid TOML{where}") from None
     return _canonical_json(data)
 
@@ -1389,7 +1401,13 @@ def _spellings(path: Path | None) -> list[str]:
 
 def _replace_prefix(text: str, prefixes: list[str], token: str) -> str:
     for prefix in sorted(prefixes, key=len, reverse=True):
-        pattern = re.compile(re.escape(prefix) + f"(?P<rest>{_PATH_TAIL})")
+        # The lookahead is load-bearing: without it, /home/lelandxyz (a
+        # different directory) matches the /home/leland prefix and becomes
+        # "{HOME}xyz", which is not even a valid path. Admit / and \ (real
+        # children) and end-of-token punctuation; reject name characters.
+        # (Review ruling, 2026-08-11.)
+        pattern = re.compile(re.escape(prefix) + r"(?![\w.+@~%-])"
+                             + f"(?P<rest>{_PATH_TAIL})")
         text = pattern.sub(
             lambda m: token + m.group("rest").replace("\\", "/"), text)
     return text
