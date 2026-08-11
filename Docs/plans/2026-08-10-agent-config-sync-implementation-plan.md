@@ -3754,9 +3754,19 @@ ANALYSIS = {
 
 
 def test_every_required_section_is_present_in_order():
+    # Match the heading PREFIX: item-bearing sections carry a "(N)" count.
     out = rd.render_markdown(DOC, ANALYSIS)
     positions = [out.index(f"## {name}") for name in rd.SECTIONS]
     assert positions == sorted(positions)
+
+
+def test_item_bearing_sections_carry_their_count():
+    out = rd.render_markdown(DOC, ANALYSIS)
+    assert "## Conflicts requiring judgment (1)" in out
+    assert "## Safe portable updates (1)" in out
+    assert "## Protected Windows state (1)" in out
+    # A section with nothing in it still states zero rather than staying silent.
+    assert "## WSL-only and Windows-only items (0)" in out
 
 
 def test_header_carries_every_version_and_fingerprint():
@@ -3844,13 +3854,14 @@ def test_rendering_is_deterministic():
 
 
 def test_matches_the_golden_report():
-    expected = GOLDEN.read_text(encoding="utf-8")
+    # Write BEFORE read: reading first makes the update branch unreachable on
+    # a clean checkout, so UPDATE_GOLDEN=1 crashes instead of regenerating.
+    # (Review ruling, 2026-08-11.)
     actual = rd.render_markdown(DOC, ANALYSIS)
     if os.environ.get("UPDATE_GOLDEN") == "1":
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)
         GOLDEN.write_text(actual, encoding="utf-8")
-        expected = actual
-    assert actual == expected
+    assert actual == GOLDEN.read_text(encoding="utf-8")
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -3985,9 +3996,14 @@ def render_markdown(doc: dict, analysis: dict) -> str:
             ("WSL-only and Windows-only items", _ONLY),
             ("Protected Windows state", ("protected_overlay",)),
             ("Plugin differences", _PLUGIN)):
-        add(f"## {heading}")
+        selected = _by(items, selector)
+        # The count is in the heading so a reader can skip a whole section
+        # without scrolling it. Always rendered, including (0) -- a heading
+        # with no number is ambiguous about whether it was counted at all.
+        # (Review ruling, 2026-08-11.)
+        add(f"## {heading} ({len(selected)})")
         add("")
-        out.extend(_item_lines(_by(items, selector), notes))
+        out.extend(_item_lines(selected, notes))
         add("")
 
     add("## Portability warnings")
