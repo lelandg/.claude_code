@@ -378,6 +378,52 @@ def test_a_failed_apply_stops_immediately_and_keeps_the_backup(scene,
     assert (roots.repo / "AGENTS.md").read_text(encoding="utf-8") == "old\n"
 
 
+def test_a_cascade_crash_leaves_a_restorable_backup_for_both_targets(
+        scene, monkeypatch):
+    """Fix round 1 finding: the primary write can succeed and the cascade
+    write can then fail. The per-target loop must still leave a complete,
+    restorable manifest -- covering both the applied primary and the
+    backed-up-but-unwritten cascade -- not just whichever target happened to
+    succeed."""
+    manifest_path, roots = scene
+    seed_text(roots, "new\n", "old\n", "old\n")   # publish_to_repo + cascade
+    seed_json(roots, {"model": "x"}, {"model": "x"}, {"model": "x"})
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["agents-md"])
+    assert plan.actions[0].cascade_target is not None, (
+        "test setup must actually exercise the cascade path")
+
+    real_write_target = merge.write_target
+    calls: list[Path] = []
+
+    def flaky(path: Path, text: str) -> None:
+        calls.append(path)
+        if len(calls) == 1:
+            real_write_target(path, text)   # primary write succeeds
+            return
+        raise OSError("disk full on the cascade write")   # cascade fails
+
+    monkeypatch.setattr(merge, "write_target", flaky)
+    with pytest.raises(OSError):
+        merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+
+    # The primary (repo) write went through; the cascade (windows) did not.
+    assert (roots.repo / "AGENTS.md").read_text(encoding="utf-8") == "new\n"
+    assert (roots.windows / "AGENTS.md").read_text(encoding="utf-8") == "old\n"
+
+    # The backup manifest covers BOTH targets, including the one that never
+    # got written -- a backup covering only the target that happened to
+    # succeed would not be a restorable state.
+    backup_dir = roots.state / "backups" / "2026-08-10T14-03-22Z-test01"
+    entries = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert {record["layer"] for record in entries["files"]} == {"repo", "windows"}
+    assert len(entries["files"]) == 2
+
+    merge.restore(backup_dir)
+    assert (roots.repo / "AGENTS.md").read_text(encoding="utf-8") == "old\n"
+    assert (roots.windows / "AGENTS.md").read_text(encoding="utf-8") == "old\n"
+
+
 # --- CLI -------------------------------------------------------------------
 
 def test_cli_plan_is_dry_run_by_default(scene, capsys):
