@@ -12,18 +12,6 @@ from dataclasses import dataclass
 
 import extract as ex
 
-SEVERITY_BY_CLASSIFICATION = {
-    "unchanged": "info",
-    "publish_to_repo": "review",
-    "reconcile_windows": "review",
-    "conflict": "conflict",
-    "wsl_only": "review",
-    "windows_only": "review",
-    "protected_overlay": "info",
-    "additive_delete_requires_approval": "review",
-    "error": "error",
-}
-
 #: Classifications that mean a report is worth generating at all.
 ACTIONABLE = frozenset({
     "publish_to_repo", "reconcile_windows", "conflict", "wsl_only",
