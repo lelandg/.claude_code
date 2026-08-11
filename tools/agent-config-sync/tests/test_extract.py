@@ -78,6 +78,10 @@ def test_redact_replaces_secret_valued_keys_and_records_a_hash():
     data = {"mcpServers": {"gh": {"command": "npx",
                                   "env": {"GITHUB_TOKEN": "ghp_realsecret"}}}}
     cleaned, redactions = ex.redact_tree(data, SECRETS)
+    # redact_tree's return type is honestly `object` (a redacted tree can be
+    # a dict, a list, or a scalar) -- narrow before indexing rather than
+    # loosening the signature.
+    assert isinstance(cleaned, dict)
     assert cleaned["mcpServers"]["gh"]["env"]["GITHUB_TOKEN"] == ex.REDACTED
     assert cleaned["mcpServers"]["gh"]["command"] == "npx"
     assert [r.pointer for r in redactions] == ["mcpServers.gh.env.GITHUB_TOKEN"]
@@ -96,6 +100,7 @@ def test_redaction_never_carries_the_value_anywhere():
 def test_redact_keeps_env_variable_names():
     data = {"env": {"API_KEY": "x", "NODE_ENV": "production"}}
     cleaned, _ = ex.redact_tree(data, SECRETS)
+    assert isinstance(cleaned, dict)
     assert set(cleaned["env"]) == {"API_KEY", "NODE_ENV"}
     assert cleaned["env"]["API_KEY"] == ex.REDACTED
     assert cleaned["env"]["NODE_ENV"] == "production"
@@ -104,17 +109,25 @@ def test_redact_keeps_env_variable_names():
 def test_redact_walks_lists():
     data = {"servers": [{"password": "p"}, {"name": "ok"}]}
     cleaned, redactions = ex.redact_tree(data, SECRETS)
+    assert isinstance(cleaned, dict)
     assert cleaned["servers"][0]["password"] == ex.REDACTED
     assert redactions[0].pointer == "servers[0].password"
 
 
 # --- extraction ------------------------------------------------------------
 
-def make_entry(**kwargs) -> mf.Entry:
-    base = dict(id="e", policy="portable_authoritative", kind="text",
-                wsl="a.md", repo="a.md", windows="a.md")
-    base.update(kwargs)
-    return mf.Entry(**base)
+def make_entry(*, id: str = "e", policy: str = "portable_authoritative",
+              kind: str = "text", wsl: str | None = "a.md",
+              repo: str | None = "a.md", windows: str | None = "a.md",
+              globs: tuple[str, ...] = (),
+              fields: dict[str, str] | None = None) -> mf.Entry:
+    # Explicit keyword arguments, not a dict-splat (Task 3 fix round 1,
+    # Finding I3): dict(id=..., ...) infers dict[str, str] from its all-str
+    # literal, so a later override with a tuple (globs) or dict (fields)
+    # collides with that inferred type at the mf.Entry(**base) call.
+    return mf.Entry(id=id, policy=policy, kind=kind, wsl=wsl, repo=repo,
+                    windows=windows, globs=globs,
+                    fields=fields if fields is not None else {})
 
 
 def test_extract_text_entry_normalizes_and_fingerprints(tmp_path: Path):
