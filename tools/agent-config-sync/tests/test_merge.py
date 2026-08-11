@@ -53,7 +53,43 @@ windows = "settings.json"
 [entries.fields]
 "model" = "portable_authoritative"
 "statusLine.command" = "platform_overlay"
+"mcpServers" = "portable_authoritative"
+
+[[entries]]
+id = "claude-agents"
+policy = "portable_authoritative"
+kind = "tree"
+wsl = "agents"
+repo = "agents"
+windows = "agents"
+
+[[entries]]
+id = "codex-config"
+policy = "portable_authoritative"
+kind = "toml"
+wsl = "config.toml"
+repo = "config.toml"
+windows = "config.toml"
+
+[entries.fields]
+"model" = "portable_authoritative"
 """
+
+#: One merge-path test per manifest ``kind``. The structural guard below reads
+#: the real config/agent-sync.toml and fails when a kind in it has no test
+#: here. Two Criticals shipped on this branch because the fixtures encoded the
+#: plan's shape instead of the manifest's: no test ever planned a "tree" or a
+#: "toml" entry, so neither path was ever run.
+MERGE_PATH_TESTS_BY_KIND = {
+    "text": "test_publish_writes_the_wsl_content_into_the_repository",
+    "tree": "test_a_tree_item_targets_the_named_file_not_the_directory",
+    "json": "test_set_field_leaves_every_other_key_untouched",
+    "toml": "test_a_toml_field_merge_is_refused_with_a_reason",
+    "plugins": "test_plan_emits_a_plugin_command_but_never_runs_it",
+}
+
+REAL_MANIFEST = (Path(__file__).resolve().parents[3] / "config"
+                 / "agent-sync.toml")
 
 
 @pytest.fixture
@@ -80,6 +116,25 @@ def seed_text(roots, wsl: str, repo: str, windows: str) -> None:
 def seed_json(roots, wsl: dict, repo: dict, windows: dict) -> None:
     for layer, data in (("wsl", wsl), ("repo", repo), ("windows", windows)):
         roots.write(getattr(roots, layer), "settings.json", json.dumps(data))
+
+
+def seed_tree(roots, rel: str, *, wsl=None, repo=None, windows=None) -> None:
+    """Write one file inside the 'agents' tree entry, per layer."""
+    for layer, content in (("wsl", wsl), ("repo", repo), ("windows", windows)):
+        if content is not None:
+            roots.write(getattr(roots, layer), f"agents/{rel}", content)
+
+
+def seed_toml(roots, *, wsl=None, repo=None, windows=None) -> None:
+    for layer, content in (("wsl", wsl), ("repo", repo), ("windows", windows)):
+        if content is not None:
+            roots.write(getattr(roots, layer), "config.toml", content)
+
+
+def quiet(roots) -> None:
+    """Seed every non-tree entry so it contributes no drift of its own."""
+    seed_text(roots, "a\n", "a\n", "a\n")
+    seed_json(roots, {"model": "x"}, {"model": "x"}, {"model": "x"})
 
 
 # --- pointers --------------------------------------------------------------
@@ -164,6 +219,222 @@ def test_render_plan_shows_targets_and_a_dry_run_marker(scene):
                                               ["agents-md"]))
     assert "DRY RUN" in text
     assert "AGENTS.md" in text
+
+
+# --- tree entries (fix wave, C1) -------------------------------------------
+
+def test_a_tree_item_targets_the_named_file_not_the_directory(scene):
+    """A tree item id is 'entry:path-inside-the-entry'. Every path the action
+    touches has to descend into the directory. Taking the target from the
+    entry alone pointed the write at the directory itself, and the apply then
+    raised IsADirectoryError after the backup directory had been created."""
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "newagent.md", wsl="new agent body\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    item = next(i for i in doc["items"] if i["id"] == "claude-agents:newagent.md")
+    assert item["classification"] == "wsl_only"
+
+    plan = merge.plan_merge(doc, m, ["claude-agents:newagent.md"])
+    action = plan.actions[0]
+    assert action.kind == "write_file"
+    assert action.target == roots.repo / "agents" / "newagent.md"
+    assert action.source == roots.wsl / "agents" / "newagent.md"
+    assert action.cascade_target == roots.windows / "agents" / "newagent.md"
+
+    # The dry run has to name the file the operator is approving, not the
+    # directory that holds it.
+    text = merge.render_plan(plan)
+    assert str(roots.repo / "agents" / "newagent.md") in text
+
+
+def test_applying_a_wsl_only_tree_item_writes_the_file_in_both_targets(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "newagent.md", wsl="new agent body\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m,
+                            ["claude-agents:newagent.md"])
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+
+    assert (roots.repo / "agents" / "newagent.md").read_text(
+        encoding="utf-8") == "new agent body\n"
+    assert (roots.windows / "agents" / "newagent.md").read_text(
+        encoding="utf-8") == "new agent body\n"
+
+
+def test_publishing_a_tree_item_updates_the_baseline_and_mirrors_windows(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "sub/agent.md", wsl="new\n", repo="old\n", windows="old\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+    item_id = "claude-agents:sub/agent.md"
+    assert next(i for i in doc["items"]
+                if i["id"] == item_id)["classification"] == "publish_to_repo"
+
+    plan = merge.plan_merge(doc, m, [item_id])
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert (roots.repo / "agents" / "sub" / "agent.md").read_text(
+        encoding="utf-8") == "new\n"
+    assert (roots.windows / "agents" / "sub" / "agent.md").read_text(
+        encoding="utf-8") == "new\n"
+
+
+def test_reconciling_a_tree_item_writes_only_the_windows_file(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "agent.md", wsl="same\n", repo="same\n",
+              windows="drifted\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+    item_id = "claude-agents:agent.md"
+    assert next(i for i in doc["items"]
+                if i["id"] == item_id)["classification"] == "reconcile_windows"
+
+    plan = merge.plan_merge(doc, m, [item_id])
+    action = plan.actions[0]
+    assert action.target == roots.windows / "agents" / "agent.md"
+    assert action.cascade_target is None
+
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert (roots.windows / "agents" / "agent.md").read_text(
+        encoding="utf-8") == "same\n"
+    assert (roots.repo / "agents" / "agent.md").read_text(
+        encoding="utf-8") == "same\n"
+
+
+def test_a_tree_item_renders_paths_for_the_windows_layer(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    body = f"hook: {roots.wsl}/tools/guard.py\n"
+    seed_tree(roots, "agent.md", wsl=body, repo=body, windows="stale\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m,
+                            ["claude-agents:agent.md"])
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    written = (roots.windows / "agents" / "agent.md").read_text(encoding="utf-8")
+    assert "{HOME}" not in written
+    assert str(roots.wsl) not in written
+
+
+def test_a_target_that_is_a_directory_is_refused_not_written(scene):
+    """The guard that turns C1's class of bug into a refusal: an id that
+    resolves to an existing directory is skipped with a reason, never handed
+    to a writer."""
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "agent.md", wsl="a\n", repo="a\n", windows="a\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+    doc["items"].append({
+        "id": "claude-agents", "entry_id": "claude-agents", "kind": "tree_file",
+        "classification": "wsl_only", "severity": "review",
+        "path": "agents", "policy": "portable_authoritative",
+        "detail": "an id that names the directory itself"})
+
+    plan = merge.plan_merge(doc, m, ["claude-agents"])
+    assert plan.actions == ()
+    assert "directory" in plan.skipped[0][1]
+
+
+# --- toml entries (fix wave, C2) -------------------------------------------
+
+def test_a_toml_field_merge_is_refused_with_a_reason(scene):
+    """Python 3.12 has no TOML writer, so a field merge could only re-serialize
+    the document as JSON into a file named .toml. The refusal is the fix; a
+    JSON body in codex/config.toml would be silent corruption, because the
+    next scan tokenizes both sides and reports the fingerprints as matching."""
+    manifest_path, roots = scene
+    quiet(roots)
+    # WSL and Windows agree and there is no baseline: publish_to_repo, with
+    # the repository target absent -- the branch that wrote JSON.
+    seed_toml(roots, wsl='model = "gpt-5.6-terra"\n',
+              windows='model = "gpt-5.6-terra"\n')
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+    assert next(i for i in doc["items"]
+                if i["id"] == "codex-config:model")["classification"] == \
+        "publish_to_repo"
+
+    plan = merge.plan_merge(doc, m, ["codex-config:model"])
+    assert plan.actions == ()
+    assert plan.skipped == (
+        ("codex-config:model",
+         "TOML field merge is not implemented; edit the target by hand"),)
+
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert not (roots.repo / "config.toml").exists()
+    assert (roots.windows / "config.toml").read_text(
+        encoding="utf-8") == 'model = "gpt-5.6-terra"\n'
+
+
+def test_a_field_merge_refuses_a_target_that_is_not_valid_json(scene):
+    manifest_path, roots = scene
+    seed_text(roots, "a\n", "a\n", "a\n")
+    seed_json(roots, {"model": "opus"}, {"model": "sonnet"},
+              {"model": "sonnet"})
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["settings:model"])
+    roots.write(roots.repo, "settings.json", "this is not json\n")
+
+    with pytest.raises(merge.MergeError) as caught:
+        merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert "not valid JSON" in str(caught.value)
+    assert (roots.repo / "settings.json").read_text(
+        encoding="utf-8") == "this is not json\n"
+
+
+# --- field values carrying paths (fix wave, I2) ----------------------------
+
+def test_a_field_value_holding_a_path_is_rendered_for_each_layer(scene):
+    """write_file tokenizes and re-renders the path spellings; set_field has
+    to do the same. It did not, so a field value holding a WSL path was
+    copied verbatim into the Windows file -- and the scanner tokenizes before
+    it fingerprints, so the broken result was then reported as clean."""
+    manifest_path, roots = scene
+    seed_text(roots, "a\n", "a\n", "a\n")
+    servers = {"gh": {"args": [f"{roots.wsl}/tools/mcp.py"]}}
+    stale = {"gh": {"args": ["old"]}}
+    seed_json(roots,
+              {"model": "x", "mcpServers": servers},
+              {"model": "x", "mcpServers": stale},
+              {"model": "x", "mcpServers": stale})
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["settings:mcpServers"])
+    assert plan.actions[0].kind == "set_field"
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+
+    repo_arg = json.loads((roots.repo / "settings.json").read_text(
+        encoding="utf-8"))["mcpServers"]["gh"]["args"][0]
+    windows_arg = json.loads((roots.windows / "settings.json").read_text(
+        encoding="utf-8"))["mcpServers"]["gh"]["args"][0]
+
+    assert repo_arg == f"{roots.wsl}/tools/mcp.py"
+    assert str(roots.wsl) not in windows_arg
+    assert str(roots.windows) in windows_arg
+
+
+# --- structural guard ------------------------------------------------------
+
+def test_every_manifest_kind_is_exercised_by_a_merge_path_test():
+    """Every distinct kind in the real manifest must have a merge-path test.
+
+    C1 and C2 both shipped because no merge test ever planned a "tree" or a
+    "toml" entry. This check fails the moment a kind appears in the manifest
+    with nothing here exercising it.
+    """
+    import tomllib
+    data = tomllib.loads(REAL_MANIFEST.read_text(encoding="utf-8"))
+    kinds = {entry["kind"] for entry in data["entries"]}
+    assert kinds - set(MERGE_PATH_TESTS_BY_KIND) == set(), (
+        "a manifest kind has no merge-path test")
+    module = sys.modules[__name__]
+    for kind, name in MERGE_PATH_TESTS_BY_KIND.items():
+        assert callable(getattr(module, name, None)), (
+            f"the test named for kind {kind!r} does not exist: {name}")
 
 
 # --- staleness (design test case 13) --------------------------------------

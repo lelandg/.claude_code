@@ -29,6 +29,11 @@ EXIT_FAILURE = 20
 EXIT_STALE = 22
 EXIT_NOTHING_SELECTED = 23
 
+
+class MergeError(RuntimeError):
+    """A target cannot be merged safely. The message names the target."""
+
+
 #: Classifications this tool knows how to act on.
 _PUBLISH = "publish_to_repo"
 _WSL_ONLY = "wsl_only"
@@ -67,6 +72,12 @@ class Action:
     #: see the comment on _PUBLISH_LIKE in plan_merge. None when there is
     #: nothing to mirror (reconcile actions, or no Windows root configured).
     cascade_target: Path | None = None
+    #: The WSL path this action reads. Planned here, not re-derived in
+    #: apply_plan: a tree item names one file inside the entry directory, so
+    #: an apply that rebuilds the source from the entry alone reads the
+    #: directory and never the file the id names (fix wave, C1). One
+    #: derivation means the dry run shows exactly what the apply will read.
+    source: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -228,29 +239,71 @@ def plan_merge(doc: dict, m, selected_ids) -> Plan:
             skipped.append((item_id, "entry is no longer in the manifest"))
             continue
 
+        # The part of the id after the colon: a path inside the directory for
+        # a tree entry, a dotted field pointer for a json/toml entry.
+        key = item_id.split(":", 1)[1] if ":" in item_id else ""
+
+        if entry.kind == "toml" and key:
+            # Python 3.12 ships a TOML reader and no TOML writer, so the only
+            # way to merge one field would be to re-serialize the document as
+            # JSON into a file named .toml -- silent corruption a later scan
+            # cannot see, because both sides tokenize to the same fingerprint
+            # (fix wave, C2). A refusal is correct until a writer is adopted.
+            skipped.append((item_id, "TOML field merge is not implemented; "
+                                     "edit the target by hand"))
+            continue
+
         primary_layer = "repo" if classification in _PUBLISH_LIKE else "windows"
         target = _target_path(m, entry, primary_layer)
         if target is None:
             skipped.append((item_id, f"no {primary_layer} root configured"))
             continue
 
+        source = _target_path_any_layer(m, entry, "wsl")
+        if source is None:
+            skipped.append((item_id, "no wsl path declared for this entry"))
+            continue
+
         cascade_target = (_target_path(m, entry, "windows")
                           if classification in _PUBLISH_LIKE else None)
+
+        if entry.kind == "tree" and key:
+            # A tree item names one file inside the entry directory. Every
+            # path this action touches has to descend into it.
+            target = target / key
+            source = source / key
+            cascade_target = (cascade_target / key
+                              if cascade_target is not None else None)
+
+        # A path that is a directory means the id was resolved to the wrong
+        # place. Refuse here rather than hand a directory to a reader or a
+        # writer: the old apply raised IsADirectoryError from inside the
+        # write loop, after the backup directory had already been created.
+        if source.is_dir():
+            skipped.append((item_id, f"{source} is a directory, not a file; "
+                                     f"this id names no file to copy"))
+            continue
+        directory = next((path for path in (target, cascade_target)
+                          if path is not None and path.is_dir()), None)
+        if directory is not None:
+            skipped.append((item_id, f"{directory} is a directory, not a "
+                                     f"file; refusing to write it"))
+            continue
+
         mirror_note = f" (mirrors to {cascade_target})" if cascade_target else ""
 
-        if entry.kind in ("json", "toml") and ":" in item_id:
-            pointer = item_id.split(":", 1)[1]
+        if entry.kind == "json" and key:
             actions.append(Action(
                 item_id=item_id, kind="set_field", layer=primary_layer,
-                target=target, pointer=pointer,
-                description=f"set {pointer} in {target} from WSL{mirror_note}",
-                cascade_target=cascade_target))
+                target=target, pointer=key,
+                description=f"set {key} in {target} from WSL{mirror_note}",
+                cascade_target=cascade_target, source=source))
         else:
             actions.append(Action(
                 item_id=item_id, kind="write_file", layer=primary_layer,
                 target=target, pointer=None,
                 description=f"write {target} from WSL{mirror_note}",
-                cascade_target=cascade_target))
+                cascade_target=cascade_target, source=source))
 
     return Plan(run_id=doc["run_id"], actions=tuple(actions),
                 skipped=tuple(skipped))
@@ -283,9 +336,13 @@ def write_target(path: Path, text: str) -> None:
     drift.write_atomic(path, text)
 
 
-def _source_text(m, entry) -> str | None:
-    source = _target_path_any_layer(m, entry, "wsl")
-    if source is None or not source.exists():
+def _read_source(source: Path | None) -> str | None:
+    """Read the planned WSL source. None when there is nothing to copy.
+
+    The path comes from the plan (``Action.source``) and is never re-derived
+    here -- see the note on that field.
+    """
+    if source is None or not source.is_file():
         return None
     return source.read_text(encoding="utf-8")
 
@@ -308,15 +365,49 @@ def _desired_for_layer(m, entry, raw: str, layer: str) -> str:
     return nz.render_paths(tokenized, layer, m.roots)
 
 
+def _render_value(m, value, layer: str):
+    """Tokenize and re-render every string inside one field value.
+
+    A whole-file write goes through _desired_for_layer, which tokenizes the
+    WSL path spellings and renders them for the target layer. A field write
+    has to do the same or it copies /home/... verbatim into a Windows file --
+    and the scanner tokenizes before it fingerprints, so the broken result
+    would be reported as clean (fix wave, I2). String leaves are rendered
+    one at a time; rendering the serialized JSON instead would emit Windows
+    backslashes that JSON cannot re-parse.
+    """
+    if isinstance(value, str):
+        return nz.render_paths(nz.tokenize_paths(value, m.roots), layer,
+                               m.roots)
+    if isinstance(value, list):
+        return [_render_value(m, item, layer) for item in value]
+    if isinstance(value, dict):
+        return {key: _render_value(m, item, layer)
+                for key, item in value.items()}
+    return value
+
+
 def _desired_for_target(m, entry, raw: str, layer: str, action: Action,
                         target: Path) -> str:
     if action.kind == "write_file":
         return _desired_for_layer(m, entry, raw, layer)
+    pointer = action.pointer or ""
     source_data = json.loads(nz.normalize_for_kind(raw, entry.kind))
-    value = get_pointer(source_data, action.pointer or "")
-    existing = ({} if not target.exists()
-                else json.loads(target.read_text(encoding="utf-8")))
-    return json.dumps(set_pointer(existing, action.pointer or "", value),
+    value = _render_value(m, get_pointer(source_data, pointer), layer)
+    existing: object = {}
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise MergeError(
+                f"{target} is not valid JSON (line {exc.lineno}, column "
+                f"{exc.colno}); refusing to replace it with a merged "
+                f"document") from None
+    if not isinstance(existing, dict):
+        raise MergeError(f"{target} holds a JSON "
+                         f"{type(existing).__name__}, not an object; "
+                         f"a field merge has nothing to set {pointer} on")
+    return json.dumps(set_pointer(existing, pointer, value),
                       indent=2, sort_keys=True) + "\n"
 
 
@@ -348,7 +439,7 @@ def apply_plan(plan: Plan, m, *, backups_dir: Path) -> tuple[Path, list[str]]:
         entry = _entry_for(m, action.item_id.split(":", 1)[0])
         if entry is None:
             continue
-        raw = _source_text(m, entry)
+        raw = _read_source(action.source)
         if raw is None:
             continue
 
@@ -467,8 +558,12 @@ def main(argv=None) -> int:
     if args.verb == "plan":
         return EXIT_OK
 
-    backup_dir, applied = apply_plan(plan, m,
-                                     backups_dir=m.state_dir / "backups")
+    try:
+        backup_dir, applied = apply_plan(plan, m,
+                                         backups_dir=m.state_dir / "backups")
+    except MergeError as exc:
+        print(f"merge: {exc}")
+        return EXIT_FAILURE
     print(f"backup: {backup_dir}")
     for item_id in applied:
         print(f"applied {item_id}")
