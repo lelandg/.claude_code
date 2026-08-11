@@ -125,8 +125,7 @@ def _item(key: str, suffix: str, classification: str, severity: str,
 
 
 def classify_plugins(desired, wsl_native, windows_native, pins,
-                     *, entry_id: str = ENTRY_ID,
-                     has_windows: bool = True) -> list[DriftItem]:
+                     *, has_windows: bool = True) -> list[DriftItem]:
     """Compare the portable record against both native managers.
 
     ``wsl_native`` and ``windows_native`` are always plain dicts (see
