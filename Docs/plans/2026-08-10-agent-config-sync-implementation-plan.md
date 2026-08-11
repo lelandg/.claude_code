@@ -4092,6 +4092,181 @@ git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(agent-config-sy
 
 ---
 
+## Task 7b: Wire portability warnings through the pipeline
+
+Added 2026-08-11, after Task 7's implementer found that `normalize.portability_warnings()` is defined, tested, and **called nowhere**. The design's report format requires "MCP and hook portability warnings", and the renderer has a section for them, but nothing ever populates it — an always-empty section reads as a clean bill of health when nothing was ever checked. Leland ruled: wire it up.
+
+**Runs after Task 7 and before Task 8** (Task 8 also edits `render.py`).
+
+**Key subtlety:** warnings run on the **tokenized** text, after `tokenize_paths` has replaced the configured roots. A hook pointing at `/home/leland/.claude/tools/guard.py` becomes `{HOME}/.claude/tools/guard.py` and is genuinely portable — that substitution is exactly how WSL and Windows compare equal. What survives tokenization is what actually cannot travel: `/usr/`, `/opt/`, `.venv_linux`, `\\wsl$`, and `/mnt/` paths to drives no root claims.
+
+**Files:**
+- Modify: `tools/agent-config-sync/extract.py` (`Unit` gains a field; both unit builders populate it)
+- Modify: `tools/agent-config-sync/compare.py` (`DriftItem` gains a field; `compare_entry` carries it; `as_dict` emits it)
+- Modify: `tools/agent-config-sync/schemas/drift-v1.json` (item gains `portability`)
+- Modify: `tools/agent-config-sync/render.py` (select by field, not by substring)
+- Test: `tests/test_extract.py`, `tests/test_compare.py`, `tests/test_render.py`
+
+**Interfaces:**
+- Consumes: `normalize.portability_warnings(text) -> list[str]` (Task 2, unchanged).
+- Produces:
+  - `extract.Unit.portability: tuple[str, ...] = ()`
+  - `compare.DriftItem.portability: tuple[str, ...] = ()`, emitted by `as_dict()` only when non-empty
+  - `render.render_markdown` selects the Portability warnings section by `item.get("portability")`
+
+- [ ] **Step 1: Write the failing extraction test**
+
+Add to `tools/agent-config-sync/tests/test_extract.py`:
+
+```python
+def test_extract_records_portability_warnings_after_tokenization(tmp_path: Path):
+    (tmp_path / "a.md").write_text(
+        "hook: /usr/bin/python3 /home/leland/.claude/tools/guard.py\n",
+        encoding="utf-8")
+    units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
+    # The home path tokenizes to {HOME} and is portable; /usr/bin is not.
+    assert units[0].portability
+    assert any("/usr/" in w for w in units[0].portability)
+    assert not any("/home/" in w for w in units[0].portability)
+
+
+def test_extract_records_no_portability_warning_for_portable_text(tmp_path: Path):
+    (tmp_path / "a.md").write_text("hook: /home/leland/.claude/x.py\n",
+                                   encoding="utf-8")
+    units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
+    assert units[0].portability == ()
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `python3 -m pytest tools/agent-config-sync/tests/test_extract.py -k portability -v`
+Expected: FAIL — `AttributeError: 'Unit' object has no attribute 'portability'`
+
+- [ ] **Step 3: Add the field and populate it**
+
+In `extract.py`, add to the `Unit` dataclass, after `redactions`:
+
+```python
+    portability: tuple[str, ...] = ()
+```
+
+In `_unit_for_file`, after `text = nz.tokenize_paths(text, roots)`, pass it through:
+
+```python
+    return Unit(..., normalized=text, fingerprint=nz.fingerprint(text),
+                portability=tuple(nz.portability_warnings(text)))
+```
+
+Do the same at every site in `_extract_structured` that sets `normalized` from tokenized text. Sites that leave `normalized=None` (undeclared keys, errors, absent files) leave `portability` at its default.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `python3 -m pytest tools/agent-config-sync/tests/test_extract.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Write the failing comparison test**
+
+Add to `tools/agent-config-sync/tests/test_compare.py`:
+
+```python
+def test_compare_entry_carries_portability_warnings():
+    wsl = ex.Unit(entry_id="e", layer="wsl", key="", path="a.md",
+                  kind="text", policy=AUTH, fingerprint=B,
+                  portability=("contains a Linux system path: /usr/",))
+    entry = mf.Entry(id="e", policy=AUTH, kind="text", wsl="a.md")
+    items = cmp.compare_entry(entry, [wsl], has_windows=False)
+    assert items[0].portability == ("contains a Linux system path: /usr/",)
+    assert items[0].as_dict()["portability"] == [
+        "contains a Linux system path: /usr/"]
+
+
+def test_as_dict_omits_empty_portability():
+    item = cmp.DriftItem(id="e", entry_id="e", kind="text",
+                         classification="wsl_only", severity="review",
+                         path="a.md", policy=AUTH, detail="d")
+    assert "portability" not in item.as_dict()
+```
+
+- [ ] **Step 6: Run to verify they fail, then implement**
+
+Run: `python3 -m pytest tools/agent-config-sync/tests/test_compare.py -k portability -v`
+Expected: FAIL
+
+In `compare.py`, add to `DriftItem` after `redactions`:
+
+```python
+    portability: tuple[str, ...] = ()
+```
+
+In `as_dict`, alongside the fingerprint loop:
+
+```python
+        if self.portability:
+            data["portability"] = list(self.portability)
+```
+
+In `compare_entry`, next to the existing redaction carry, prefer the WSL unit — it is the authority — then fall back to any present unit:
+
+```python
+        portability: tuple = ()
+        for unit in (wsl, repo, windows):
+            if unit is not None and unit.portability:
+                portability = tuple(unit.portability)
+                break
+```
+
+and pass `portability=portability` into the `DriftItem(...)` construction.
+
+- [ ] **Step 7: Run to verify they pass**
+
+Run: `python3 -m pytest tools/agent-config-sync/tests/test_compare.py -v`
+Expected: PASS
+
+- [ ] **Step 8: Add the field to the drift schema**
+
+In `tools/agent-config-sync/schemas/drift-v1.json`, inside the item `properties` block:
+
+```json
+          "portability": {"type": "array", "items": {"type": "string"}},
+```
+
+- [ ] **Step 9: Fix the renderer's selector**
+
+Replace the substring match in `render.py`:
+
+```python
+    warnings = [i for i in items if "portability" in i.get("detail", "").lower()]
+    out.extend([f"- `{i['id']}`: {i['detail']}" for i in warnings] or ["_None._"])
+```
+
+with a field-based selection that shows each warning:
+
+```python
+    warned = [i for i in items if i.get("portability")]
+    out.extend([f"- `{i['id']}` (`{i['path']}`): " + "; ".join(i["portability"])
+                for i in warned] or ["_None._"])
+```
+
+Add to `tools/agent-config-sync/tests/test_render.py` a document item carrying `"portability": ["contains a Linux system path: /usr/"]`, and assert it appears under `## Portability warnings` with its id and the warning text — and that an item without the field does not.
+
+- [ ] **Step 10: Regenerate the golden and re-render the real document**
+
+```bash
+UPDATE_GOLDEN=1 python3 -m pytest tools/agent-config-sync/tests/test_render.py -k golden -q
+python3 -m pytest tools/agent-config-sync/tests/ -q
+```
+
+Then re-run the scanner against the real machine and report how many items now carry a portability warning, and what they are. This is the payoff — if the answer is zero, say so plainly rather than assuming the wiring is wrong.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git -C /mnt/d/Documents/Code/GitHub/.claude_code add tools/agent-config-sync/extract.py tools/agent-config-sync/compare.py tools/agent-config-sync/render.py tools/agent-config-sync/schemas/drift-v1.json tools/agent-config-sync/tests/
+git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(agent-config-sync): wire portability warnings through the pipeline"
+```
+
+---
+
 ## Task 8: Bounded `claude -p` analyzer and response validation
 
 **Files:**
