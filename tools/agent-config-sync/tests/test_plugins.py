@@ -181,3 +181,33 @@ def test_item_ids_are_stable_and_namespaced():
     items = pl.classify_plugins(state(), {}, {}, {})
     assert items[0].id == f"claude-plugins:{KEY}"
     assert items[0].entry_id == "claude-plugins"
+
+
+# --- has_windows -------------------------------------------------------
+#
+# wsl_native/windows_native are always plain dicts, so an empty dict is
+# ambiguous by itself. has_windows disambiguates it for the windows layer:
+# these tests pin both readings so they can never quietly collapse back
+# into one.
+
+def test_has_windows_false_excludes_windows_from_the_missing_check():
+    # Same inputs that DO produce a windows plugin_missing item below
+    # (has_windows=True); with the layer out of scope, nothing is emitted.
+    items = pl.classify_plugins(state(), state(version="6.2.0"), {}, {},
+                                has_windows=False)
+    assert items == []
+
+
+def test_has_windows_true_with_an_empty_windows_native_is_a_real_miss():
+    items = pl.classify_plugins(state(), state(version="6.2.0"), {}, {},
+                                has_windows=True)
+    missing = [i for i in items if i.classification == "plugin_missing"]
+    assert len(missing) == 1
+    assert missing[0].id.endswith("#missing:windows")
+
+
+def test_has_windows_false_produces_no_version_item():
+    items = pl.classify_plugins(state(), state(version="6.1.0"),
+                                state(version="6.2.0"), {}, has_windows=False)
+    assert not [i for i in items if i.classification == "plugin_version_differs"]
+    assert not [i for i in items if i.classification == "plugin_incompatible"]

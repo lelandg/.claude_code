@@ -125,11 +125,29 @@ def _item(key: str, suffix: str, classification: str, severity: str,
 
 
 def classify_plugins(desired, wsl_native, windows_native, pins,
-                     *, entry_id: str = ENTRY_ID) -> list[DriftItem]:
-    """Compare the portable record against both native managers."""
+                     *, entry_id: str = ENTRY_ID,
+                     has_windows: bool = True) -> list[DriftItem]:
+    """Compare the portable record against both native managers.
+
+    ``wsl_native`` and ``windows_native`` are always plain dicts (see
+    ``read_layer``, which never returns ``None``), so an empty dict is
+    ambiguous on its own -- it could mean "this layer is configured and
+    genuinely has nothing installed" or "this layer does not exist at all".
+    ``has_windows`` resolves that ambiguity for Windows: when False, the
+    Windows layer is entirely out of scope -- ``windows_native`` is not
+    read, and no ``#missing:windows``, ``#enabled:windows``,
+    ``#pin:windows``, or ``#version`` item is produced (a version
+    comparison needs two native layers to compare). When True (the
+    default), an empty ``windows_native`` means Windows is configured with
+    zero plugins installed, so a desired plugin absent from it is a
+    genuine ``plugin_missing``.
+    """
     items: list[DriftItem] = []
-    natives = (("wsl", wsl_native), ("windows", windows_native))
-    all_keys = sorted(set(desired) | set(wsl_native) | set(windows_native))
+    natives = (("wsl", wsl_native), ("windows", windows_native)) \
+        if has_windows else (("wsl", wsl_native),)
+    all_keys = sorted(
+        set(desired) | set(wsl_native)
+        | (set(windows_native) if has_windows else set()))
 
     for key in all_keys:
         want = desired.get(key)
@@ -178,6 +196,9 @@ def classify_plugins(desired, wsl_native, windows_native, pins,
                     f"Explicit pin {pin} but {layer} has {have.version}. "
                     f"A pin is the only thing that authorizes a downgrade; "
                     f"approve before acting."))
+
+        if not has_windows:
+            continue  # a version comparison needs two native layers
 
         wsl_version = (wsl_native.get(key).version
                        if wsl_native.get(key) else None)
