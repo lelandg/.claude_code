@@ -7,10 +7,8 @@ description: Scan for drift between WSL agent configuration (the authority), thi
 
 WSL is the authority for portable agent configuration. This repository is the
 sanitized record. Windows is a derived target with a protected overlay.
-This skill **reports**. Applying anything is a separate `agent-config-merge`
-skill — it always needs explicit approval, and as of this writing it does not
-exist yet (it lands in a later change; the underlying `merge.py` has not been
-built).
+This skill **reports**. Applying anything is the separate `agent-config-merge`
+skill, which always needs explicit approval.
 
 Design: `Docs/plans/2026-08-08-wsl-authoritative-agent-config-sync-design.md`
 Operator guide: `Docs/agent-config-sync.md`
@@ -116,7 +114,7 @@ Then quote the item ids Leland would need to approve. Nothing is applied.
   and your intuition disagree, the manifest is wrong — fix `config/agent-sync.toml`.
 - Never print a value from a secret-bearing field, even if you can see it. The
   report deliberately carries pointers, reason codes, and hashes only.
-- Never run `merge.py` from this skill — it does not exist yet, and even once
-  it ships, applying a change is the separate `agent-config-merge` skill.
+- Never run `merge.py` from this skill. Applying a change is the separate
+  `agent-config-merge` skill; hand the approved item ids to it.
 - If the report recommends `/codex`, mention it and paste the prompt the report
   generated; do not run it unprompted.
