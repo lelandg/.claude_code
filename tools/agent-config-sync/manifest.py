@@ -22,6 +22,30 @@ POLICIES = (
 KINDS = ("text", "tree", "json", "toml", "plugins")
 
 
+def _pointer_regex(pattern: str) -> re.Pattern[str]:
+    parts = []
+    for segment in pattern.split("."):
+        if segment == "**":
+            parts.append(r"[^.]+(?:\.[^.]+)*")
+        elif segment == "*":
+            parts.append(r"[^.]+")
+        else:
+            parts.append(re.escape(segment))
+    return re.compile("^" + r"\.".join(parts) + "$")
+
+
+def pointer_match(pattern: str, pointer: str) -> bool:
+    """Dotted-pointer glob: '*' matches one segment, '**' matches one or more."""
+    return bool(_pointer_regex(pattern).match(pointer))
+
+
+def _specificity(pattern: str) -> tuple[int, int]:
+    """More literal segments and fewer wildcards wins."""
+    segments = pattern.split(".")
+    wildcards = sum(1 for s in segments if s in ("*", "**"))
+    return (len(segments) - wildcards, -wildcards)
+
+
 class ManifestError(ValueError):
     """Manifest is missing, malformed, or declares something unsupported."""
 
@@ -50,6 +74,21 @@ class Entry:
 
     def rel_for_layer(self, layer: str) -> str | None:
         return {"wsl": self.wsl, "repo": self.repo, "windows": self.windows}[layer]
+
+    def policy_for(self, pointer: str) -> str | None:
+        """Field-level policy, most specific pattern first.
+
+        Returns None for a field that no pattern covers -- an undeclared field,
+        which the design says to report as metadata only.
+        """
+        if not self.fields:
+            return self.policy
+        matches = [(pat, pol) for pat, pol in self.fields.items()
+                   if pointer_match(pat, pointer)]
+        if not matches:
+            return None
+        matches.sort(key=lambda pair: _specificity(pair[0]), reverse=True)
+        return matches[0][1]
 
 
 @dataclass(frozen=True)
