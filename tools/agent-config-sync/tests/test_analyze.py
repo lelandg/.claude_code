@@ -183,6 +183,53 @@ def test_error_messages_never_echo_the_model_output_verbatim(tmp_path: Path):
     assert "sk-live-DO-NOT-LEAK" not in str(excinfo.value)
 
 
+# --- regression: schema.validate() error strings can embed the offending ---
+# --- value or key verbatim; run() must keep only the path, never that ------
+
+def test_schema_error_never_echoes_a_secret_shaped_enum_value(tmp_path: Path):
+    # An enum mismatch's message is "{path}: {instance!r} is not one of
+    # [...]" -- the offending *value* is attacker-controlled once analyze.py
+    # validates model output (unlike drift.py, which only validates our own
+    # scanner's output against the same validator).
+    bad = json.dumps(dict(VALID, severity="sk-live-SECRET-VALUE"))
+    binary = stub(tmp_path, f"cat >/dev/null\necho '{bad}'\n")
+    with pytest.raises(az.AnalysisError) as excinfo:
+        az.run(DOC, claude_bin=binary, prompt_path=PROMPT, timeout_s=10,
+               max_turns=4)
+    message = str(excinfo.value)
+    assert "sk-live-SECRET-VALUE" not in message
+    assert message == "analyzer response failed the schema at: $.severity"
+
+
+def test_schema_error_never_echoes_a_secret_shaped_extra_key(tmp_path: Path):
+    # An additionalProperties violation's message is "{path}: unexpected
+    # property {key!r}" -- the extra JSON key is also attacker-chosen text.
+    bad = json.dumps(dict(VALID, **{"ghp_ATTACKER_KEY": "leak-me-too"}))
+    binary = stub(tmp_path, f"cat >/dev/null\necho '{bad}'\n")
+    with pytest.raises(az.AnalysisError) as excinfo:
+        az.run(DOC, claude_bin=binary, prompt_path=PROMPT, timeout_s=10,
+               max_turns=4)
+    message = str(excinfo.value)
+    assert "ghp_ATTACKER_KEY" not in message
+    assert "leak-me-too" not in message
+    assert message == "analyzer response failed the schema at: $"
+
+
+def test_schema_error_path_extraction_survives_a_colon_in_the_value(tmp_path: Path):
+    # split(":", 1) must isolate the path even when the offending value
+    # itself contains ": " -- the path's own colon always comes first in
+    # "{path}: {message}", because a JSON-Schema path (dots, brackets,
+    # property names) never contains a colon.
+    bad = json.dumps(dict(VALID, severity="not real: has a colon too"))
+    binary = stub(tmp_path, f"cat >/dev/null\necho '{bad}'\n")
+    with pytest.raises(az.AnalysisError) as excinfo:
+        az.run(DOC, claude_bin=binary, prompt_path=PROMPT, timeout_s=10,
+               max_turns=4)
+    message = str(excinfo.value)
+    assert "has a colon too" not in message
+    assert message == "analyzer response failed the schema at: $.severity"
+
+
 # --- render.py CLI ---------------------------------------------------------
 
 def test_render_cli_promotes_only_a_valid_report(tmp_path: Path):

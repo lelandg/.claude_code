@@ -3,8 +3,20 @@
 
 Supports exactly what the drift and analysis-response schemas need:
 type, required, properties, items, enum, additionalProperties.
-Error strings carry a JSON path and a type name -- never a data value,
-except for enum mismatches where the value is by definition a known token.
+
+Error strings are "{path}: {message}". Most messages carry only a JSON path
+and a type name, but two carry a data value verbatim: an enum mismatch
+embeds the offending value, and an additionalProperties violation embeds the
+offending key. Both are safe to surface as-is when the instance is trusted
+(for example drift.validate_document, which validates our own scanner's
+output -- an operator debugging a scanner bug wants to see the value).
+
+They are NOT safe to surface as-is when the instance is untrusted, such as a
+model response. A caller in that position must keep only the path and drop
+the message half before the error reaches a user or a log; see
+analyze.run(), which splits each error on its first ": " for exactly this
+reason. This module does not redact on its own -- the sanitization boundary
+belongs to the caller that knows whether its instance is trusted.
 
 Design: "Deterministic scan" step 1; "Claude-first report generation".
 """
