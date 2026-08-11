@@ -104,6 +104,7 @@ class Manifest:
     state_dir: Path
     entries: tuple[Entry, ...]
     secrets: SecretPolicy
+    pins: dict[str, str] = field(default_factory=dict)
 
     def entry(self, entry_id: str) -> Entry:
         for candidate in self.entries:
@@ -203,10 +204,13 @@ def load_manifest(path: Path,
     if not entries:
         raise ManifestError(f"{path.name}: no [[entries]] declared")
 
+    pins = dict(data.get("plugin_pins", {}))
+
     return Manifest(
         schema_version=version,
         roots=roots,
         state_dir=state_dir,
         entries=tuple(entries),
         secrets=secrets,
+        pins=pins,
     )

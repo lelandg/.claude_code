@@ -254,3 +254,11 @@ policy = "excluded"
 kind = "tree"
 wsl = ".claude"
 globs = [".claude.json", "my-projects.yaml", "policy-limits.json"]
+
+# ---------------------------------------------------------------------------
+# Explicit plugin version pins. A pin -- and only a pin -- authorizes a
+# downgrade. Empty by default: newer native builds are preserved.
+# Format: "<plugin>@<marketplace>" = "<exact version>"
+# ---------------------------------------------------------------------------
+
+[plugin_pins]
