@@ -270,7 +270,7 @@ def pointer_is_ancestor(ancestor: str, descendant: str) -> bool:
 
 def extract_entry(entry, layer: str, root: Path | None, secrets, roots) -> list[Unit]:
     """All comparable units for one manifest entry in one layer."""
-    if root is None or entry.policy == "excluded":
+    if root is None or entry.policy == "excluded" or entry.kind == "plugins":
         return []
     rel = entry.rel_for_layer(layer)
     if rel is None:
