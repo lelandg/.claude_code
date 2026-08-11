@@ -70,6 +70,8 @@ _None._
 
 ## Scan errors (0)
 
+Read failures with no comparable item (not counted above):
+
 - `.codex/config.toml`: invalid TOML at line 12
 
 ## Recommended merge order

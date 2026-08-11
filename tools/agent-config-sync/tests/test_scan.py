@@ -167,6 +167,30 @@ repo = "mcp.json"
     assert doc["redactions"], "the redaction must be recorded"
 
 
+def test_a_malformed_file_is_recorded_as_an_item_and_not_copied_again(scene):
+    """One malformed file, one record. Error items used to be copied into
+    doc["errors"] as well, which made the report list each one twice under a
+    heading that counted it once."""
+    manifest_path, roots = scene
+    manifest_path.write_text(manifest_path.read_text(encoding="utf-8") + """
+[[entries]]
+id = "mcp"
+policy = "portable_authoritative"
+kind = "json"
+wsl = "mcp.json"
+repo = "mcp.json"
+""", encoding="utf-8")
+    seed(roots, wsl="x\n", repo="x\n", windows="x\n")
+    roots.write(roots.wsl, "mcp.json", "{not json")
+
+    doc = scan.run_scan(manifest_path, root_overrides=None, now=NOW,
+                        entropy="x")
+    error_items = [i for i in doc["items"] if i["classification"] == "error"]
+    assert [i["id"] for i in error_items] == ["mcp"]
+    assert doc["errors"] == []
+    assert drift.validate_document(doc) == []
+
+
 # --- lock ------------------------------------------------------------------
 
 def test_lock_is_exclusive(fixture_roots):

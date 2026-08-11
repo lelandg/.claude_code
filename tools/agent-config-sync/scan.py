@@ -86,9 +86,12 @@ def run_scan(manifest_path, *, root_overrides, now: datetime,
             states["repo"], states["wsl"], states["windows"], m.pins,
             has_windows=m.roots.windows_home is not None))
 
-    for item in items:
-        if item.classification == "error":
-            errors.append({"path": item.path, "message": item.detail})
+    # An item that failed to extract is already carried as an "error" item,
+    # and render.py counts and lists those items under "Scan errors". Copying
+    # them into doc["errors"] as well printed every one of them twice under a
+    # heading that counted them once (fix wave, I3). doc["errors"] is now only
+    # for failures that produced no comparable item -- a plugin directory that
+    # could not be read, which has no item to attach to.
 
     return drift.build_document(m, items, errors, now=now, entropy=entropy,
                                 units=units)

@@ -183,14 +183,25 @@ def render_markdown(doc: dict, analysis: dict) -> str:
         add("_None._")
     add("")
 
+    # The heading counts items, and the items are listed in the same shape as
+    # every other item section. doc["errors"] holds only failures with no
+    # comparable item (see the note in scan.run_scan); they are listed under
+    # their own label so nothing appears twice and the count still matches the
+    # bullets it heads.
     error_items = _by(items, "Scan errors")
     add(_heading("Scan errors", len(error_items)))
     add("")
-    error_lines = [f"- `{e['path']}`: {e['message']}" for e in doc["errors"]]
-    error_lines.extend(f"- `{i['id']}` (`{i['path']}`): {i['detail']}"
-                       for i in error_items)
-    out.extend(error_lines or ["_None._"])
-    add("")
+    if error_items:
+        out.extend(_item_lines(error_items, notes))
+        add("")
+    if doc["errors"]:
+        add("Read failures with no comparable item (not counted above):")
+        add("")
+        out.extend(f"- `{e['path']}`: {e['message']}" for e in doc["errors"])
+        add("")
+    if not error_items and not doc["errors"]:
+        add("_None._")
+        add("")
 
     add("## Recommended merge order")
     add("")

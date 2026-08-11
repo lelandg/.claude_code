@@ -6,11 +6,22 @@ partial model response can never replace the last valid report.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import render as rd  # noqa: E402
+
+#: The shape _item_lines gives every drift item. Read failures with no item
+#: (doc["errors"]) render in a different shape on purpose, so counting this
+#: pattern counts items and nothing else.
+ITEM_LINE = re.compile(r"^- `[^`]+` — \*\*", re.MULTILINE)
+
+
+def section_body(out: str, name: str) -> str:
+    """The text under one '## Name (N)' heading, up to the next heading."""
+    return out.split(f"## {name} (")[1].split("\n## ")[0]
 
 GOLDEN = Path(__file__).resolve().parent / "golden" / "report-basic.md"
 
@@ -70,6 +81,18 @@ ANALYSIS = {
 _SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "drift-v1.json"
 
 
+def _partition_doc() -> dict:
+    """DOC plus one item for every section that DOC does not already cover."""
+    return dict(DOC, items=DOC["items"] + [
+        {"id": "p", "entry_id": "claude-plugins", "kind": "plugin",
+         "classification": "plugin_pin_violation", "severity": "conflict",
+         "path": "x@y", "policy": "portable_authoritative", "detail": "d"},
+        {"id": "e", "entry_id": "e", "kind": "text",
+         "classification": "error", "severity": "error",
+         "path": "a.md", "policy": "portable_authoritative", "detail": "boom"},
+    ])
+
+
 def test_every_schema_classification_maps_to_exactly_one_section():
     import json
     schema = json.loads(_SCHEMA.read_text())
@@ -81,16 +104,8 @@ def test_every_schema_classification_maps_to_exactly_one_section():
 
 
 def test_section_counts_sum_to_the_item_total():
-    doc = dict(DOC, items=DOC["items"] + [
-        {"id": "p", "entry_id": "claude-plugins", "kind": "plugin",
-         "classification": "plugin_pin_violation", "severity": "conflict",
-         "path": "x@y", "policy": "portable_authoritative", "detail": "d"},
-        {"id": "e", "entry_id": "e", "kind": "text",
-         "classification": "error", "severity": "error",
-         "path": "a.md", "policy": "portable_authoritative", "detail": "boom"},
-    ])
+    doc = _partition_doc()
     out = rd.render_markdown(doc, rd.empty_analysis())
-    import re
     # Scoped to the item-bearing section names themselves (SECTION_OF.values()),
     # not "any heading with a trailing (N)" -- a future section could add a
     # count that is not an item count, and an unscoped regex would silently
@@ -99,6 +114,25 @@ def test_section_counts_sum_to_the_item_total():
     total = sum(int(m) for m in re.findall(rf"^## (?:{names}) \((\d+)\)$", out,
                                            re.MULTILINE))
     assert total == len(doc["items"])
+
+
+def test_each_section_lists_exactly_as_many_items_as_its_heading_counts():
+    """The sum above can be right while a body is wrong.
+
+    That is how the duplicated scan error shipped: the arithmetic held, and
+    one malformed file still rendered two bullets under a heading that said
+    (1). Check each section's rendered item lines against its own count.
+    """
+    doc = _partition_doc()
+    out = rd.render_markdown(doc, rd.empty_analysis())
+    for name in sorted(set(rd.SECTION_OF.values())):
+        match = re.search(rf"^## {re.escape(name)} \((\d+)\)$", out,
+                          re.MULTILINE)
+        assert match is not None, f"{name}: no counted heading was rendered"
+        heading = int(match.group(1))
+        rendered = len(ITEM_LINE.findall(section_body(out, name)))
+        assert rendered == heading, (
+            f"{name}: heading says {heading}, body lists {rendered}")
 
 
 def test_every_required_section_is_present_in_order():
@@ -195,6 +229,31 @@ def test_errors_are_reported_with_location_only():
     out = rd.render_markdown(DOC, ANALYSIS)
     assert "invalid TOML at line 12" in out
     assert ".codex/config.toml" in out
+
+
+def test_an_error_item_is_listed_once_under_a_heading_that_counts_it():
+    """One malformed file, one bullet. scan.py used to copy every error item
+    into doc["errors"] as well, so the renderer listed it from both sources
+    under a heading that counted it once."""
+    doc = dict(DOC, errors=[], items=[
+        {"id": "codex-config", "entry_id": "codex-config", "kind": "toml_field",
+         "classification": "error", "severity": "error",
+         "path": ".codex/config.toml", "policy": "portable_authoritative",
+         "detail": "wsl: invalid TOML at line 12"},
+    ])
+    out = rd.render_markdown(doc, rd.empty_analysis())
+    section = section_body(out, "Scan errors")
+    assert "## Scan errors (1)" in out
+    assert section.count("`codex-config`") == 1
+
+
+def test_a_read_failure_with_no_item_is_listed_but_not_counted():
+    doc = dict(DOC, items=[])
+    out = rd.render_markdown(doc, rd.empty_analysis())
+    section = section_body(out, "Scan errors")
+    assert "## Scan errors (0)" in out
+    assert ".codex/config.toml" in section
+    assert "not counted above" in section
 
 
 def test_empty_analysis_renders_without_a_model():
