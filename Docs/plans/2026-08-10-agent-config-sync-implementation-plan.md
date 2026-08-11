@@ -2023,11 +2023,16 @@ def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
             continue
         text = nz.tokenize_paths(
             nz.normalize_json(_json.dumps(value)), roots)
+        # Boundary check, not a bare startswith: "envFoo.token" must not be
+        # attributed to the sibling field "env". Same bug class as the path
+        # prefix over-match. (Review ruling, 2026-08-11.)
         units.append(Unit(**common, key=pointer, policy=policy,
                           normalized=text, fingerprint=nz.fingerprint(text),
                           redactions=tuple(
                               r for r in redactions
-                              if r.pointer.startswith(pointer))))
+                              if r.pointer == pointer
+                              or r.pointer.startswith(pointer + ".")
+                              or r.pointer.startswith(pointer + "["))))
         covered.add(pointer.split(".")[0])
 
     # Undeclared top-level keys: metadata only (design, "Unknown content").
