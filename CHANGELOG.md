@@ -75,3 +75,23 @@ A plain-English history of what changed in this repository and why. Newest first
 - **Initial public release**: a sanitized mirror of a real `~/.claude/` setup — six custom agents, the first skills, output styles, instructions, settings, and the CodeMap spec.
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
+
+## [0.4.0] - 2026-08-11
+
+- **New: WSL-authoritative agent config sync.** A report-first pipeline that
+  keeps agent configuration aligned across WSL, this repository, and a Windows
+  desktop without ever applying a change unattended. A deterministic scanner
+  (`tools/agent-config-sync/scan.py`) reads only what `config/agent-sync.toml`
+  declares, normalizes away cosmetic differences (line endings, JSON key order,
+  `/home/leland` vs `C:\Users\...`), and emits a drift document that carries no
+  secret values — denied keys are represented by a pointer, a reason code, a
+  type, and a hash. When there is no drift, no model runs at all. When there is,
+  a bounded `claude -p` call supplies judgment only, and a deterministic renderer
+  writes the Markdown report, so a malformed model response can never replace the
+  last good one. Applying is a separate approved step: `merge.py` acts only on
+  item ids you name, rejects a report whose files moved since the scan, backs up
+  every target, and restores. Plugin code is never copied between environments —
+  a newer native build is preserved unless you pin it, and plugin commands are
+  printed for you to run rather than executed. Two skills drive it:
+  `agent-config-report` and `agent-config-merge`. Operator guide:
+  `Docs/agent-config-sync.md`.
