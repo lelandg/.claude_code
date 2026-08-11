@@ -182,3 +182,21 @@ def test_real_repository_manifest_loads(tmp_path: Path):
     ids = {e.id for e in m.entries}
     assert {"agents-md", "claude-md", "claude-instructions",
             "claude-settings", "claude-plugins", "claude-mcp"} <= ids
+
+
+def test_invalid_field_policy_is_rejected(tmp_path: Path):
+    bad = MINIMAL.replace(
+        '"statusLine.command" = "platform_overlay"',
+        '"statusLine.command" = "portable_authoritatve"', 1)
+    with pytest.raises(mf.ManifestError) as excinfo:
+        mf.load_manifest(write_manifest(tmp_path, bad))
+    message = str(excinfo.value)
+    assert "claude-settings" in message
+    assert "statusLine.command" in message
+
+
+def test_missing_state_table_is_rejected(tmp_path: Path):
+    no_state = MINIMAL.replace('[state]\ndir = "/fixture/state"\n\n', "")
+    with pytest.raises(mf.ManifestError) as excinfo:
+        mf.load_manifest(write_manifest(tmp_path, no_state))
+    assert "state.dir" in str(excinfo.value)

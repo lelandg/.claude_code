@@ -111,8 +111,10 @@ def load_manifest(path: Path,
         windows_home=_expand(windows) if windows else None,
     )
 
-    state_dir = _expand(data.get("state", {}).get(
-        "dir", "~/.local/state/agent-config-sync"))
+    raw_state = data.get("state", {})
+    if not raw_state.get("dir"):
+        raise ManifestError(f"{path.name}: state.dir is required")
+    state_dir = _expand(raw_state["dir"])
 
     raw_secrets = data.get("secrets", {})
     secrets = SecretPolicy(
@@ -139,6 +141,13 @@ def load_manifest(path: Path,
             raise ManifestError(
                 f"{path.name}: entry {entry_id!r} has unknown kind {kind!r}; "
                 f"expected one of {list(KINDS)}")
+        fields = dict(raw.get("fields", {}))
+        for field_pointer, field_policy in fields.items():
+            if field_policy not in POLICIES:
+                raise ManifestError(
+                    f"{path.name}: entry {entry_id!r} field {field_pointer!r} "
+                    f"has unknown policy {field_policy!r}; "
+                    f"expected one of {list(POLICIES)}")
         entries.append(Entry(
             id=entry_id,
             policy=policy,
@@ -147,7 +156,7 @@ def load_manifest(path: Path,
             repo=raw.get("repo"),
             windows=raw.get("windows"),
             globs=tuple(raw.get("globs", [])),
-            fields=dict(raw.get("fields", {})),
+            fields=fields,
         ))
 
     if not entries:
