@@ -4246,6 +4246,93 @@ In `tools/agent-config-sync/schemas/drift-v1.json`, inside the item `properties`
           "portability": {"type": "array", "items": {"type": "string"}},
 ```
 
+- [ ] **Step 8b: Make the report sections a structural partition**
+
+Found by Task 7's re-review. The five section selectors are not a partition:
+`plugin_pin_violation` appears in **both** `_CONFLICT` and `_PLUGIN`, so such an
+item renders twice and inflates two counts; and `error` appears in **no**
+selector, so an error-classified item is counted in the executive-summary table
+and rendered in no body section. Both are latent today (each count is zero on
+the real document), which is exactly why the section counts happened to sum to
+the item total — that was data, not a guarantee.
+
+Replace the five hand-maintained tuples with one mapping, so a partition is
+structurally guaranteed and a missing classification fails a test rather than
+silently vanishing. In `render.py`, delete `_SAFE`, `_CONFLICT`, `_ONLY`,
+`_PLUGIN` and add:
+
+```python
+#: Every non-"unchanged" classification maps to exactly one section. This is a
+#: partition by construction: a classification in two sections double-counts,
+#: and one in none disappears from the body while still being tallied in the
+#: header. (Review ruling, 2026-08-11.)
+SECTION_OF = {
+    "publish_to_repo": "Safe portable updates",
+    "reconcile_windows": "Safe portable updates",
+    "conflict": "Conflicts requiring judgment",
+    "wsl_only": "WSL-only and Windows-only items",
+    "windows_only": "WSL-only and Windows-only items",
+    "additive_delete_requires_approval": "WSL-only and Windows-only items",
+    "protected_overlay": "Protected Windows state",
+    "plugin_missing": "Plugin differences",
+    "plugin_extra": "Plugin differences",
+    "plugin_enabled_differs": "Plugin differences",
+    "plugin_version_differs": "Plugin differences",
+    "plugin_pin_violation": "Plugin differences",
+    "plugin_incompatible": "Plugin differences",
+    "error": "Scan errors",
+}
+```
+
+`plugin_pin_violation` lives under Plugin differences so every plugin item is in
+one place; its `severity` is still `conflict`, and the Conflicts section gains a
+one-line note pointing there so an operator scanning for decisions is not misled.
+`error` items render under Scan errors, alongside the entries from
+`doc["errors"]`.
+
+Change `_by(items, selector)` to select by section name:
+
+```python
+def _by(items, section: str) -> list[dict]:
+    return [i for i in items if SECTION_OF.get(i["classification"]) == section]
+```
+
+and drive the section loop from the heading name alone.
+
+Add two tests that make the invariant structural rather than incidental:
+
+```python
+def test_every_schema_classification_maps_to_exactly_one_section():
+    import json
+    from pathlib import Path as _P
+    schema = json.loads(
+        (_P(rd.__file__).parent / "schemas" / "drift-v1.json").read_text())
+    enum = schema["properties"]["items"]["items"]["properties"][
+        "classification"]["enum"]
+    unmapped = [c for c in enum
+                if c != "unchanged" and c not in rd.SECTION_OF]
+    assert unmapped == [], f"these would vanish from the report: {unmapped}"
+
+
+def test_section_counts_sum_to_the_item_total():
+    doc = dict(DOC, items=DOC["items"] + [
+        {"id": "p", "entry_id": "claude-plugins", "kind": "plugin",
+         "classification": "plugin_pin_violation", "severity": "conflict",
+         "path": "x@y", "policy": "portable_authoritative", "detail": "d"},
+        {"id": "e", "entry_id": "e", "kind": "text",
+         "classification": "error", "severity": "error",
+         "path": "a.md", "policy": "portable_authoritative", "detail": "boom"},
+    ])
+    out = rd.render_markdown(doc, rd.empty_analysis())
+    import re
+    total = sum(int(m) for m in re.findall(r"^## .*\((\d+)\)$", out,
+                                           re.MULTILINE))
+    assert total == len(doc["items"])
+```
+
+The second test fails today: `plugin_pin_violation` is counted twice and `error`
+not at all.
+
 - [ ] **Step 9: Fix the renderer's selector**
 
 Replace the substring match in `render.py`:
