@@ -2236,6 +2236,18 @@ def test_without_a_windows_layer_only_wsl_and_repo_are_compared():
     assert cmp.classify(B, A, None, AUTH, has_windows=False)[0] == "publish_to_repo"
 
 
+def test_without_a_windows_layer_additive_deletion_requires_approval():
+    kind, severity, _ = cmp.classify(None, A, None, ADD, has_windows=False)
+    assert (kind, severity) == ("additive_delete_requires_approval", "review")
+
+
+def test_without_a_windows_layer_authoritative_deletion_publishes():
+    kind, severity, detail = cmp.classify(None, A, None, AUTH,
+                                          has_windows=False)
+    assert (kind, severity) == ("publish_to_repo", "review")
+    assert "deletion" in detail
+
+
 # --- compare_entry() -------------------------------------------------------
 
 def test_compare_entry_joins_layers_by_key():
@@ -2407,9 +2419,6 @@ def classify(wsl: str | None, repo: str | None, windows: str | None,
         return ("protected_overlay", "info",
                 "Windows owns this value; preserved and reported only.")
 
-    if not has_windows:
-        windows = None
-
     if policy is None:
         present = [fp for fp in (wsl, repo, windows) if fp]
         if len(set(present)) <= 1:
@@ -2417,6 +2426,31 @@ def classify(wsl: str | None, repo: str | None, windows: str | None,
         return ("conflict", "conflict",
                 "Ownership undeclared and layers differ. Declare a policy for "
                 "this field in config/agent-sync.toml before merging.")
+
+    # Two layers only. This needs its own path, not `windows = None` plus the
+    # three-layer ladder: that fallthrough hits `wsl == repo and repo !=
+    # windows` and returns reconcile_windows for two layers that actually
+    # agree. Found by TDD in Task 4; verified across all 216 table cells.
+    # (Review ruling, 2026-08-11.)
+    if not has_windows:
+        if wsl is None and repo is None:
+            return ("unchanged", "info", "Absent everywhere.")
+        if wsl is None:
+            if policy == "portable_additive":
+                return ("additive_delete_requires_approval", "review",
+                        "Removed in WSL. This item is portable-additive, so "
+                        "the deletion is never applied without explicit "
+                        "approval.")
+            return ("publish_to_repo", "review",
+                    "Removed in WSL. Publishing records the deletion in the "
+                    "baseline; review it as a deletion, not an update.")
+        if repo is None:
+            return ("wsl_only", "review",
+                    "Present in WSL only; a new portable item.")
+        if wsl == repo:
+            return ("unchanged", "info", "All layers agree.")
+        return ("publish_to_repo", "review",
+                "WSL intent is ahead of the baseline; publish it.")
 
     # No baseline in the repository.
     if repo is None:
