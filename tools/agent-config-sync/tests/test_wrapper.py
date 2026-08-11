@@ -148,6 +148,45 @@ def test_home_unset_but_both_overrides_provided_runs_normally(tmp_path):
     assert marker.exists()
 
 
+def test_home_unset_and_state_empty_exits_twenty(tmp_path):
+    # ACS_STATE="" is set-but-empty, not unset. ${VAR:+x} (value-based) must
+    # treat this the same as unset, matching what ${VAR:-default} two lines
+    # down will do -- a presence-only ${VAR+x} guard would wrongly let this
+    # through and still dereference the unset $HOME.
+    scan = stub(tmp_path / "scan-stub", "exit 0\n")
+    render = stub(tmp_path / "render-stub", "exit 0\n")
+    env = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "ACS_CLAUDE": "/nonexistent/claude",
+        "ACS_STATE": "",
+        "ACS_SCAN": scan,
+        "ACS_RENDER": render,
+    }
+    result = subprocess.run(["env", "-u", "HOME", "bash", str(WRAPPER)],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 20
+    assert "HOME" in result.stderr
+
+
+def test_home_unset_and_claude_empty_exits_twenty(tmp_path):
+    # Symmetric case: ACS_CLAUDE="" set-but-empty, ACS_STATE a real path.
+    state = tmp_path / "state"
+    state.mkdir()
+    scan = stub(tmp_path / "scan-stub", "exit 0\n")
+    render = stub(tmp_path / "render-stub", "exit 0\n")
+    env = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "ACS_CLAUDE": "",
+        "ACS_STATE": str(state),
+        "ACS_SCAN": scan,
+        "ACS_RENDER": render,
+    }
+    result = subprocess.run(["env", "-u", "HOME", "bash", str(WRAPPER)],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 20
+    assert "HOME" in result.stderr
+
+
 def test_wrapper_is_executable_and_uses_absolute_defaults():
     assert WRAPPER.stat().st_mode & stat.S_IXUSR
     text = WRAPPER.read_text(encoding="utf-8")

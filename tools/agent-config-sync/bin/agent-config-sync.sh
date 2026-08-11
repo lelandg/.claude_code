@@ -11,14 +11,18 @@ set -euo pipefail
 ACS_REPO="${ACS_REPO:-/mnt/d/Documents/Code/GitHub/.claude_code}"
 ACS_PYTHON="${ACS_PYTHON:-/usr/bin/python3}"
 
-# $HOME is only dereferenced below as a fallback for ACS_CLAUDE/ACS_STATE.
-# cron, systemd timers, and minimal containers do not all guarantee it, so
-# check before dereferencing -- otherwise `set -u` aborts with HOME's own
-# "unbound variable" message and no documented exit code, before log()
-# exists to record what happened. ${VAR+x} tests presence without
-# dereferencing, so this check itself is safe under `set -u` even when HOME
-# is unset.
-if [ -z "${HOME+x}" ] && { [ -z "${ACS_CLAUDE+x}" ] || [ -z "${ACS_STATE+x}" ]; }; then
+# $HOME is only dereferenced below as a fallback for ACS_CLAUDE/ACS_STATE,
+# via ${VAR:-$HOME/...}, which treats VAR as absent when VAR is unset OR
+# set-but-empty. This guard must use the same value-based test (${VAR:+x},
+# not ${VAR+x}) or an empty-but-set override would slip past a
+# presence-only guard and still trigger the $HOME dereference it exists to
+# prevent. cron, systemd timers, and minimal containers do not all
+# guarantee HOME, so check before dereferencing -- otherwise `set -u`
+# aborts with HOME's own "unbound variable" message and no documented exit
+# code, before log() exists to record what happened. ${VAR:+x} never
+# dereferences on the unset path, so this check itself is safe under
+# `set -u` even when HOME is unset.
+if [ -z "${HOME:+x}" ] && { [ -z "${ACS_CLAUDE:+x}" ] || [ -z "${ACS_STATE:+x}" ]; }; then
   printf 'agent-config-sync: HOME is not set and ACS_CLAUDE/ACS_STATE were not both provided explicitly; set ACS_CLAUDE and ACS_STATE, or set HOME.\n' >&2
   exit 20
 fi
