@@ -3528,8 +3528,13 @@ def run_scan(manifest_path, *, root_overrides, now: datetime,
             states[layer] = state
             errors.extend({"path": f"{layer}:{entry.id}", "message": message}
                           for message in layer_errors)
+        # has_windows must be threaded through: without it, an empty
+        # windows_native is indistinguishable from an unconfigured Windows
+        # root, and a machine with no Windows target would be told every
+        # plugin it owns is missing. (Task 5 ruling, 2026-08-11.)
         items.extend(pl.classify_plugins(
-            states["repo"], states["wsl"], states["windows"], m.pins))
+            states["repo"], states["wsl"], states["windows"], m.pins,
+            has_windows=m.roots.windows_home is not None))
 
     for item in items:
         if item.classification == "error":
