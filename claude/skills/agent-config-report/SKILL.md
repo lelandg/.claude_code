@@ -1,6 +1,6 @@
 ---
 name: agent-config-report
-description: Scan for drift between WSL agent configuration (the authority), this repository's sanitized record, and the Windows target, then explain the resulting report. Use when Leland asks "what config has drifted", "check my agent config sync", "is Windows out of date", "run the config drift scan", or asks about a drift report by run id. Read-only — it never applies a change; use agent-config-merge for that.
+description: Scan for drift between WSL agent configuration (the authority), this repository's sanitized record, and the Windows target, then explain the resulting report. Use when Leland asks "what config has drifted", "check my agent config sync", "is Windows out of date", "run the config drift scan", asks about a drift report by run id, or asks why his laptop and desktop behave differently, why a skill/agent/setting is missing on one machine, or whether his machines are in sync. Read-only — it never applies a change; use agent-config-merge for that.
 ---
 
 # Agent Config Drift Report
@@ -41,10 +41,14 @@ the expected, normal outcome here, not an error. The breakdown by type:
 | `plugin_version_differs` | 2 |
 | `plugin_incompatible` | 1 |
 
-47 of the 340 items also carry a portability warning (a hardcoded machine path
-that would not survive a move) — `/mnt/` 30, `.venv_linux` 17, `/usr/` 12,
-unrooted `/home/` 6. Mention the count if Leland asks about portability; do
-not enumerate all 47 unless asked.
+47 of the 340 items also carry at least one portability warning (a hardcoded
+machine path that would not survive a move) — **65 warnings in total**, since
+an item can trip more than one (32 items carry one, 12 carry two, 3 carry
+three). The 65 instances break down as: `/mnt/` 30, `.venv_linux` 17, `/usr/`
+12, unrooted `/home/` 6. `.config/agents/AGENTS.md` — the canonical house-rules
+file every agent CLI reads — is one of the items that trips two: it names both
+a WSL mount path and `.venv_linux`. Mention the item count (47) if Leland asks
+about portability; do not enumerate all of them unless asked.
 
 ## 1. Run the deterministic scan
 
@@ -70,6 +74,11 @@ python3 /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/render
   --drift ~/.local/state/agent-config-sync/latest-drift.json \
   --state-dir ~/.local/state/agent-config-sync
 ```
+
+Exit `20` means the drift document is missing or malformed — `render.py`
+could not read or parse `latest-drift.json`. Say so, and re-run the scan
+(step 1) to regenerate it. Never open or edit `latest-drift.json` by hand to
+work around this — the same rule as an exit `20` from `scan.py`.
 
 Exit `30` means the analyzer failed. The previous valid report is untouched —
 say so, and offer to re-run with `--no-model` to render from the deterministic
