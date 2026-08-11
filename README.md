@@ -335,6 +335,24 @@ Custom skills extend Claude Code with repeatable workflows:
 - **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default.
 - **time** - Tracks execution time for each step in a workflow
 
+### Agent config sync (WSL-authoritative)
+
+`tools/agent-config-sync/` keeps agent configuration aligned across WSL, this
+repository, and a Windows desktop — **report-first, never automatic**.
+
+- WSL is the authority for portable intent; this repo is the sanitized record;
+  Windows is a derived target with a protected overlay.
+- A deterministic scanner (`scan.py`) produces a drift document containing no
+  secret values — only pointers, reason codes, types, and hashes.
+- When (and only when) there is drift, a bounded `claude -p` call adds judgment
+  and `render.py` writes the Markdown report.
+- Applying anything is a separate, approved operation (`merge.py`), which
+  re-verifies fingerprints, backs up every target, and can restore.
+- Plugin code is never copied; plugin commands are proposed, never executed.
+
+Skills: `agent-config-report` (scan and explain) and `agent-config-merge`
+(apply approved items). Operator guide: `Docs/agent-config-sync.md`.
+
 ### CodeMap System
 The CodeMap is a structured documentation file (`Docs/CodeMap.md`) that provides:
 - Line-number-accurate class/method inventory
