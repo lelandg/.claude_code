@@ -20,7 +20,8 @@ On this machine, a scan currently reports:
 | Metric | Value |
 |---|---|
 | Items | 340 |
-| Report size | ~170 KB |
+| `latest-drift.json` size | ~174 KB |
+| `latest-report.md` size | ~103 KB |
 | Exit code | `10` (drift reported) |
 | Errors | 0 |
 | Redactions | 0 |
@@ -147,6 +148,7 @@ different meaning — each of these five states is distinct:
 ├── latest-report.md     # last VALID report; an invalid run cannot replace it
 ├── reports/             # one timestamped report per run, retained
 ├── backups/             # one directory per applied merge, keyed by run id
+│                        # (empty until Task 11 ships merge.py -- not a bug)
 ├── scan.lock            # held only while a scan is in progress
 └── wrapper.log           # a few UTC-timestamped lines per wrapper run
 ```

@@ -85,6 +85,33 @@ def test_model_failure_exits_thirty_not_twenty(scene):
     assert result.returncode == 30
 
 
+def test_unwritable_state_dir_exits_twenty(tmp_path):
+    parent = tmp_path / "locked"
+    parent.mkdir()
+    state = parent / "state"
+    marker = tmp_path / "render-was-called"
+    scan = stub(tmp_path / "scan-stub", "exit 0\n")
+    render = stub(tmp_path / "render-stub", f'echo called >"{marker}"\nexit 0\n')
+    parent.chmod(0o000)
+    try:
+        env = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "ACS_STATE": str(state),
+            "ACS_MANIFEST": str(tmp_path / "agent-sync.toml"),
+            "ACS_SCAN": scan,
+            "ACS_RENDER": render,
+            "ACS_CLAUDE": "/nonexistent/claude",
+        }
+        result = subprocess.run(["bash", str(WRAPPER)], env=env,
+                                capture_output=True, text=True)
+    finally:
+        parent.chmod(0o755)
+    assert result.returncode == 20
+    assert not marker.exists(), "Claude must not run when the state dir can't be created"
+    assert "cannot create state directory" in result.stderr
+
+
 def test_wrapper_is_executable_and_uses_absolute_defaults():
     assert WRAPPER.stat().st_mode & stat.S_IXUSR
     text = WRAPPER.read_text(encoding="utf-8")

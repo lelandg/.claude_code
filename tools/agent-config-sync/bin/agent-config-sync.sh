@@ -20,7 +20,13 @@ ACS_RENDER="${ACS_RENDER:-$ACS_PYTHON $ACS_REPO/tools/agent-config-sync/render.p
 export PATH=/usr/local/bin:/usr/bin:/bin
 export LC_ALL=C.UTF-8
 
-mkdir -p "$ACS_STATE"
+if ! mkdir -p "$ACS_STATE" 2>/dev/null; then
+  # wrapper.log lives inside $ACS_STATE, which just failed to exist -- log()
+  # cannot be relied on here, so this goes to stderr, the only channel cron
+  # has left to mail.
+  printf 'agent-config-sync: cannot create state directory %s\n' "$ACS_STATE" >&2
+  exit 20
+fi
 DRIFT="$ACS_STATE/latest-drift.json"
 LOG="$ACS_STATE/wrapper.log"
 
@@ -60,8 +66,8 @@ case "$scan_code" in
     ;;
 esac
 
-# shellcheck disable=SC2086
 set +e
+# shellcheck disable=SC2086
 $ACS_RENDER --drift "$DRIFT" --state-dir "$ACS_STATE" \
             --claude-bin "$ACS_CLAUDE"
 render_code=$?
