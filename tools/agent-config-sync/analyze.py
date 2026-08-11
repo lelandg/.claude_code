@@ -27,7 +27,23 @@ class AnalysisError(RuntimeError):
 
 
 def build_command(claude_bin: str, *, max_turns: int) -> list[str]:
-    """Read-only, bounded, normal configuration (never --bare)."""
+    """Read-only, bounded, normal configuration (never --bare).
+
+    --allowedTools is a prompt-SKIP list, not an allowlist: it does not
+    restrict what exists. --disallowedTools is the real control -- it removes
+    those tools from the model's context entirely. Both are kept on purpose;
+    do not "simplify" by dropping the disallow list.
+
+    Anything named in neither list fails closed: under the default permission
+    mode (never overridden here) a tool needing approval aborts the --print
+    run, since no interactive prompt is possible; that surfaces here as a
+    non-zero exit, which run() turns into an AnalysisError, so no report is
+    written. (Verified against the published CLI/headless/permission-modes
+    docs, 2026-08-11. One residual: the abort-on-attempt rule is stated
+    explicitly for shell/network tools and for org-connector/
+    requiresUserInteraction MCP cases, but not spelled out by name for an
+    ordinary locally-configured MCP tool.)
+    """
     return [
         claude_bin,
         "--print",
