@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["response_schema_version", "summary", "severity",
+               "recommended_order", "notes", "codex_review_recommended"],
+  "properties": {
+    "response_schema_version": {"type": "integer", "enum": [1]},
+    "summary": {"type": "string"},
+    "severity": {"type": "string", "enum": ["none", "review", "conflict"]},
+    "recommended_order": {"type": "array", "items": {"type": "string"}},
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item_id", "note"],
+        "properties": {
+          "item_id": {"type": "string"},
+          "note": {"type": "string"}
+        }
+      }
+    },
+    "codex_review_recommended": {"type": "boolean"},
+    "codex_reason": {"type": "string"}
+  }
+}

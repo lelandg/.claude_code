@@ -91,7 +91,12 @@ def test_section_counts_sum_to_the_item_total():
     ])
     out = rd.render_markdown(doc, rd.empty_analysis())
     import re
-    total = sum(int(m) for m in re.findall(r"^## .*\((\d+)\)$", out,
+    # Scoped to the item-bearing section names themselves (SECTION_OF.values()),
+    # not "any heading with a trailing (N)" -- a future section could add a
+    # count that is not an item count, and an unscoped regex would silently
+    # fold it into this total with no signal pointing at the cause.
+    names = "|".join(re.escape(name) for name in sorted(set(rd.SECTION_OF.values())))
+    total = sum(int(m) for m in re.findall(rf"^## (?:{names}) \((\d+)\)$", out,
                                            re.MULTILINE))
     assert total == len(doc["items"])
 

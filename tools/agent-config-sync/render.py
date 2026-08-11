@@ -9,6 +9,13 @@ Design: "Report format".
 """
 from __future__ import annotations
 
+import argparse
+import json
+from pathlib import Path
+
+import analyze
+import drift as drift_mod
+
 REPORT_TEMPLATE_VERSION = 1
 
 SECTIONS = (
@@ -230,3 +237,59 @@ def render_markdown(doc: dict, analysis: dict) -> str:
     add("")
 
     return "\n".join(out).rstrip() + "\n"
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+EXIT_OK = 0
+EXIT_RENDER_FAILURE = 20
+EXIT_MODEL_FAILURE = 30
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="render.py",
+        description="Validate a model analysis and render the Markdown report.")
+    parser.add_argument("--drift", required=True, type=Path)
+    parser.add_argument("--state-dir", required=True, type=Path)
+    parser.add_argument("--claude-bin", default="claude")
+    parser.add_argument("--prompt", type=Path,
+                        default=Path(__file__).resolve().parent / "prompts"
+                        / "report-v1.md")
+    parser.add_argument("--no-model", action="store_true",
+                        help="render from the scan alone; do not call Claude")
+    parser.add_argument("--timeout", type=int, default=300)
+    parser.add_argument("--max-turns", type=int, default=6)
+    args = parser.parse_args(argv)
+
+    try:
+        doc = json.loads(args.drift.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"render: cannot read drift document: {type(exc).__name__}")
+        return EXIT_RENDER_FAILURE
+
+    if args.no_model:
+        analysis = empty_analysis()
+    else:
+        try:
+            analysis = analyze.run(doc, claude_bin=args.claude_bin,
+                                   prompt_path=args.prompt,
+                                   timeout_s=args.timeout,
+                                   max_turns=args.max_turns)
+        except analyze.AnalysisError as exc:
+            print(f"render: {exc}")
+            return EXIT_MODEL_FAILURE
+
+    markdown = render_markdown(doc, analysis)
+    state_dir = args.state_dir
+    drift_mod.write_atomic(state_dir / "reports" / f"{doc['run_id']}.md",
+                           markdown)
+    drift_mod.write_atomic(state_dir / "latest-report.md", markdown)
+    print(str(state_dir / "latest-report.md"))
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
