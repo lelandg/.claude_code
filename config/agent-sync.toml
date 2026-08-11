@@ -56,6 +56,25 @@ deny_path_globs = [
 ]
 
 # ---------------------------------------------------------------------------
+# Non-portable machine state. Never read -- not because it is secret, but
+# because it is tool-generated: plugin caches, temp dirs, vendored imports,
+# staging areas. Distinct from [secrets] on purpose. Design non-goal:
+# "Plugin caches, downloads, logs, telemetry state, and temporary files."
+# Measured 2026-08-11: these accounted for 4,286 of 4,626 drift items.
+# ---------------------------------------------------------------------------
+
+[exclusions]
+deny_path_globs = [
+  "**/.codex/.tmp/**",
+  "**/.codex/vendor_imports/**",
+  "**/.codex/plugins/**",
+  "**/.codex/memories/**",
+  "**/.codex/skills/.system/**",
+  "**/.gemini/antigravity*/**",
+  "**/.copilot/installed-plugins/**",
+]
+
+# ---------------------------------------------------------------------------
 # Portable authoritative: WSL intent is the desired value.
 # ---------------------------------------------------------------------------
 

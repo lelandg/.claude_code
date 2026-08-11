@@ -201,3 +201,21 @@ def test_missing_state_table_is_rejected(tmp_path: Path):
     with pytest.raises(mf.ManifestError) as excinfo:
         mf.load_manifest(write_manifest(tmp_path, no_state))
     assert "state.dir" in str(excinfo.value)
+
+
+def test_exclusions_table_is_optional(tmp_path: Path):
+    # MINIMAL declares no [exclusions] table at all; loading must not fail.
+    m = mf.load_manifest(write_manifest(tmp_path, MINIMAL))
+    assert m.secrets.deny_path_globs == (".credentials.json",)
+
+
+def test_exclusions_merge_into_deny_path_globs(tmp_path: Path):
+    with_exclusions = MINIMAL + """
+[exclusions]
+deny_path_globs = ["**/.codex/.tmp/**", "**/.gemini/antigravity*/**"]
+"""
+    m = mf.load_manifest(write_manifest(tmp_path, with_exclusions))
+    # Both tables land in the one deny list the extractor consults --
+    # [secrets] entries first, then [exclusions] entries.
+    assert m.secrets.deny_path_globs == (
+        ".credentials.json", "**/.codex/.tmp/**", "**/.gemini/antigravity*/**")

@@ -159,9 +159,17 @@ def load_manifest(path: Path,
     state_dir = _expand(raw_state["dir"])
 
     raw_secrets = data.get("secrets", {})
+    raw_exclusions = data.get("exclusions", {})
+    # [secrets].deny_path_globs means "this may hold a credential"; a path
+    # under [exclusions] means "this is machine-generated state, not
+    # portable intent" -- plugin caches, temp dirs, vendored imports. The
+    # two tables are conceptually distinct but the extractor only needs one
+    # deny list, so they are merged here (design non-goal: "Plugin caches,
+    # downloads, logs, telemetry state, and temporary files").
     secrets = SecretPolicy(
         deny_key_patterns=tuple(raw_secrets.get("deny_key_patterns", [])),
-        deny_path_globs=tuple(raw_secrets.get("deny_path_globs", [])),
+        deny_path_globs=tuple(raw_secrets.get("deny_path_globs", []))
+                        + tuple(raw_exclusions.get("deny_path_globs", [])),
     )
 
     entries: list[Entry] = []
