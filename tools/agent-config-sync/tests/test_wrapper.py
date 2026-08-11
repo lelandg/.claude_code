@@ -112,6 +112,42 @@ def test_unwritable_state_dir_exits_twenty(tmp_path):
     assert "cannot create state directory" in result.stderr
 
 
+def test_home_unset_and_no_overrides_exits_twenty_mentioning_home(tmp_path):
+    scan = stub(tmp_path / "scan-stub", "exit 0\n")
+    render = stub(tmp_path / "render-stub", "exit 0\n")
+    env = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "ACS_SCAN": scan,
+        "ACS_RENDER": render,
+    }
+    result = subprocess.run(["env", "-u", "HOME", "bash", str(WRAPPER)],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 20
+    assert "HOME" in result.stderr
+    assert "ACS_CLAUDE" in result.stderr
+    assert "ACS_STATE" in result.stderr
+
+
+def test_home_unset_but_both_overrides_provided_runs_normally(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    marker = tmp_path / "render-was-called"
+    scan = stub(tmp_path / "scan-stub", "exit 10\n")
+    render = stub(tmp_path / "render-stub", f'echo called >"{marker}"\nexit 0\n')
+    env = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "ACS_STATE": str(state),
+        "ACS_CLAUDE": "/nonexistent/claude",
+        "ACS_MANIFEST": str(tmp_path / "agent-sync.toml"),
+        "ACS_SCAN": scan,
+        "ACS_RENDER": render,
+    }
+    result = subprocess.run(["env", "-u", "HOME", "bash", str(WRAPPER)],
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 10, result.stderr
+    assert marker.exists()
+
+
 def test_wrapper_is_executable_and_uses_absolute_defaults():
     assert WRAPPER.stat().st_mode & stat.S_IXUSR
     text = WRAPPER.read_text(encoding="utf-8")
