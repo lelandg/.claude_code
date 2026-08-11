@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,17 @@ MANIFEST = REPO / "config" / "agent-sync.toml"
 
 live = pytest.mark.skipif(os.environ.get("ACS_LIVE") != "1",
                           reason="set ACS_LIVE=1 to run against this machine")
+
+# Real credential shapes, not bare prefixes. A bare "sk-" substring check
+# false-positives on ordinary repo paths (this repo ships skills named
+# disk-doctor and ask-matt, both of which contain "sk-"); requiring a
+# plausible key body after the prefix keeps the check meaningful.
+CREDENTIAL_PATTERNS = {
+    "OpenAI-style key": re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+    "GitHub token": re.compile(r"gh[a-z]_[A-Za-z0-9]{30,}"),
+    "PEM private key header": re.compile(r"-----BEGIN"),
+    "AWS access key ID": re.compile(r"AKIA[0-9A-Z]{16}"),
+}
 
 
 @live
@@ -37,8 +49,9 @@ def test_scanner_runs_clean_against_this_machine(tmp_path: Path):
     assert doc["scanner_version"]
     # Nothing that looks like a credential may appear anywhere in the document.
     blob = json.dumps(doc)
-    for needle in ("sk-", "ghp_", "-----BEGIN", "AKIA"):
-        assert needle not in blob, f"possible secret leak: {needle}"
+    for label, pattern in CREDENTIAL_PATTERNS.items():
+        m = pattern.search(blob)
+        assert m is None, f"possible secret leak ({label}): {m.group(0)!r}"
 
 
 @live
