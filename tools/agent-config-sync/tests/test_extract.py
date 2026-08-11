@@ -232,3 +232,22 @@ def test_extract_unreadable_file_records_an_error(tmp_path: Path):
     target.write_bytes(b"\xff\xfe\x00binary")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     assert units[0].error is not None
+
+
+def test_extract_redaction_is_not_misattributed_to_a_sibling_pointer(tmp_path: Path):
+    # Fix round 1, Finding 1: r.pointer.startswith(pointer) has no path
+    # boundary, so a secret at "envFoo.token" was wrongly attributed to the
+    # unrelated sibling unit "env" because "envFoo.token".startswith("env").
+    (tmp_path / "s.json").write_text(
+        '{"env": {"NODE_ENV": "production"}, '
+        '"envFoo": {"a": 1, "token": "leak-value"}}',
+        encoding="utf-8")
+    entry = make_entry(kind="json", wsl="s.json",
+                       fields={"env": "portable_authoritative",
+                               "envFoo.a": "portable_authoritative"})
+    units = ex.extract_entry(entry, "wsl", tmp_path, SECRETS, ROOTS)
+    by_key = {u.key: u for u in units}
+    assert by_key["env"].redactions == ()
+    assert by_key["envFoo.a"].redactions == ()
+    all_redacted_pointers = {r.pointer for u in units for r in u.redactions}
+    assert "envFoo.token" not in all_redacted_pointers

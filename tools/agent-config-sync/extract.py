@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-import manifest as mf
 import normalize as nz
 
 REDACTED = "<redacted>"
@@ -149,20 +148,29 @@ def _display(root: Path, path: Path) -> str:
 
 def _unit_for_file(entry, layer, root, path, key, roots,
                    kind: str, policy: str | None) -> Unit:
-    common = dict(entry_id=entry.id, layer=layer, key=key,
-                  path=_display(root, path), kind=kind, policy=policy)
+    # Explicit keyword arguments, not an untyped dict splat (fix round 1,
+    # Finding 3): a dict()-then-**common merges every field into one union
+    # value type, which defeats per-field type checking on the Unit call.
+    entry_id: str = entry.id
+    display = _display(root, path)
     if not path.exists():
-        return Unit(**common)
+        return Unit(entry_id=entry_id, layer=layer, key=key, path=display,
+                    kind=kind, policy=policy)
     try:
         raw = _read(path)
     except (UnicodeDecodeError, OSError) as exc:
-        return Unit(**common, error=f"unreadable: {type(exc).__name__}")
+        return Unit(entry_id=entry_id, layer=layer, key=key, path=display,
+                    kind=kind, policy=policy,
+                    error=f"unreadable: {type(exc).__name__}")
     try:
         text = nz.normalize_for_kind(raw, kind if kind in ("json", "toml") else "text")
     except nz.NormalizeError as exc:
-        return Unit(**common, error=str(exc))
+        return Unit(entry_id=entry_id, layer=layer, key=key, path=display,
+                    kind=kind, policy=policy, error=str(exc))
     text = nz.tokenize_paths(text, roots)
-    return Unit(**common, normalized=text, fingerprint=nz.fingerprint(text))
+    return Unit(entry_id=entry_id, layer=layer, key=key, path=display,
+               kind=kind, policy=policy, normalized=text,
+               fingerprint=nz.fingerprint(text))
 
 
 def _flatten_pointers(data, prefix: str = "") -> list[tuple[str, object]]:
@@ -176,19 +184,39 @@ def _flatten_pointers(data, prefix: str = "") -> list[tuple[str, object]]:
     return out
 
 
+def _redactions_under(pointer: str, redactions) -> tuple[Redaction, ...]:
+    """Redactions for exactly this pointer or a genuine descendant of it.
+
+    A plain str.startswith(pointer) has no path boundary and would treat a
+    sibling like "envFoo.token" as a descendant of "env" merely because the
+    strings share a prefix (fix round 1, Finding 1). Requiring the next
+    character to be "." (a dict child) or "[" (a list index) rules that out.
+    """
+    return tuple(r for r in redactions
+                if r.pointer == pointer
+                or r.pointer.startswith(pointer + ".")
+                or r.pointer.startswith(pointer + "["))
+
+
 def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
+    # Explicit keyword arguments, not an untyped dict splat (fix round 1,
+    # Finding 3): see the matching note in _unit_for_file.
     kind = entry.kind
-    common = dict(entry_id=entry.id, layer=layer,
-                  path=_display(root, path), kind=f"{kind}_field")
+    entry_id: str = entry.id
+    display = _display(root, path)
+    unit_kind = f"{kind}_field"
     if not path.exists():
-        return [Unit(**common, key="", policy=entry.policy)]
+        return [Unit(entry_id=entry_id, layer=layer, key="", path=display,
+                     kind=unit_kind, policy=entry.policy)]
     try:
         raw = _read(path)
         canonical = nz.normalize_for_kind(raw, kind)
     except nz.NormalizeError as exc:
-        return [Unit(**common, key="", policy=entry.policy, error=str(exc))]
+        return [Unit(entry_id=entry_id, layer=layer, key="", path=display,
+                     kind=unit_kind, policy=entry.policy, error=str(exc))]
     except (UnicodeDecodeError, OSError) as exc:
-        return [Unit(**common, key="", policy=entry.policy,
+        return [Unit(entry_id=entry_id, layer=layer, key="", path=display,
+                     kind=unit_kind, policy=entry.policy,
                      error=f"unreadable: {type(exc).__name__}")]
 
     data = json.loads(canonical)
@@ -196,7 +224,8 @@ def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
 
     if not entry.fields:
         text = nz.tokenize_paths(nz.normalize_json(json.dumps(data)), roots)
-        return [Unit(**common, key="", policy=entry.policy, normalized=text,
+        return [Unit(entry_id=entry_id, layer=layer, key="", path=display,
+                     kind=unit_kind, policy=entry.policy, normalized=text,
                      fingerprint=nz.fingerprint(text),
                      redactions=tuple(redactions))]
 
@@ -217,11 +246,11 @@ def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
             continue
         text = nz.tokenize_paths(
             nz.normalize_json(json.dumps(value)), roots)
-        units.append(Unit(**common, key=pointer, policy=policy,
-                          normalized=text, fingerprint=nz.fingerprint(text),
-                          redactions=tuple(
-                              r for r in redactions
-                              if r.pointer.startswith(pointer))))
+        units.append(Unit(
+            entry_id=entry_id, layer=layer, key=pointer, path=display,
+            kind=unit_kind, policy=policy, normalized=text,
+            fingerprint=nz.fingerprint(text),
+            redactions=_redactions_under(pointer, redactions)))
         covered.add(pointer.split(".")[0])
 
     # Undeclared top-level keys: metadata only (design, "Unknown content").
@@ -229,9 +258,9 @@ def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
         if key in covered:
             continue
         text = nz.normalize_json(json.dumps(value))
-        units.append(Unit(**common, key=str(key), policy=None,
-                          normalized=None,
-                          fingerprint=nz.fingerprint(text)))
+        units.append(Unit(entry_id=entry_id, layer=layer, key=str(key),
+                          path=display, kind=unit_kind, policy=None,
+                          normalized=None, fingerprint=nz.fingerprint(text)))
     return units
 
 
