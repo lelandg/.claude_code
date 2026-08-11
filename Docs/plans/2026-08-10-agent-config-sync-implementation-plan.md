@@ -389,6 +389,23 @@ wsl = "x"
     assert "duplicate" in str(excinfo.value).lower()
 
 
+def test_unknown_field_level_policy_is_rejected(tmp_path: Path):
+    bad = MINIMAL.replace('"statusLine.command" = "platform_overlay"',
+                          '"statusLine.command" = "platform_overlaid"', 1)
+    with pytest.raises(mf.ManifestError) as excinfo:
+        mf.load_manifest(write_manifest(tmp_path, bad))
+    message = str(excinfo.value)
+    assert "statusLine.command" in message
+    assert "platform_overlaid" in message
+
+
+def test_missing_state_dir_is_rejected(tmp_path: Path):
+    no_state = MINIMAL.replace('[state]\ndir = "/fixture/state"\n', "")
+    with pytest.raises(mf.ManifestError) as excinfo:
+        mf.load_manifest(write_manifest(tmp_path, no_state))
+    assert "state.dir" in str(excinfo.value)
+
+
 def test_future_schema_version_is_rejected(tmp_path: Path):
     future = MINIMAL.replace("schema_version = 1", "schema_version = 99", 1)
     with pytest.raises(mf.ManifestError):
@@ -542,8 +559,13 @@ def load_manifest(path: Path,
         windows_home=_expand(windows) if windows else None,
     )
 
-    state_dir = _expand(data.get("state", {}).get(
-        "dir", "~/.local/state/agent-config-sync"))
+    # [state].dir is required, not defaulted: a default here would duplicate
+    # the literal that config/agent-sync.toml already declares, and the two
+    # could drift. (Review ruling, 2026-08-10.)
+    raw_state = data.get("state", {})
+    if not raw_state.get("dir"):
+        raise ManifestError(f"{path.name}: state.dir is required")
+    state_dir = _expand(raw_state["dir"])
 
     raw_secrets = data.get("secrets", {})
     secrets = SecretPolicy(
@@ -570,6 +592,17 @@ def load_manifest(path: Path,
             raise ManifestError(
                 f"{path.name}: entry {entry_id!r} has unknown kind {kind!r}; "
                 f"expected one of {list(KINDS)}")
+        # Field-level policies get the same check as the entry-level one.
+        # platform_overlay is what protects Windows-owned values; a typo that
+        # loaded silently would downgrade a protected field to portable.
+        # (Review ruling, 2026-08-10.)
+        raw_fields = dict(raw.get("fields", {}))
+        for pointer, field_policy in raw_fields.items():
+            if field_policy not in POLICIES:
+                raise ManifestError(
+                    f"{path.name}: entry {entry_id!r} field {pointer!r} has "
+                    f"unknown policy {field_policy!r}; "
+                    f"expected one of {list(POLICIES)}")
         entries.append(Entry(
             id=entry_id,
             policy=policy,
@@ -578,7 +611,7 @@ def load_manifest(path: Path,
             repo=raw.get("repo"),
             windows=raw.get("windows"),
             globs=tuple(raw.get("globs", [])),
-            fields=dict(raw.get("fields", {})),
+            fields=raw_fields,
         ))
 
     if not entries:
