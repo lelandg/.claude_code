@@ -39,14 +39,24 @@ produces `conflict` for two distinct reasons, with two distinct fixes; in
 both cases the fix is a **WSL** edit or a manifest change, never a direct
 edit to the repo or Windows file:
 
-- **Genuine value divergence** (WSL, repo, and Windows disagree with each
-  other, or WSL and Windows disagree with no baseline recorded yet — most
-  real conflicts): edit **WSL** to whichever value is intended — WSL is the
-  authority, so the tool refuses to guess which side wins on Leland's behalf
-  — then re-scan. The item typically reclassifies as `reconcile_windows` (WSL
-  now matches the repo baseline) or `publish_to_repo` (WSL now matches
-  Windows, or there was no baseline to reconcile against). Either way it
-  becomes an id-applicable item this same skill can apply on the next pass.
+- **Genuine value divergence, three-way** (WSL, repo, and Windows have each
+  drifted from one another — most real conflicts): edit **WSL** to whichever
+  value is intended — WSL is the authority, so the tool refuses to guess
+  which side wins on Leland's behalf — then re-scan. The item reclassifies as
+  `reconcile_windows` (WSL now matches the repo baseline) or `publish_to_repo`
+  (WSL now matches Windows). Either way it becomes an id-applicable item this
+  same skill can apply on the next pass.
+- **Genuine value divergence, no baseline yet** (the repo has no record of
+  this field at all, and WSL and Windows disagree — `compare.py:116-124`):
+  the loop only closes if the intended value happens to match what Windows
+  already holds — edit WSL to that value and re-scan; it reclassifies as
+  `publish_to_repo`. If the intended value differs from Windows's current
+  value, editing WSL does **not** resolve it: with no repository baseline to
+  compare against, the item stays `conflict` and `merge.py` still has no
+  id-applicable action for it. Say this plainly rather than promising it
+  always resolves — closing it that way means writing the repo file
+  directly, outside this tool's normal WSL→repo flow, which is a separate
+  operation this skill does not perform.
 - **Ownership undeclared** (no policy is set for the field, and the layers
   disagree): the fix is declaring a policy for that field in
   `config/agent-sync.toml`, then re-scanning. This is a different fix for a
