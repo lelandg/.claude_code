@@ -20,14 +20,14 @@ One portable update is safe; the settings model field needs a decision.
 | `protected_overlay` | 1 |
 | `publish_to_repo` | 1 |
 
-## Safe portable updates
+## Safe portable updates (1)
 
 - `agents-md` — **publish_to_repo** (portable_authoritative)  
   path: `.config/agents/AGENTS.md`  
   wsl `dddddddddddd` · repo `eeeeeeeeeeee` · windows `-`  
   WSL intent is ahead of the baseline; publish it.
 
-## Conflicts requiring judgment
+## Conflicts requiring judgment (1)
 
 - `claude-settings:model` — **conflict** (portable_authoritative)  
   path: `.claude/settings.json`  
@@ -36,29 +36,29 @@ One portable update is safe; the settings model field needs a decision.
   
   > Both sides edited the model pin since the baseline.
 
-## WSL-only and Windows-only items
+## WSL-only and Windows-only items (0)
 
 _None._
 
-## Protected Windows state
+## Protected Windows state (1)
 
 - `claude-settings:statusLine.command` — **protected_overlay** (platform_overlay)  
   path: `.claude/settings.json`  
   wsl `-` · repo `-` · windows `-`  
   Windows owns this value; preserved and reported only.
 
-## Plugin differences
+## Plugin differences (1)
 
 - `claude-plugins:superpowers@claude-plugins-official#version` — **plugin_version_differs** (portable_authoritative)  
   path: `superpowers@claude-plugins-official`  
   wsl `-` · repo `-` · windows `-`  
   windows has 6.2.0, wsl has 6.1.0. The newer build is preserved; upgrade wsl.
 
-## Portability warnings
+## Portability warnings (0)
 
 _None._
 
-## Excluded and redacted
+## Excluded and redacted (1)
 
 Values are never recorded — only a pointer, a reason code, a type, and a truncated hash.
 
@@ -66,7 +66,7 @@ Values are never recorded — only a pointer, a reason code, a type, and a trunc
 |---|---|---|---|
 | `mcpServers.gh.env.GITHUB_TOKEN` | `secret_key_pattern` | str | `ffffffffffff` |
 
-## Scan errors
+## Scan errors (1)
 
 - `.codex/config.toml`: invalid TOML at line 12
 

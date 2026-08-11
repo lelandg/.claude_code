@@ -158,10 +158,8 @@ def test_rendering_is_deterministic():
 
 
 def test_matches_the_golden_report():
-    expected = GOLDEN.read_text(encoding="utf-8")
     actual = rd.render_markdown(DOC, ANALYSIS)
     if os.environ.get("UPDATE_GOLDEN") == "1":
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)
         GOLDEN.write_text(actual, encoding="utf-8")
-        expected = actual
-    assert actual == expected
+    assert actual == GOLDEN.read_text(encoding="utf-8")

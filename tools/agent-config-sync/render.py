@@ -51,6 +51,11 @@ def _short(value: str | None) -> str:
     return value[:12] if value else "-"
 
 
+def _heading(name: str, count: int) -> str:
+    """An item-bearing H2, with its count so a reader can skip cheaply."""
+    return f"## {name} ({count})"
+
+
 def _by(items, classifications) -> list[dict]:
     return [i for i in items if i["classification"] in classifications]
 
@@ -120,18 +125,19 @@ def render_markdown(doc: dict, analysis: dict) -> str:
             ("WSL-only and Windows-only items", _ONLY),
             ("Protected Windows state", ("protected_overlay",)),
             ("Plugin differences", _PLUGIN)):
-        add(f"## {heading}")
+        section_items = _by(items, selector)
+        add(_heading(heading, len(section_items)))
         add("")
-        out.extend(_item_lines(_by(items, selector), notes))
+        out.extend(_item_lines(section_items, notes))
         add("")
 
-    add("## Portability warnings")
-    add("")
     warnings = [i for i in items if "portability" in i.get("detail", "").lower()]
+    add(_heading("Portability warnings", len(warnings)))
+    add("")
     out.extend([f"- `{i['id']}`: {i['detail']}" for i in warnings] or ["_None._"])
     add("")
 
-    add("## Excluded and redacted")
+    add(_heading("Excluded and redacted", len(doc["redactions"])))
     add("")
     add("Values are never recorded — only a pointer, a reason code, a type, "
         "and a truncated hash.")
@@ -147,7 +153,7 @@ def render_markdown(doc: dict, analysis: dict) -> str:
         add("_None._")
     add("")
 
-    add("## Scan errors")
+    add(_heading("Scan errors", len(doc["errors"])))
     add("")
     out.extend([f"- `{e['path']}`: {e['message']}" for e in doc["errors"]]
                or ["_None._"])
