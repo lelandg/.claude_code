@@ -27,13 +27,37 @@ classifications into an action: `publish_to_repo`, `wsl_only`,
 `plugin_enabled_differs`, `plugin_version_differs`, `plugin_pin_violation`).
 Everything else — most importantly **`conflict`** — is skipped unconditionally,
 even when named, with "requires a decision, not an automatic action" (the
-same skip also catches `windows_only`, `protected_overlay`,
-`additive_delete_requires_approval`, `plugin_extra`, and `plugin_incompatible`).
-There is no id-based way to make this tool pick a side in a real conflict.
-If Leland wants a conflict resolved, that is a manual edit outside this tool
-(or declaring an ownership policy in `config/agent-sync.toml`, then a fresh
-scan) — this skill can only show that the item was skipped and explain why.
-Do not offer "conflict resolution via id" as if `merge.py` could execute it.
+same skip also catches `windows_only`, `additive_delete_requires_approval`,
+`plugin_extra`, and `plugin_incompatible`). `protected_overlay` is refused
+too, but earlier and by a different guard — the `platform_overlay` policy
+check, with the message "protected Windows state; never applied", not this
+one.
+
+There is no id-based way to make this tool pick a side in a conflict, but it
+is not a dead end — it is a loop back through WSL. `compare.py`'s `classify()`
+produces `conflict` for two distinct reasons, with two distinct fixes; in
+both cases the fix is a **WSL** edit or a manifest change, never a direct
+edit to the repo or Windows file:
+
+- **Genuine value divergence** (WSL, repo, and Windows disagree with each
+  other, or WSL and Windows disagree with no baseline recorded yet — most
+  real conflicts): edit **WSL** to whichever value is intended — WSL is the
+  authority, so the tool refuses to guess which side wins on Leland's behalf
+  — then re-scan. The item typically reclassifies as `reconcile_windows` (WSL
+  now matches the repo baseline) or `publish_to_repo` (WSL now matches
+  Windows, or there was no baseline to reconcile against). Either way it
+  becomes an id-applicable item this same skill can apply on the next pass.
+- **Ownership undeclared** (no policy is set for the field, and the layers
+  disagree): the fix is declaring a policy for that field in
+  `config/agent-sync.toml`, then re-scanning. This is a different fix for a
+  different cause — declaring a policy does not by itself resolve a value
+  divergence; if the layers still genuinely disagree once the policy is
+  declared, the fresh scan can still show `conflict`, and the WSL-edit path
+  above still applies.
+
+This skill only shows that the current item was skipped and explains why —
+never resolve a conflict in place, and never offer "conflict resolution via
+id" as if `merge.py` could execute it.
 
 ## 2. Dry-run — always first
 
