@@ -41,6 +41,19 @@ DOC = {
 
 PROMPT = Path(__file__).resolve().parents[1] / "prompts" / "report-v1.md"
 
+# A trimmed but structurally real capture of `claude -p --output-format json`
+# against the real 340-item drift document (Claude Code v2.1.228): a
+# top-level JSON array of stream events -- system/init, thinking-token
+# deltas, an assistant turn, a rate-limit event, and a terminal event with
+# type == "result" whose own "result" field is a JSON-encoded string
+# carrying a fenced ```json block. That terminal event's "result" string is
+# preserved byte for byte from the real capture; only surrounding telemetry
+# (session ids, cost, timings) and the large tool/agent/skill/plugin/mcp
+# catalogs on the init event were trimmed, since extract_json never inspects
+# them. See tests/fixtures/analyzer-stream-envelope.json.
+STREAM_ENVELOPE_FIXTURE = (Path(__file__).resolve().parent / "fixtures"
+                          / "analyzer-stream-envelope.json")
+
 
 def stub(tmp_path: Path, body: str) -> str:
     """Write an executable shell script that impersonates `claude`."""
@@ -111,6 +124,40 @@ def test_extract_json_raises_when_there_is_no_object():
         az.extract_json("I could not do that.")
 
 
+# --- the real stream-event envelope (Claude Code v2.1.228) -----------------
+# Regression coverage for a bug that survived a full review: every existing
+# fixture above encodes an *assumption* about the CLI's output shape. The
+# real machine returns something different -- a top-level array, not a bare
+# object or a single-envelope dict -- and the fence inside it is preceded by
+# a literal two-character "\n" escape in the undecoded text, not whitespace.
+
+def test_extract_json_reads_the_real_stream_event_array_envelope():
+    stdout = STREAM_ENVELOPE_FIXTURE.read_text(encoding="utf-8")
+    result = az.extract_json(stdout)
+    assert az.validate_analysis(result) == []
+    assert result["severity"] == "conflict"
+    assert result["codex_review_recommended"] is True
+    assert "agents-md" in result["recommended_order"]
+
+
+def test_extract_json_raises_on_an_empty_stream_event_array():
+    with pytest.raises(az.AnalysisError):
+        az.extract_json("[]")
+
+
+def test_extract_json_raises_when_no_event_has_type_result():
+    events = [{"type": "system", "subtype": "init"},
+              {"type": "assistant", "message": {}}]
+    with pytest.raises(az.AnalysisError):
+        az.extract_json(json.dumps(events))
+
+
+def test_extract_json_raises_when_the_result_field_is_not_a_string():
+    events = [{"type": "result", "subtype": "success", "result": None}]
+    with pytest.raises(az.AnalysisError):
+        az.extract_json(json.dumps(events))
+
+
 def test_validate_accepts_a_good_analysis():
     assert az.validate_analysis(VALID) == []
 
@@ -135,6 +182,18 @@ def test_run_returns_the_parsed_analysis(tmp_path: Path):
     result = az.run(DOC, claude_bin=binary, prompt_path=PROMPT,
                     timeout_s=10, max_turns=4)
     assert result["summary"] == "One safe update."
+
+
+def test_run_returns_the_parsed_analysis_from_the_real_capture(tmp_path: Path):
+    # cat the fixture file directly rather than embedding it in the stub
+    # script -- the real capture's content includes an apostrophe, which
+    # would break the `echo '...'` quoting the other stub tests use.
+    binary = stub(tmp_path,
+                  f"cat >/dev/null\ncat {STREAM_ENVELOPE_FIXTURE}\n")
+    result = az.run(DOC, claude_bin=binary, prompt_path=PROMPT,
+                    timeout_s=10, max_turns=4)
+    assert result["severity"] == "conflict"
+    assert result["codex_review_recommended"] is True
 
 
 def test_run_raises_on_a_nonzero_exit(tmp_path: Path):

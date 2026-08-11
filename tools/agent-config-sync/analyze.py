@@ -61,39 +61,77 @@ def build_prompt(doc: dict, prompt_path: Path) -> str:
             .replace("{DRIFT}", json.dumps(doc, indent=2, sort_keys=True)))
 
 
-def extract_json(stdout: str) -> dict:
-    """Accept a bare object, a fenced block, or claude's --output-format json."""
-    text = stdout.strip()
-    candidates: list[str] = []
+def _is_answer(data: object) -> dict | None:
+    """A parsed JSON value is the answer itself if it's a dict carrying our
+    version key -- the one field every valid response must have."""
+    if isinstance(data, dict) and "response_schema_version" in data:
+        return data
+    return None
 
+
+def _find_in_text(text: str) -> dict | None:
+    """A bare object or a fenced ```json block in already-decoded text (no
+    further envelope wrapping this text)."""
+    text = text.strip()
     if text.startswith("{"):
-        candidates.append(text)
+        try:
+            found = _is_answer(json.loads(text))
+        except json.JSONDecodeError:
+            found = None
+        if found is not None:
+            return found
     fenced = _FENCE.search(text)
     if fenced:
-        candidates.append(fenced.group("body"))
-
-    for candidate in list(candidates):
         try:
-            data = json.loads(candidate)
+            return _is_answer(json.loads(fenced.group("body")))
         except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict) and "response_schema_version" in data:
-            return data
-        # claude --output-format json wraps the answer in an envelope.
-        inner = data.get("result") if isinstance(data, dict) else None
+            return None
+    return None
+
+
+def extract_json(stdout: str) -> dict:
+    """Accept a bare object, a fenced block, or claude's --output-format json
+    envelope -- a single result object, or (Claude Code >= 2.1.228) a
+    top-level array of stream events whose terminal type == "result" event
+    carries the answer as a JSON-encoded string in its own "result" field.
+
+    The envelope is parsed as JSON *before* any fence matching, because a
+    fence nested inside a JSON string is preceded by the literal two-
+    character escape "\\n" in the raw text -- not whitespace -- so the fence
+    regex cannot find it there. Only after `json.loads` decodes that string
+    does its leading "\\n" become a real newline the regex can match.
+    """
+    text = stdout.strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, dict):
+        found = _is_answer(parsed)
+        if found is not None:
+            return found
+        inner = parsed.get("result")
         if isinstance(inner, str):
-            try:
-                nested = json.loads(inner)
-            except json.JSONDecodeError:
-                nested = None
-            if isinstance(nested, dict):
-                return nested
-            fenced_inner = _FENCE.search(inner)
-            if fenced_inner:
-                try:
-                    return json.loads(fenced_inner.group("body"))
-                except json.JSONDecodeError:
-                    pass
+            found = _find_in_text(inner)
+            if found is not None:
+                return found
+    elif isinstance(parsed, list):
+        for event in parsed:
+            if isinstance(event, dict) and event.get("type") == "result":
+                inner = event.get("result")
+                if isinstance(inner, str):
+                    found = _find_in_text(inner)
+                    if found is not None:
+                        return found
+                break  # exactly one terminal result event; stop scanning
+
+    # No envelope recognized, or nothing usable inside it: fall back to
+    # scanning stdout itself, in case the model printed the answer directly.
+    found = _find_in_text(text)
+    if found is not None:
+        return found
 
     raise AnalysisError(
         "the analyzer returned no JSON object matching the response schema "
