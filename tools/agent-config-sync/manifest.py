@@ -6,6 +6,7 @@ the implementation (design section "Paths").
 """
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,10 +88,11 @@ def load_manifest(path: Path,
     except FileNotFoundError as exc:
         raise ManifestError(f"{path.name}: manifest not found at {path}") from exc
     except tomllib.TOMLDecodeError as exc:
-        # exc carries a line/column, not file content -- but rebuild the message
-        # defensively so no source fragment can ride along.
-        line = getattr(exc, "lineno", None)
-        where = f" at line {line}" if line else ""
+        # exc carries a line/column in its string repr, not as attributes.
+        # Extract only the location (digits) to ensure no source fragment rides along.
+        match = re.search(r"at line (\d+), column (\d+)", str(exc))
+        where = (f" at line {match.group(1)}, column {match.group(2)}"
+                 if match else "")
         raise ManifestError(f"{path.name}: invalid TOML{where}") from None
 
     version = data.get("schema_version")

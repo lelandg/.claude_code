@@ -15,6 +15,10 @@ import re
 import tomllib
 from datetime import date, datetime, time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from manifest import Roots
 
 TOKEN_HOME = "{HOME}"
 TOKEN_REPO = "{REPO}"
@@ -70,11 +74,17 @@ def normalize_json(raw: str) -> str:
 
 
 def normalize_toml(raw: str) -> str:
+    """Parse and canonicalize TOML to a JSON surface.
+
+    One-way canonicalization: accepts raw TOML bytes, emits the shared JSON
+    comparison surface. Never apply this to its own output.
+    """
     try:
         data = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as exc:
-        line = getattr(exc, "lineno", None)
-        where = f" at line {line}" if line else ""
+        match = re.search(r"at line (\d+), column (\d+)", str(exc))
+        where = (f" at line {match.group(1)}, column {match.group(2)}"
+                 if match else "")
         raise NormalizeError(f"invalid TOML{where}") from None
     return _canonical_json(data)
 
@@ -115,22 +125,25 @@ def _spellings(path: Path | None) -> list[str]:
 
 def _replace_prefix(text: str, prefixes: list[str], token: str) -> str:
     for prefix in sorted(prefixes, key=len, reverse=True):
-        pattern = re.compile(re.escape(prefix) + f"(?P<rest>{_PATH_TAIL})")
+        # Negative lookahead ensures the character after prefix is not a path name char.
+        # This prevents /home/lelandxyz from matching /home/leland.
+        pattern = re.compile(re.escape(prefix) + r"(?![\w.+@~%-])"
+                             + f"(?P<rest>{_PATH_TAIL})")
         text = pattern.sub(
             lambda m: token + m.group("rest").replace("\\", "/"), text)
     return text
 
 
-def tokenize_paths(text: str, roots) -> str:
+def tokenize_paths(text: str, roots: Roots) -> str:
     """Replace layer roots with {HOME}/{REPO}. Longest prefix wins."""
-    # Repo first: it usually lives under a mount that no other root claims,
-    # but ordering by length guards against any future nesting.
+    # Repo first: it usually lives under a mount that no other root claims.
+    # Within each _replace_prefix call, length-sorted prefixes prevent partial matches.
     text = _replace_prefix(text, _spellings(roots.repo), TOKEN_REPO)
     homes = _spellings(roots.windows_home) + _spellings(roots.wsl_home)
     return _replace_prefix(text, homes, TOKEN_HOME)
 
 
-def render_paths(text: str, layer: str, roots) -> str:
+def render_paths(text: str, layer: str, roots: Roots) -> str:
     """Replace {HOME}/{REPO} with the native spelling for one layer.
 
     The repository baseline is rendered in the WSL spelling: the repo is a
@@ -147,7 +160,8 @@ def render_paths(text: str, layer: str, roots) -> str:
         for token, native in ((TOKEN_HOME, home), (TOKEN_REPO, repo)):
             if native is None:
                 continue
-            pattern = re.compile(re.escape(token) + f"(?P<rest>{_PATH_TAIL})")
+            pattern = re.compile(re.escape(token) + r"(?![\w.+@~%-])"
+                                 + f"(?P<rest>{_PATH_TAIL})")
             out = pattern.sub(
                 lambda m, n=native: n + m.group("rest").replace("/", "\\"), out)
         return out

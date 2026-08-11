@@ -166,6 +166,7 @@ def test_malformed_toml_error_names_the_file_not_its_contents(tmp_path: Path):
         mf.load_manifest(path)
     message = str(excinfo.value)
     assert "agent-sync.toml" in message
+    assert "line" in message and "column" in message
     assert "hunter2" not in message
 
 

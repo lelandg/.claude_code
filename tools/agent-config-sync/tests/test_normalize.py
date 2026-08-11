@@ -72,7 +72,9 @@ def test_normalize_toml_produces_the_same_surface_as_json():
 def test_normalize_toml_reports_location_without_content():
     with pytest.raises(nz.NormalizeError) as excinfo:
         nz.normalize_toml('[bad\npassword = "hunter2"\n')
-    assert "hunter2" not in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "line" in message and "column" in message
+    assert "hunter2" not in message
 
 
 def test_normalize_toml_renders_dates_as_strings():
@@ -113,6 +115,39 @@ def test_tokenize_normalizes_backslashes_inside_a_matched_path():
 
 def test_tokenize_leaves_unrelated_absolute_paths_alone():
     assert nz.tokenize_paths("/usr/bin/python3", ROOTS) == "/usr/bin/python3"
+
+
+def test_tokenize_does_not_match_sibling_paths():
+    # /home/lelandxyz is a sibling, not a child of /home/leland
+    out = nz.tokenize_paths("see /home/lelandxyz/file.py here", ROOTS)
+    assert out == "see /home/lelandxyz/file.py here"
+    assert "{HOME}" not in out
+
+
+def test_tokenize_does_not_match_different_users():
+    # /mnt/c/Users/aboogiedemo is a sibling, not a child of /mnt/c/Users/aboog
+    out = nz.tokenize_paths("see /mnt/c/Users/aboogiedemo/file.py here", ROOTS)
+    assert out == "see /mnt/c/Users/aboogiedemo/file.py here"
+    assert "{HOME}" not in out
+
+
+def test_tokenize_does_not_match_hidden_directories():
+    # /home/leland.bak is not a child of /home/leland
+    out = nz.tokenize_paths("see /home/leland.bak/file.py here", ROOTS)
+    assert out == "see /home/leland.bak/file.py here"
+    assert "{HOME}" not in out
+
+
+def test_tokenize_bare_root_with_no_tail():
+    # Bare root reference should still tokenize
+    out = nz.tokenize_paths("path /home/leland end", ROOTS)
+    assert out == "path {HOME} end"
+
+
+def test_tokenize_quoted_root_path():
+    # Quoted path should still tokenize
+    out = nz.tokenize_paths('run "/home/leland/x" now', ROOTS)
+    assert out == 'run "{HOME}/x" now'
 
 
 # --- path rendering (the Windows adaptation of design test case 11) ---------
