@@ -67,6 +67,35 @@ ANALYSIS = {
 }
 
 
+_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "drift-v1.json"
+
+
+def test_every_schema_classification_maps_to_exactly_one_section():
+    import json
+    schema = json.loads(_SCHEMA.read_text())
+    enum = schema["properties"]["items"]["items"]["properties"][
+        "classification"]["enum"]
+    unmapped = [c for c in enum
+                if c != "unchanged" and c not in rd.SECTION_OF]
+    assert unmapped == [], f"these would vanish from the report: {unmapped}"
+
+
+def test_section_counts_sum_to_the_item_total():
+    doc = dict(DOC, items=DOC["items"] + [
+        {"id": "p", "entry_id": "claude-plugins", "kind": "plugin",
+         "classification": "plugin_pin_violation", "severity": "conflict",
+         "path": "x@y", "policy": "portable_authoritative", "detail": "d"},
+        {"id": "e", "entry_id": "e", "kind": "text",
+         "classification": "error", "severity": "error",
+         "path": "a.md", "policy": "portable_authoritative", "detail": "boom"},
+    ])
+    out = rd.render_markdown(doc, rd.empty_analysis())
+    import re
+    total = sum(int(m) for m in re.findall(r"^## .*\((\d+)\)$", out,
+                                           re.MULTILINE))
+    assert total == len(doc["items"])
+
+
 def test_every_required_section_is_present_in_order():
     out = rd.render_markdown(DOC, ANALYSIS)
     positions = [out.index(f"## {name}") for name in rd.SECTIONS]
@@ -104,6 +133,22 @@ def test_plugin_differences_get_their_own_section():
     section = out.split("## Plugin differences")[1].split("## ")[0]
     assert "superpowers@claude-plugins-official" in section
     assert "6.2.0" in section
+
+
+def test_portability_warnings_are_selected_by_field_not_by_detail_text():
+    doc = dict(DOC, items=DOC["items"] + [
+        {"id": "hook-guard", "entry_id": "hooks", "kind": "text",
+         "classification": "wsl_only", "severity": "review",
+         "path": "tools/guard.py", "policy": "portable_authoritative",
+         "detail": "Present in WSL only; a new portable item.",
+         "portability": ["contains a Linux system path: /usr/"]},
+    ])
+    out = rd.render_markdown(doc, ANALYSIS)
+    section = out.split("## Portability warnings")[1].split("## ")[0]
+    assert "`hook-guard`" in section
+    assert "contains a Linux system path: /usr/" in section
+    # An item without the field is not swept in by a substring match.
+    assert "`agents-md`" not in section
 
 
 def test_redactions_show_reason_codes_and_never_values():

@@ -50,6 +50,7 @@ class Unit:
     normalized: str | None = None
     fingerprint: str | None = None
     redactions: tuple[Redaction, ...] = ()
+    portability: tuple[str, ...] = ()
     error: str | None = None
 
     @property
@@ -170,7 +171,8 @@ def _unit_for_file(entry, layer, root, path, key, roots,
     text = nz.tokenize_paths(text, roots)
     return Unit(entry_id=entry_id, layer=layer, key=key, path=display,
                kind=kind, policy=policy, normalized=text,
-               fingerprint=nz.fingerprint(text))
+               fingerprint=nz.fingerprint(text),
+               portability=tuple(nz.portability_warnings(text)))
 
 
 def _flatten_pointers(data, prefix: str = "") -> list[tuple[str, object]]:
@@ -227,7 +229,8 @@ def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
         return [Unit(entry_id=entry_id, layer=layer, key="", path=display,
                      kind=unit_kind, policy=entry.policy, normalized=text,
                      fingerprint=nz.fingerprint(text),
-                     redactions=tuple(redactions))]
+                     redactions=tuple(redactions),
+                     portability=tuple(nz.portability_warnings(text)))]
 
     units: list[Unit] = []
     covered: set[str] = set()
@@ -250,7 +253,8 @@ def _extract_structured(entry, layer, root, path, secrets, roots) -> list[Unit]:
             entry_id=entry_id, layer=layer, key=pointer, path=display,
             kind=unit_kind, policy=policy, normalized=text,
             fingerprint=nz.fingerprint(text),
-            redactions=_redactions_under(pointer, redactions)))
+            redactions=_redactions_under(pointer, redactions),
+            portability=tuple(nz.portability_warnings(text))))
         covered.add(pointer.split(".")[0])
 
     # Undeclared top-level keys: metadata only (design, "Unknown content").

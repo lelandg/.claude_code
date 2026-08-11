@@ -56,7 +56,8 @@
           "detail": {"type": "string"},
           "wsl_fingerprint": {"type": "string"},
           "repo_fingerprint": {"type": "string"},
-          "windows_fingerprint": {"type": "string"}
+          "windows_fingerprint": {"type": "string"},
+          "portability": {"type": "array", "items": {"type": "string"}}
         }
       }
     },

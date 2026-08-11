@@ -47,9 +47,10 @@ class DriftItem:
     repo_fingerprint: str | None = None
     windows_fingerprint: str | None = None
     redactions: tuple = ()
+    portability: tuple[str, ...] = ()
 
     def as_dict(self) -> dict:
-        data = {
+        data: dict[str, object] = {
             "id": self.id,
             "entry_id": self.entry_id,
             "kind": self.kind,
@@ -64,6 +65,8 @@ class DriftItem:
                             ("windows_fingerprint", self.windows_fingerprint)):
             if value:
                 data[name] = value
+        if self.portability:
+            data["portability"] = list(self.portability)
         return data
 
 
@@ -206,6 +209,12 @@ def compare_entry(entry, units: list[ex.Unit], *, has_windows: bool) -> list[Dri
                 redactions = tuple(unit.redactions)
                 break
 
+        portability: tuple = ()
+        for unit in (wsl, repo, windows):
+            if unit is not None and unit.portability:
+                portability = tuple(unit.portability)
+                break
+
         items.append(DriftItem(
             id=item_id, entry_id=entry.id, kind=kind,
             classification=classification, severity=severity,
@@ -213,7 +222,7 @@ def compare_entry(entry, units: list[ex.Unit], *, has_windows: bool) -> list[Dri
             wsl_fingerprint=wsl.fingerprint if wsl else None,
             repo_fingerprint=repo.fingerprint if repo else None,
             windows_fingerprint=windows.fingerprint if windows else None,
-            redactions=redactions))
+            redactions=redactions, portability=portability))
     return items
 
 

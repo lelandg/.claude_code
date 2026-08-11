@@ -192,6 +192,24 @@ def test_unchanged_and_protected_are_not_actionable():
     assert "publish_to_repo" in cmp.ACTIONABLE
 
 
+def test_compare_entry_carries_portability_warnings():
+    wsl = ex.Unit(entry_id="e", layer="wsl", key="", path="a.md",
+                  kind="text", policy=AUTH, fingerprint=B,
+                  portability=("contains a Linux system path: /usr/",))
+    entry = mf.Entry(id="e", policy=AUTH, kind="text", wsl="a.md")
+    items = cmp.compare_entry(entry, [wsl], has_windows=False)
+    assert items[0].portability == ("contains a Linux system path: /usr/",)
+    assert items[0].as_dict()["portability"] == [
+        "contains a Linux system path: /usr/"]
+
+
+def test_as_dict_omits_empty_portability():
+    item = cmp.DriftItem(id="e", entry_id="e", kind="text",
+                         classification="wsl_only", severity="review",
+                         path="a.md", policy=AUTH, detail="d")
+    assert "portability" not in item.as_dict()
+
+
 def test_as_dict_omits_absent_fingerprints():
     item = cmp.DriftItem(id="e", entry_id="e", kind="text",
                          classification="wsl_only", severity="review",

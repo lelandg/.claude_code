@@ -29,6 +29,8 @@ One portable update is safe; the settings model field needs a decision.
 
 ## Conflicts requiring judgment (1)
 
+> Plugin pin violations are severity `conflict` too, but render under **Plugin differences** below so every plugin item is in one place.
+
 - `claude-settings:model` — **conflict** (portable_authoritative)  
   path: `.claude/settings.json`  
   wsl `-` · repo `-` · windows `-`  
@@ -58,15 +60,15 @@ _None._
 
 _None._
 
-## Excluded and redacted (1)
+## Excluded and redacted
 
-Values are never recorded — only a pointer, a reason code, a type, and a truncated hash.
+1 value redacted. Values are never recorded — only a pointer, a reason code, a type, and a truncated hash.
 
 | Pointer | Reason | Type | Hash |
 |---|---|---|---|
 | `mcpServers.gh.env.GITHUB_TOKEN` | `secret_key_pattern` | str | `ffffffffffff` |
 
-## Scan errors (1)
+## Scan errors (0)
 
 - `.codex/config.toml`: invalid TOML at line 12
 

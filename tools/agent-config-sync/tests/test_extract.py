@@ -234,6 +234,24 @@ def test_extract_unreadable_file_records_an_error(tmp_path: Path):
     assert units[0].error is not None
 
 
+def test_extract_records_portability_warnings_after_tokenization(tmp_path: Path):
+    (tmp_path / "a.md").write_text(
+        "hook: /usr/bin/python3 /home/leland/.claude/tools/guard.py\n",
+        encoding="utf-8")
+    units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
+    # The home path tokenizes to {HOME} and is portable; /usr/bin is not.
+    assert units[0].portability
+    assert any("/usr/" in w for w in units[0].portability)
+    assert not any("/home/" in w for w in units[0].portability)
+
+
+def test_extract_records_no_portability_warning_for_portable_text(tmp_path: Path):
+    (tmp_path / "a.md").write_text("hook: /home/leland/.claude/x.py\n",
+                                   encoding="utf-8")
+    units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
+    assert units[0].portability == ()
+
+
 def test_extract_redaction_is_not_misattributed_to_a_sibling_pointer(tmp_path: Path):
     # Fix round 1, Finding 1: r.pointer.startswith(pointer) has no path
     # boundary, so a secret at "envFoo.token" was wrongly attributed to the

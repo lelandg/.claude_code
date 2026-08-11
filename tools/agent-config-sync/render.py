@@ -26,12 +26,26 @@ SECTIONS = (
     "Validation and restoration",
 )
 
-_SAFE = ("publish_to_repo", "reconcile_windows")
-_ONLY = ("wsl_only", "windows_only", "additive_delete_requires_approval")
-_CONFLICT = ("conflict", "plugin_pin_violation")
-_PLUGIN = ("plugin_missing", "plugin_extra", "plugin_enabled_differs",
-           "plugin_version_differs", "plugin_incompatible",
-           "plugin_pin_violation")
+#: Every non-"unchanged" classification maps to exactly one section. This is a
+#: partition by construction: a classification in two sections double-counts,
+#: and one in none disappears from the body while still being tallied in the
+#: header. (Review ruling, 2026-08-11.)
+SECTION_OF = {
+    "publish_to_repo": "Safe portable updates",
+    "reconcile_windows": "Safe portable updates",
+    "conflict": "Conflicts requiring judgment",
+    "wsl_only": "WSL-only and Windows-only items",
+    "windows_only": "WSL-only and Windows-only items",
+    "additive_delete_requires_approval": "WSL-only and Windows-only items",
+    "protected_overlay": "Protected Windows state",
+    "plugin_missing": "Plugin differences",
+    "plugin_extra": "Plugin differences",
+    "plugin_enabled_differs": "Plugin differences",
+    "plugin_version_differs": "Plugin differences",
+    "plugin_pin_violation": "Plugin differences",
+    "plugin_incompatible": "Plugin differences",
+    "error": "Scan errors",
+}
 
 
 def empty_analysis() -> dict:
@@ -56,8 +70,8 @@ def _heading(name: str, count: int) -> str:
     return f"## {name} ({count})"
 
 
-def _by(items, classifications) -> list[dict]:
-    return [i for i in items if i["classification"] in classifications]
+def _by(items, section: str) -> list[dict]:
+    return [i for i in items if SECTION_OF.get(i["classification"]) == section]
 
 
 def _notes(analysis) -> dict[str, str]:
@@ -119,28 +133,37 @@ def render_markdown(doc: dict, analysis: dict) -> str:
         add("_No drift detected._")
     add("")
 
-    for heading, selector in (
-            ("Safe portable updates", _SAFE),
-            ("Conflicts requiring judgment", _CONFLICT),
-            ("WSL-only and Windows-only items", _ONLY),
-            ("Protected Windows state", ("protected_overlay",)),
-            ("Plugin differences", _PLUGIN)):
-        section_items = _by(items, selector)
+    for heading in ("Safe portable updates", "Conflicts requiring judgment",
+                    "WSL-only and Windows-only items", "Protected Windows state",
+                    "Plugin differences"):
+        section_items = _by(items, heading)
         add(_heading(heading, len(section_items)))
         add("")
+        if heading == "Conflicts requiring judgment":
+            add("> Plugin pin violations are severity `conflict` too, but "
+                "render under **Plugin differences** below so every plugin "
+                "item is in one place.")
+            add("")
         out.extend(_item_lines(section_items, notes))
         add("")
 
-    warnings = [i for i in items if "portability" in i.get("detail", "").lower()]
-    add(_heading("Portability warnings", len(warnings)))
+    warned = [i for i in items if i.get("portability")]
+    add(_heading("Portability warnings", len(warned)))
     add("")
-    out.extend([f"- `{i['id']}`: {i['detail']}" for i in warnings] or ["_None._"])
+    out.extend([f"- `{i['id']}` (`{i['path']}`): " + "; ".join(i["portability"])
+                for i in warned] or ["_None._"])
     add("")
 
-    add(_heading("Excluded and redacted", len(doc["redactions"])))
+    # No count in the heading (unlike the item-classification sections above):
+    # redactions are pointer-level facts, not drift items, so folding this
+    # count into the same "## Name (N)" shape would let it get swept into a
+    # count of *items* by anything scanning headings for the item partition.
+    add("## Excluded and redacted")
     add("")
-    add("Values are never recorded — only a pointer, a reason code, a type, "
-        "and a truncated hash.")
+    redaction_count = len(doc["redactions"])
+    add(f"{redaction_count} value{'' if redaction_count == 1 else 's'} "
+        "redacted. Values are never recorded — only a pointer, a reason "
+        "code, a type, and a truncated hash.")
     add("")
     if doc["redactions"]:
         add("| Pointer | Reason | Type | Hash |")
@@ -153,10 +176,13 @@ def render_markdown(doc: dict, analysis: dict) -> str:
         add("_None._")
     add("")
 
-    add(_heading("Scan errors", len(doc["errors"])))
+    error_items = _by(items, "Scan errors")
+    add(_heading("Scan errors", len(error_items)))
     add("")
-    out.extend([f"- `{e['path']}`: {e['message']}" for e in doc["errors"]]
-               or ["_None._"])
+    error_lines = [f"- `{e['path']}`: {e['message']}" for e in doc["errors"]]
+    error_lines.extend(f"- `{i['id']}` (`{i['path']}`): {i['detail']}"
+                       for i in error_items)
+    out.extend(error_lines or ["_None._"])
     add("")
 
     add("## Recommended merge order")
