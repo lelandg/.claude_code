@@ -104,6 +104,17 @@ def test_without_a_windows_layer_only_wsl_and_repo_are_compared():
     assert cmp.classify(B, A, None, AUTH, has_windows=False)[0] == "publish_to_repo"
 
 
+def test_without_a_windows_layer_additive_deletion_requires_approval():
+    kind, severity, _ = cmp.classify(None, A, None, ADD, has_windows=False)
+    assert (kind, severity) == ("additive_delete_requires_approval", "review")
+
+
+def test_without_a_windows_layer_authoritative_deletion_publishes():
+    kind, severity, detail = cmp.classify(None, A, None, AUTH, has_windows=False)
+    assert (kind, severity) == ("publish_to_repo", "review")
+    assert "deletion" in detail
+
+
 # --- compare_entry() -------------------------------------------------------
 
 def test_compare_entry_joins_layers_by_key():
