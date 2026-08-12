@@ -194,8 +194,7 @@ scan (or the disk under it) is stuck.
 Never automatic. The wrapper only reports. Applying a change is a separate,
 human-approved step.
 
-`merge.py` does not exist yet — it lands in a later change (Task 11). Once
-it ships, hand the report to Claude:
+Hand the report to Claude:
 
 ```text
 Use the agent-config-merge skill on report <run-id>.
@@ -219,6 +218,76 @@ python3 /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/merge.
   --run-id <run-id>
 ```
 
+## Known limitations
+
+The report covers more than the merge tool can apply. A plan is only a claim
+about the items it lists, so read this before you trust one.
+
+### `kind = "toml"` entries are report-only
+
+`merge.py` refuses a field merge on a TOML entry and skips it with a reason:
+
+```
+Skipped:
+- `codex-config:model`: TOML field merge is not implemented; edit the target by hand
+```
+
+Python 3.12 has a TOML reader and no TOML writer, so the only way to merge one
+field would be to write the document back as JSON into a file named
+`config.toml`. That corruption is silent — the next scan tokenizes both files
+and reports the fingerprints as matching — so the tool refuses instead.
+
+The whole-file path is no escape. `codex-config` declares `[entries.fields]`,
+so every item it produces is a field item, and the whole-file write never
+comes up. **Every `codex-config` item is reported and never appliable.** To
+resolve one, edit `~/.codex/config.toml` by hand, then re-scan.
+
+### A deletion is reported but never applied
+
+If a file was removed in WSL and still exists in the repository and on
+Windows, the item classifies `publish_to_repo` and its detail reads
+"Removed in WSL". Publishing that would mean deleting the baseline copy, which
+the tool never does.
+
+It does not say so. The dry run names the file as if it will be written, the
+apply writes nothing, and no reason is printed:
+
+```
+- [write_file] `claude-agents:old-agent.md` → write .../repo/claude/agents/old-agent.md from WSL
+```
+
+Recognize it two ways: the item's detail says **"Removed in WSL"**, and a
+re-scan afterwards shows the item unchanged. Five items are in this shape
+today, all under `claude-agents/`. Delete the repository and Windows copies by
+hand if you want the removal recorded.
+
+A deletion under a `portable_additive` entry is safe by comparison. It
+classifies `additive_delete_requires_approval`, and the tool skips it with a
+reason you can read in the plan. Seven items are in that shape today, under
+`claude-skills/` and `claude-tools/`. Only the `publish_to_repo` deletions are
+silent.
+
+The cause is one line: `plan_merge` checks `source.is_dir()` and never
+`source.exists()`, so an absent source reaches `apply_plan`, which skips it
+without a message.
+
+### A deleted JSON field would be written as `null`
+
+The same gap has a field-shaped variant. If a field is deleted in WSL while it
+is still present in the repository and on Windows, the source *file* exists,
+so the plan proceeds and writes `null` into the field rather than removing it.
+
+No item in the current manifest can reach this — every appliable field item
+has a value in WSL — but it is the same missing check, so it is worth knowing
+before a new entry is declared.
+
+### `conflict` items are never appliable
+
+40 items on this machine are `conflict`, and no item id makes the tool pick a
+side. Resolving one means editing WSL and re-scanning; the
+`agent-config-merge` skill documents that loop in step 1, including the two
+distinct causes and their two distinct fixes.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -227,5 +296,6 @@ python3 /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/merge.
 | exit `21` every run | a stale lock from a killed run | `rm ~/.local/state/agent-config-sync/scan.lock` |
 | exit `30` every run | `ACS_CLAUDE` is not the real executable | `command -v claude`, then set `ACS_CLAUDE` |
 | huge `errors` list | a declared path does not exist on this machine | remove or correct that `[[entries]]` block |
-| exit `10` every run on this machine | expected — 340 items of real drift exist here | not a bug; review `latest-report.md`, apply changes with `merge.py` once it ships |
+| exit `10` every run on this machine | expected — 340 items of real drift exist here | not a bug; review `latest-report.md` and apply what you approve with `merge.py` |
+| an approved item stays in the next report | it may be one the tool cannot apply | check "Known limitations" above |
 | a scan seems to hang | it is disk-bound, not stuck; expect 140–150 seconds | wait; do not kill it mid-run or the lock will need clearing |
