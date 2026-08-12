@@ -76,6 +76,15 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.4.1] - 2026-08-11
+
+- **The config merge tool could not apply most of what it reported.** `merge.py` resolved a *tree* item — anything under `claude/agents/`, `claude/skills/`, `claude/instructions/`, and the other directory-shaped entries — to the directory that holds the file instead of the file itself. The dry run named the directory, so an approval covered a path that would never be written, and the apply then crashed on it. 128 of the 340 items a scan finds here are tree items, so this was most of the tool's real work. Tree items now resolve to the file the item id names, and the plan carries the source path it will read, so the dry run and the apply can no longer disagree.
+- **A TOML field merge wrote a JSON document into a `.toml` file.** Approving a field of `~/.codex/config.toml` would have replaced it with JSON — and the corruption was silent, because the next scan compares the two sides in a normalized form and reports them as matching. Python 3.12 has a TOML reader and no TOML writer, so the tool now refuses a TOML field merge and says to edit the file by hand. `Docs/agent-config-sync.md` gained a **Known limitations** section recording that refusal along with the other three things a report can show but the tool will not apply — deletions, a deleted JSON field, and conflicts.
+- **A malformed file was listed twice in the drift report.** One unreadable file produced two bullets under a heading that counted it once. Drift items are now the single source of truth, and read failures that belong to no item are listed separately and explicitly not counted.
+- **The drift-report skill claimed the merge tool did not exist.** Both `agent-config-report` and the operator guide still said `merge.py` "does not exist yet" and would land in a later change, months after it shipped — so the reporting skill refused to point at an installed tool. The rule that the report skill never applies anything stays; it now hands off to `agent-config-merge` for the reason that rule exists.
+- **The report analyzer could not read Claude's actual output.** `extract_json` did not handle the real `claude -p --output-format json` envelope, so every model-backed report fell back to the deterministic renderer. Also sanitized two real identifiers that had been captured in the test fixture recording that envelope.
+- Added a Discord announcement draft for the `getting-started` skill, written back on 2026-08-06 and left untracked since.
+
 ## [0.4.0] - 2026-08-11
 
 - **New: WSL-authoritative agent config sync.** A report-first pipeline that
