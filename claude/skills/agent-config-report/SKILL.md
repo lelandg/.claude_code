@@ -20,33 +20,32 @@ runs 140–150s). It is disk-bound, not stuck — do not kill it partway through
 and do not re-run it while waiting; a killed run leaves a stale lock behind.
 Tell Leland up front that this takes over two minutes before running it.
 
-On this machine, a scan currently reports **340 items**, `latest-drift.json`
-around 174 KB, `latest-report.md` around 103 KB, and it exits `10` — drift is
-the expected, normal outcome here, not an error. The breakdown by type:
+On this machine (as of the 2026-08-20 scan), a scan reports **180 items**,
+`latest-drift.json` around 99 KB, `latest-report.md` around 62 KB, and it
+exits `10` — drift is the expected, normal outcome here, not an error. The
+breakdown by type:
 
 | Type | Count |
 |---|---|
-| `windows_only` | 93 |
-| `wsl_only` | 71 |
-| `reconcile_windows` | 57 |
-| `conflict` | 40 |
-| `plugin_missing` | 25 |
-| `plugin_enabled_differs` | 22 |
-| `plugin_extra` | 11 |
-| `protected_overlay` | 7 |
-| `publish_to_repo` | 6 |
-| `additive_delete_requires_approval` | 5 |
-| `plugin_version_differs` | 2 |
+| `windows_only` | 84 |
+| `publish_to_repo` | 22 |
+| `plugin_enabled_differs` | 20 |
+| `conflict` | 17 |
+| `plugin_removed` | 13 |
+| `protected_overlay` | 8 |
+| `additive_delete_requires_approval` | 7 |
+| `plugin_extra` | 5 |
+| `plugin_missing` | 1 |
 | `plugin_incompatible` | 1 |
+| `plugin_version_differs` | 1 |
+| `reconcile_windows` | 1 |
 
-47 of the 340 items also carry at least one portability warning (a hardcoded
-machine path that would not survive a move) — **65 warnings in total**, since
-an item can trip more than one (32 items carry one, 12 carry two, 3 carry
-three). The 65 instances break down as: `/mnt/` 30, `.venv_linux` 17, `/usr/`
-12, unrooted `/home/` 6. `.config/agents/AGENTS.md` — the canonical house-rules
-file every agent CLI reads — is one of the items that trips two: it names both
-a WSL mount path and `.venv_linux`. Mention the item count (47) if Leland asks
-about portability; do not enumerate all of them unless asked.
+31 of the 180 items also carry at least one portability warning (a hardcoded
+machine path that would not survive a move) — **42 warnings in total**, since
+an item can trip more than one. The 42 instances break down as: WSL mount
+path 20, `.venv_linux` 8, Linux system path 8, Linux home path 6. Mention the
+item count (31) if Leland asks about portability; do not enumerate all of
+them unless asked.
 
 ## 1. Run the deterministic scan
 
@@ -95,16 +94,25 @@ Read `~/.local/state/agent-config-sync/latest-report.md` and summarize for
 Leland in this order:
 
 1. **Conflicts requiring judgment** — these are the only items that need a
-   decision. On this machine there are 40, including
-   `.config/agents/AGENTS.md`, `.claude/CLAUDE.md`, 8 instruction files, 5
-   fields in `.claude/settings.json`, and 2 in `.codex/config.toml`. Say what
-   changed on each side; never pick a winner yourself.
+   decision. On this machine (2026-08-20 scan) there are 17: 15 skill/agent
+   tree files and 2 fields in `.claude/settings.json` (`hooks`,
+   `permissions`). Say what changed on each side; never pick a winner
+   yourself.
 2. **Safe portable updates** — one line each.
-3. **Plugin differences** — call out any pin violation explicitly. Never
-   propose a downgrade unless the report shows an explicit pin.
-4. **Protected Windows state** — mention only if Leland asks; it is not
+3. **Deletions to offer** — items gone from WSL but still in a target:
+   `publish_to_repo` with a "Removed in WSL" detail,
+   `additive_delete_requires_approval`, `windows_only`, and `plugin_removed`.
+   WSL is the authority, so present these as removals Leland already made
+   that the merge skill can propagate — including whole-directory sweeps that
+   also remove untracked temp files and scripts. Never call them "missing"
+   items to reinstall.
+4. **Plugin differences** — call out any pin violation explicitly. Never
+   propose a downgrade unless the report shows an explicit pin. A
+   `plugin_removed` item is a deletion (see 3): removing it from the record
+   and uninstalling on Windows is the fix, never reinstalling on WSL.
+5. **Protected Windows state** — mention only if Leland asks; it is not
    actionable by design.
-5. **Scan errors** — a malformed file blocks its own item, nothing else.
+6. **Scan errors** — a malformed file blocks its own item, nothing else.
 
 Then quote the item ids Leland would need to approve. Nothing is applied.
 

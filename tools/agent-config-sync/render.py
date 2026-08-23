@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import analyze
@@ -46,6 +47,7 @@ SECTION_OF = {
     "additive_delete_requires_approval": "WSL-only and Windows-only items",
     "protected_overlay": "Protected Windows state",
     "plugin_missing": "Plugin differences",
+    "plugin_removed": "Plugin differences",
     "plugin_extra": "Plugin differences",
     "plugin_enabled_differs": "Plugin differences",
     "plugin_version_differs": "Plugin differences",
@@ -102,7 +104,61 @@ def _item_lines(items, notes) -> list[str]:
     return lines or ["_None._"]
 
 
-def render_markdown(doc: dict, analysis: dict) -> str:
+def windows_path(posix: str) -> str | None:
+    """The Windows spelling of a WSL /mnt/<drive> path, or None when the
+    path has no drive-letter equivalent. Files consumed on Windows are
+    referenced by their Windows name only (Leland, 2026-08-14)."""
+    match = re.match(r"^/mnt/([a-z])(/.*)?$", posix)
+    if not match:
+        return None
+    drive = match.group(1).upper()
+    rest = (match.group(2) or "").replace("/", "\\")
+    return f"{drive}:{rest}"
+
+
+def windows_script(doc: dict) -> str | None:
+    """A PowerShell script holding the Windows-side plugin actions of this
+    run, CRLF-terminated, or None when the run proposes none.
+
+    Selection mirrors the actions the report asks Leland to run by hand on
+    the Windows machine: installs missing there, enables recorded-enabled
+    plugins disabled there, updates where Windows holds the older build,
+    and uninstalls where the plugin is gone from WSL (the authority) but
+    still installed on Windows. WSL-side enable mismatches are record
+    maintenance, not Windows work, so they are excluded."""
+    commands: list[str] = []
+    for item in doc.get("items", []):
+        classification = item.get("classification")
+        item_id = item.get("id", "")
+        detail = item.get("detail", "")
+        if (classification == "plugin_missing"
+                and item_id.endswith("#missing:windows")):
+            commands.append(f"claude plugin install {item['path']}")
+        elif (classification == "plugin_enabled_differs"
+                and item_id.endswith("#enabled:windows")):
+            commands.append(f"claude plugin enable {item['path']}")
+        elif (classification == "plugin_version_differs"
+                and "upgrade windows with:" in detail):
+            commands.append(f"claude plugin update {item['path']}")
+        elif (classification == "plugin_removed"
+                and "claude plugin uninstall" in detail):
+            commands.append(f"claude plugin uninstall {item['path']}")
+    if not commands:
+        return None
+    lines = [
+        f"# agent-config-sync — Windows plugin actions for run {doc['run_id']}",
+        "# Run in PowerShell on the Windows machine.",
+        "# The sync tool never executes a package manager; these commands are",
+        "# generated for you to run and review by hand.",
+        "",
+        *commands,
+        "",
+    ]
+    return "\r\n".join(lines)
+
+
+def render_markdown(doc: dict, analysis: dict,
+                    windows_script_ref: str | None = None) -> str:
     items = doc.get("items", [])
     notes = _notes(analysis)
     out: list[str] = []
@@ -237,6 +293,18 @@ def render_markdown(doc: dict, analysis: dict) -> str:
         add("```")
         add("")
 
+    if windows_script_ref is not None:
+        add("## Windows script")
+        add("")
+        add("The Windows-side plugin actions above are also written as one "
+            "runnable script. Run it by hand in PowerShell on the Windows "
+            "machine:")
+        add("")
+        add("```powershell")
+        add(f"powershell -ExecutionPolicy Bypass -File \"{windows_script_ref}\"")
+        add("```")
+        add("")
+
     add("## Validation and restoration")
     add("")
     add("- Every applied change is backed up first, keyed by this run id.")
@@ -293,7 +361,15 @@ def main(argv=None) -> int:
             print(f"render: {exc}")
             return EXIT_MODEL_FAILURE
 
-    markdown = render_markdown(doc, analysis)
+    script = windows_script(doc)
+    script_ref = None
+    if script is not None:
+        script_path = (Path(doc["roots"]["repo"]) / "Notes" / "scripts"
+                       / f"agent-config-{doc['run_id']}.ps1")
+        drift_mod.write_atomic(script_path, script)
+        script_ref = windows_path(str(script_path)) or str(script_path)
+
+    markdown = render_markdown(doc, analysis, windows_script_ref=script_ref)
     state_dir = args.state_dir
     drift_mod.write_atomic(state_dir / "reports" / f"{doc['run_id']}.md",
                            markdown)

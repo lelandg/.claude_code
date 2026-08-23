@@ -72,10 +72,35 @@ deny_path_globs = [
   "**/.codex/skills/.system/**",
   "**/.gemini/antigravity*/**",
   "**/.copilot/installed-plugins/**",
+  # Ephemeral tool artifacts surfaced by the 2026-08-11 first-run report:
+  # pytest caches, Copilot per-session checkpoints, Codex visualization dumps.
+  "**/.pytest_cache/**",
+  "**/.copilot/session-state/**",
+  "**/.codex/visualizations/**",
+  # yt-transcript is three legitimate platform variants (bash on WSL,
+  # PowerShell on Windows, portable copy in the repo record). Schema v1 has no
+  # per-file platform_overlay, so the platform-overlay decision from report
+  # 2026-08-11T17-32-13Z-4d244f is expressed as an exclusion: each layer owns
+  # its own copy and the trio stops reporting as a conflict on every scan.
+  # Both layouts: the wsl/windows layers use dotted paths (.claude/...), the
+  # repo drops the leading dot (claude/...). Without the second pair the repo
+  # copies misclassify as "removed in WSL".
+  "**/.claude/skills/yt-transcript/**",
+  "**/claude/skills/yt-transcript/**",
+  "**/.claude/commands/yt-transcript.md",
+  "**/claude/commands/yt-transcript.md",
 ]
 
 # ---------------------------------------------------------------------------
 # Portable authoritative: WSL intent is the desired value.
+#
+# House-rules family (2026-08-14 restructure): these entries record their
+# baseline under the gitignored baseline/ directory, NOT the public tree.
+# The public tree's sanitized copies (config/agents/, claude/CLAUDE.md,
+# claude/instructions/) are deliberately different from WSL forever, so using
+# them as the baseline made these items permanent conflicts. The private
+# baseline restores honest three-way classification; /publish-claude-config
+# owns the sanitized public copies.
 # ---------------------------------------------------------------------------
 
 [[entries]]
@@ -83,7 +108,7 @@ id = "agents-md"
 policy = "portable_authoritative"
 kind = "text"
 wsl = ".config/agents/AGENTS.md"
-repo = "config/agents/AGENTS.md"
+repo = "baseline/config/agents/AGENTS.md"
 windows = ".config/agents/AGENTS.md"
 
 [[entries]]
@@ -91,7 +116,7 @@ id = "claude-md"
 policy = "portable_authoritative"
 kind = "text"
 wsl = ".claude/CLAUDE.md"
-repo = "claude/CLAUDE.md"
+repo = "baseline/claude/CLAUDE.md"
 windows = ".claude/CLAUDE.md"
 
 [[entries]]
@@ -99,7 +124,7 @@ id = "claude-instructions"
 policy = "portable_authoritative"
 kind = "tree"
 wsl = ".claude/instructions"
-repo = "claude/instructions"
+repo = "baseline/claude/instructions"
 windows = ".claude/instructions"
 globs = ["**/*.md"]
 
@@ -143,12 +168,16 @@ repo = "claude/tools"
 windows = ".claude/tools"
 globs = ["**/*.py", "**/*.ts", "**/*.sh"]
 
+# The per-CLI instruction mirrors carry the same house-rules content (symlinks
+# or copies of AGENTS.md), so their baselines are private too — publishing
+# them to the public tree would leak the unsanitized rules.
+
 [[entries]]
 id = "codex-instructions"
 policy = "portable_additive"
 kind = "tree"
 wsl = ".codex"
-repo = "codex"
+repo = "baseline/codex"
 windows = ".codex"
 globs = ["**/*.md"]
 
@@ -157,7 +186,7 @@ id = "copilot-instructions"
 policy = "portable_additive"
 kind = "tree"
 wsl = ".copilot"
-repo = "copilot"
+repo = "baseline/copilot"
 windows = ".copilot"
 globs = ["**/*.md"]
 
@@ -166,7 +195,7 @@ id = "gemini-instructions"
 policy = "portable_additive"
 kind = "tree"
 wsl = ".gemini"
-repo = "gemini"
+repo = "baseline/gemini"
 windows = ".gemini"
 globs = ["**/*.md"]
 
@@ -175,7 +204,7 @@ id = "pi-instructions"
 policy = "portable_additive"
 kind = "tree"
 wsl = ".pi"
-repo = "pi"
+repo = "baseline/pi"
 windows = ".pi"
 globs = ["**/*.md"]
 
@@ -209,6 +238,21 @@ windows = ".claude/settings.json"
 "statusLine.command" = "platform_overlay"
 "awsAuthRefresh" = "excluded"
 "forceLoginMethod" = "platform_overlay"
+# Declared after the 2026-08-11 first-run report flagged these as
+# "ownership undeclared":
+# tui is a per-machine display preference (WSL: default, Windows: fullscreen).
+"tui" = "platform_overlay"
+# effortLevel surfaced undeclared in the 2026-08-12 verification scan after a
+# WSL-side settings change; per-machine preference like tui.
+"effortLevel" = "platform_overlay"
+# Plugin identity and enabled state are already portable through the
+# claude-plugins entry (kind = "plugins"), which reads the same file. The
+# settings-level view stays machine-owned so each machine curates its own set.
+"enabledPlugins" = "platform_overlay"
+# The WSL marketplace list includes private sources (a local-directory
+# marketplace and the mirror repo itself) that must never enter the public
+# record; each machine registers its own marketplaces by hand.
+"extraKnownMarketplaces" = "platform_overlay"
 
 [[entries]]
 id = "codex-config"
@@ -225,19 +269,24 @@ windows = ".codex/config.toml"
 "desktop" = "platform_overlay"
 "windows" = "platform_overlay"
 "shell" = "platform_overlay"
+# Hook-trust bookkeeping: entries keyed by absolute path with per-file
+# integrity hashes. Keys can never match across machines, so this state is
+# machine-local by construction and is not collected at all.
+"hooks" = "excluded"
 
+# 2026-08-14 Codex-audit reconciliation: ~/.claude/mcp.json is a dead config
+# on BOTH machines — `claude mcp list` loads nothing from it (verified on WSL;
+# the audit verified Windows). Current Claude Code stores user-level MCP
+# servers in ~/.claude.json via `claude mcp add`, and that file is excluded as
+# machine state (claude-local-state below). Servers are re-added natively per
+# machine; this file is no longer synced.
 [[entries]]
 id = "claude-mcp"
-policy = "portable_authoritative"
+policy = "excluded"
 kind = "json"
 wsl = ".claude/mcp.json"
 repo = "claude/mcp.json"
 windows = ".claude/mcp.json"
-
-[entries.fields]
-"mcpServers.*.command" = "platform_overlay"
-"mcpServers.*.args" = "portable_authoritative"
-"mcpServers.*.env" = "excluded"
 
 # ---------------------------------------------------------------------------
 # Plugins: identities reconciled through native managers, never copied.

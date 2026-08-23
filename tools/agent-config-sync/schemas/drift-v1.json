@@ -44,7 +44,7 @@
                      "conflict", "wsl_only", "windows_only",
                      "protected_overlay",
                      "additive_delete_requires_approval",
-                     "plugin_missing", "plugin_extra",
+                     "plugin_missing", "plugin_removed", "plugin_extra",
                      "plugin_enabled_differs", "plugin_version_differs",
                      "plugin_pin_violation", "plugin_incompatible",
                      "error"]

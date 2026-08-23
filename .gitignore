@@ -60,3 +60,8 @@ claude/skills/publish-claude-config/
 # Python bytecode (generated when running skill test suites)
 __pycache__/
 *.pyc
+
+# agent-config-sync private baseline: faithful (unsanitized) record of WSL
+# intent for the house-rules family. Never committed — the public tree's
+# sanitized copies are owned by /publish-claude-config instead.
+baseline/

@@ -211,12 +211,40 @@ python3 /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/merge.
   --id agents-md
 ```
 
-Add `--apply` only after reading the plan. Restore with:
+Re-run with the `apply` verb (in place of `plan`) only after reading the
+plan. Restore with:
 
 ```bash
 python3 /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/merge.py restore \
   --run-id <run-id>
 ```
+
+## Deletions
+
+WSL is the authority, so an item that is gone from WSL and still present in a
+target is drift the merge can remove. Approval works the same as for a write:
+name the item id, read the plan, then apply. The plan states each removal as a
+`delete_file`, `delete_tree`, or `delete_field` action.
+
+- **`publish_to_repo` with a "Removed in WSL" detail** deletes the repository
+  copy and mirrors the deletion onto Windows in the same action.
+- **`additive_delete_requires_approval`** is the same deletion under a
+  `portable_additive` entry. Naming the id is the approval; unnamed, it is
+  never touched.
+- **`windows_only`** deletes the Windows copy alone.
+- **A deleted JSON field** is removed from the target document
+  (`delete_field`), never written as `null`.
+- **`plugin_removed`** removes the plugin from the portable record
+  (`claude/settings.json` → `enabledPlugins`) and, when Windows still has the
+  plugin, prints `claude plugin uninstall <key>` for you to run by hand. The
+  tool never executes a package manager.
+
+When the directory that held a tree file is itself gone from WSL, the plan
+sweeps the whole target directory (`delete_tree`) — including temp files,
+scripts, and caches the scan's globs never tracked. The dry run names the
+directory and its file count; approving the id approves the sweep. Every
+removed file — tracked or not — is backed up first, and `restore` rebuilds
+the full tree.
 
 ## Known limitations
 
@@ -242,44 +270,13 @@ so every item it produces is a field item, and the whole-file write never
 comes up. **Every `codex-config` item is reported and never appliable.** To
 resolve one, edit `~/.codex/config.toml` by hand, then re-scan.
 
-### A deletion is reported but never applied
+### A TOML field deletion is refused too
 
-If a file was removed in WSL and still exists in the repository and on
-Windows, the item classifies `publish_to_repo` and its detail reads
-"Removed in WSL". Publishing that would mean deleting the baseline copy, which
-the tool never does.
-
-It does not say so. The dry run names the file as if it will be written, the
-apply writes nothing, and no reason is printed:
-
-```
-- [write_file] `claude-agents:old-agent.md` → write .../repo/claude/agents/old-agent.md from WSL
-```
-
-Recognize it two ways: the item's detail says **"Removed in WSL"**, and a
-re-scan afterwards shows the item unchanged. Five items are in this shape
-today, all under `claude-agents/`. Delete the repository and Windows copies by
-hand if you want the removal recorded.
-
-A deletion under a `portable_additive` entry is safe by comparison. It
-classifies `additive_delete_requires_approval`, and the tool skips it with a
-reason you can read in the plan. Seven items are in that shape today, under
-`claude-skills/` and `claude-tools/`. Only the `publish_to_repo` deletions are
-silent.
-
-The cause is one line: `plan_merge` checks `source.is_dir()` and never
-`source.exists()`, so an absent source reaches `apply_plan`, which skips it
-without a message.
-
-### A deleted JSON field would be written as `null`
-
-The same gap has a field-shaped variant. If a field is deleted in WSL while it
-is still present in the repository and on Windows, the source *file* exists,
-so the plan proceeds and writes `null` into the field rather than removing it.
-
-No item in the current manifest can reach this — every appliable field item
-has a value in WSL — but it is the same missing check, so it is worth knowing
-before a new entry is declared.
+The deletion path shares the TOML refusal: a `codex-config` field that was
+removed in WSL is reported, and the plan skips it with the same "edit the
+target by hand" reason. (Deletions of files and JSON fields are fully
+supported — see "Deletions" above; before 2026-08-20 they were silent no-ops,
+and that limitation is gone.)
 
 ### `conflict` items are never appliable
 
@@ -296,6 +293,6 @@ distinct causes and their two distinct fixes.
 | exit `21` every run | a stale lock from a killed run | `rm ~/.local/state/agent-config-sync/scan.lock` |
 | exit `30` every run | `ACS_CLAUDE` is not the real executable | `command -v claude`, then set `ACS_CLAUDE` |
 | huge `errors` list | a declared path does not exist on this machine | remove or correct that `[[entries]]` block |
-| exit `10` every run on this machine | expected — 340 items of real drift exist here | not a bug; review `latest-report.md` and apply what you approve with `merge.py` |
+| exit `10` every run on this machine | expected — real drift exists here (180 items on 2026-08-20) | not a bug; review `latest-report.md` and apply what you approve with `merge.py` |
 | an approved item stays in the next report | it may be one the tool cannot apply | check "Known limitations" above |
 | a scan seems to hang | it is disk-bound, not stuck; expect 140–150 seconds | wait; do not kill it mid-run or the lock will need clearing |

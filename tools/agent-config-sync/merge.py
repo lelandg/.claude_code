@@ -2,7 +2,12 @@
 """Reviewed merge: the only module that writes to a target.
 
 Nothing is applied that was not named by id, re-verified against a fresh scan,
-and backed up first. Plugin operations are proposed, never executed.
+and backed up first. Deletions are first-class: an item that is gone from WSL
+(the authority) plans a delete of the target copies, and an orphaned directory
+is swept whole -- temp files, scripts, and everything else the scan's globs
+never tracked -- with every removed file backed up for restore. Native plugin
+commands are proposed, never executed; the portable record is edited only for
+an explicitly named plugin removal.
 
     merge.py plan    --drift FILE --manifest FILE --id ID [--id ID ...]
     merge.py apply   --drift FILE --manifest FILE --id ID [--id ID ...]
@@ -14,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import shutil
 from dataclasses import dataclass
@@ -38,6 +44,8 @@ class MergeError(RuntimeError):
 _PUBLISH = "publish_to_repo"
 _WSL_ONLY = "wsl_only"
 _RECONCILE = "reconcile_windows"
+_WINDOWS_ONLY = "windows_only"
+_ADDITIVE_DELETE = "additive_delete_requires_approval"
 _PLUGIN = ("plugin_missing", "plugin_enabled_differs",
            "plugin_version_differs", "plugin_pin_violation")
 
@@ -111,6 +119,22 @@ def set_pointer(data: dict, pointer: str, value) -> dict:
             current[segment] = nxt
         current = nxt
     current[segments[-1]] = value
+    return out
+
+
+def delete_pointer(data: dict, pointer: str) -> dict:
+    """A copy of ``data`` without the pointed-at key. A pointer whose parent
+    chain does not exist returns the copy unchanged -- deleting what is
+    already absent is a no-op, not an error."""
+    out = copy.deepcopy(data)
+    current = out
+    segments = pointer.split(".")
+    for segment in segments[:-1]:
+        nxt = current.get(segment)
+        if not isinstance(nxt, dict):
+            return out
+        current = nxt
+    current.pop(segments[-1], None)
     return out
 
 
@@ -202,10 +226,121 @@ def _plugin_command(detail: str) -> tuple[str, ...] | None:
     return tuple(tail.split())
 
 
+def _orphan_rel(wsl_dir: Path, key: str) -> str | None:
+    """The topmost directory on ``key``'s path, relative to the entry root
+    ("" for the entry root itself), that no longer exists in WSL -- or None
+    when every directory on the path still exists there. A non-None result
+    means the whole target directory is orphaned: WSL is the authority, so
+    nothing under it is wanted any more, tracked by the scan or not."""
+    if not wsl_dir.exists():
+        return ""
+    rel = ""
+    for part in key.split("/")[:-1]:
+        rel = f"{rel}/{part}" if rel else part
+        if not (wsl_dir / rel).exists():
+            return rel
+    return None
+
+
+def _tree_file_count(*dirs: Path | None) -> int:
+    return sum(1 for d in dirs if d is not None and d.is_dir()
+               for p in d.rglob("*") if p.is_file())
+
+
+def _plan_deletion(m, entry, item_id: str, key: str, classification: str,
+                   planned_sweeps: dict[tuple[str, str], str]
+                   ) -> tuple[Action | None, str | None]:
+    """One deletion item -> (action, None) or (None, skip reason).
+
+    A ``windows_only`` item deletes the Windows copy alone; every other
+    deletion removes the repository record and mirrors the removal onto
+    Windows, the same pairing a publish write uses.
+    """
+    if entry.kind == "toml" and key:
+        return None, ("TOML field merge is not implemented; edit the target "
+                      "by hand")
+
+    primary_layer = "windows" if classification == _WINDOWS_ONLY else "repo"
+    target = _target_path(m, entry, primary_layer)
+    if target is None:
+        return None, f"no {primary_layer} root configured"
+    cascade_target = (_target_path(m, entry, "windows")
+                      if primary_layer == "repo" else None)
+
+    if entry.kind == "json" and key:
+        mirror = (f" (also removes it from {cascade_target})"
+                  if cascade_target is not None else "")
+        return Action(
+            item_id=item_id, kind="delete_field", layer=primary_layer,
+            target=target, pointer=key,
+            description=f"remove field {key} from {target}, deleted in "
+                        f"WSL{mirror}",
+            cascade_target=cascade_target), None
+
+    if entry.kind == "tree" and key:
+        wsl_dir = _target_path_any_layer(m, entry, "wsl")
+        orphan = _orphan_rel(wsl_dir, key) if wsl_dir is not None else None
+        if orphan is not None and classification == _WINDOWS_ONLY:
+            # Sweep a Windows-only directory only when the repository holds
+            # no copy either; a surviving repo copy means the directory's
+            # other files have deletion items of their own to approve.
+            repo_dir = _target_path_any_layer(m, entry, "repo")
+            if repo_dir is not None and \
+                    (repo_dir / orphan if orphan else repo_dir).exists():
+                orphan = None
+        if orphan is not None:
+            tree_target = target / orphan if orphan else target
+            tree_cascade = None
+            if cascade_target is not None:
+                tree_cascade = (cascade_target / orphan if orphan
+                                else cascade_target)
+            sweep_key = (primary_layer, str(tree_target))
+            if sweep_key in planned_sweeps:
+                return Action(
+                    item_id=item_id, kind="noop", layer=primary_layer,
+                    target=None, pointer=None,
+                    description=f"covered by the directory deletion planned "
+                                f"for {tree_target} (item "
+                                f"{planned_sweeps[sweep_key]})"), None
+            planned_sweeps[sweep_key] = item_id
+            count = _tree_file_count(tree_target, tree_cascade)
+            mirror = (f"; also deletes {tree_cascade}"
+                      if tree_cascade is not None else "")
+            return Action(
+                item_id=item_id, kind="delete_tree", layer=primary_layer,
+                target=tree_target, pointer=None,
+                description=f"delete directory {tree_target} recursively — "
+                            f"{count} files, including any the scan does not "
+                            f"track (directory removed in WSL{mirror})",
+                cascade_target=tree_cascade), None
+        target = target / key
+        if cascade_target is not None:
+            cascade_target = cascade_target / key
+
+    directory = next((path for path in (target, cascade_target)
+                      if path is not None and path.is_dir()), None)
+    if directory is not None:
+        return None, (f"{directory} is a directory, not a file; this id "
+                      f"names no file to delete")
+
+    reason = ("present on Windows only; absent in WSL and the repository"
+              if classification == _WINDOWS_ONLY else "removed in WSL")
+    mirror = (f"; also deletes {cascade_target}"
+              if cascade_target is not None else "")
+    return Action(
+        item_id=item_id, kind="delete_file", layer=primary_layer,
+        target=target, pointer=None,
+        description=f"delete {target} ({reason}{mirror})",
+        cascade_target=cascade_target), None
+
+
 def plan_merge(doc: dict, m, selected_ids) -> Plan:
     by_id = {item["id"]: item for item in doc.get("items", [])}
     actions: list[Action] = []
     skipped: list[tuple[str, str]] = []
+    #: (layer, directory) -> the item id whose sweep already covers it, so a
+    #: second id inside the same orphaned directory plans no duplicate work.
+    planned_sweeps: dict[tuple[str, str], str] = {}
 
     for item_id in selected_ids:
         item = by_id.get(item_id)
@@ -216,6 +351,27 @@ def plan_merge(doc: dict, m, selected_ids) -> Plan:
             skipped.append((item_id, "protected Windows state; never applied"))
             continue
         classification = item["classification"]
+
+        if classification == "plugin_removed":
+            entry = _entry_for(m, item["entry_id"])
+            if entry is None:
+                skipped.append((item_id, "entry is no longer in the manifest"))
+                continue
+            base = _target_path(m, entry, "repo")
+            if base is None:
+                skipped.append((item_id, "no repo root configured"))
+                continue
+            record = base / "settings.json"
+            command = _plugin_command(item["detail"])
+            key = item["path"]
+            description = f"remove {key} from the portable record {record}"
+            if command:
+                description += f"; run by hand: {' '.join(command)}"
+            actions.append(Action(
+                item_id=item_id, kind="remove_plugin_from_record",
+                layer="repo", target=record, pointer=key,
+                description=description, command=command))
+            continue
 
         if classification in _PLUGIN:
             command = _plugin_command(item["detail"])
@@ -228,7 +384,16 @@ def plan_merge(doc: dict, m, selected_ids) -> Plan:
                 description=f"run by hand: {' '.join(command)}"))
             continue
 
-        if classification not in _PUBLISH_LIKE and classification != _RECONCILE:
+        # A deletion: the unit is gone from WSL (the authority) but a target
+        # still holds it, or it exists on Windows alone. Every deletion still
+        # needs its id named -- naming it is the approval.
+        is_deletion = (
+            classification == _WINDOWS_ONLY
+            or (classification in (_PUBLISH, _ADDITIVE_DELETE)
+                and item.get("wsl_fingerprint") is None))
+
+        if (not is_deletion and classification not in _PUBLISH_LIKE
+                and classification != _RECONCILE):
             skipped.append((item_id,
                             f"{classification} requires a decision, not an "
                             f"automatic action"))
@@ -242,6 +407,15 @@ def plan_merge(doc: dict, m, selected_ids) -> Plan:
         # The part of the id after the colon: a path inside the directory for
         # a tree entry, a dotted field pointer for a json/toml entry.
         key = item_id.split(":", 1)[1] if ":" in item_id else ""
+
+        if is_deletion:
+            action, sweep_note = _plan_deletion(
+                m, entry, item_id, key, classification, planned_sweeps)
+            if action is not None:
+                actions.append(action)
+            else:
+                skipped.append((item_id, sweep_note or "nothing to delete"))
+            continue
 
         if entry.kind == "toml" and key:
             # Python 3.12 ships a TOML reader and no TOML writer, so the only
@@ -323,7 +497,8 @@ def render_plan(plan: Plan) -> str:
         lines.extend(f"- `{item_id}`: {reason}"
                      for item_id, reason in plan.skipped)
     lines.append("")
-    lines.append("Nothing above has been applied. Re-run with --apply to act.")
+    lines.append("Nothing above has been applied. "
+                 "Re-run with the apply verb to act.")
     return "\n".join(lines) + "\n"
 
 
@@ -411,6 +586,39 @@ def _desired_for_target(m, entry, raw: str, layer: str, action: Action,
                       indent=2, sort_keys=True) + "\n"
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _prune_empty_dirs(start: Path, stop: Path | None) -> None:
+    """Remove now-empty directories from ``start`` up to (never including)
+    ``stop``. Deleting the last file in a directory must not leave an empty
+    husk on the target -- that husk is exactly the temp-dir litter the sweep
+    exists to remove."""
+    if stop is None:
+        return
+    current = start
+    while current != stop and stop in current.parents:
+        try:
+            current.rmdir()          # refuses a non-empty directory
+        except OSError:
+            return
+        current = current.parent
+
+
+def _load_json_object(target: Path, purpose: str) -> dict:
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise MergeError(
+            f"{target} is not valid JSON (line {exc.lineno}, column "
+            f"{exc.colno}); refusing to {purpose}") from None
+    if not isinstance(data, dict):
+        raise MergeError(f"{target} holds a JSON {type(data).__name__}, "
+                         f"not an object; refusing to {purpose}")
+    return data
+
+
 def apply_plan(plan: Plan, m, *, backups_dir: Path) -> tuple[Path, list[str]]:
     backup_dir = Path(backups_dir) / plan.run_id
     files_dir = backup_dir / "files"
@@ -429,6 +637,22 @@ def apply_plan(plan: Plan, m, *, backups_dir: Path) -> tuple[Path, list[str]]:
             "manual_recovery": manual,
         }, indent=2) + "\n")
 
+    def back_up(index: int, action: Action, layer: str, target: Path,
+                stored_name: str, *, flush: bool = True) -> None:
+        stored = files_dir / stored_name
+        shutil.copy2(target, stored)
+        records.append({
+            "index": index,
+            "item_id": action.item_id,
+            "target": str(target),
+            "layer": layer,
+            "existed": True,
+            "stored": stored_name,
+            "sha256_before": _sha256_file(target),
+        })
+        if flush:
+            flush_manifest()
+
     for index, action in enumerate(plan.actions):
         if action.kind == "plugin_command":
             manual.append(list(action.command or ()))
@@ -436,7 +660,83 @@ def apply_plan(plan: Plan, m, *, backups_dir: Path) -> tuple[Path, list[str]]:
         if action.target is None:
             continue
 
+        if action.kind == "remove_plugin_from_record":
+            # The uninstall command is Leland's to run either way; the record
+            # edit happens only when the record actually names the plugin.
+            if action.command:
+                manual.append(list(action.command))
+            target = action.target
+            key = action.pointer or ""
+            if target.is_file():
+                data = _load_json_object(target, "edit the plugin record")
+                enabled = data.get("enabledPlugins")
+                # Plugin keys carry "@" and may carry "."; they are plain
+                # dict keys here, never dotted pointers.
+                if isinstance(enabled, dict) and key in enabled:
+                    back_up(index, action, "repo", target, f"{index:03d}-0")
+                    enabled = dict(enabled)
+                    del enabled[key]
+                    data["enabledPlugins"] = enabled
+                    write_target(target, json.dumps(
+                        data, indent=2, sort_keys=True) + "\n")
+                    applied.append(action.item_id)
+            continue
+
         entry = _entry_for(m, action.item_id.split(":", 1)[0])
+
+        if action.kind in ("delete_file", "delete_tree"):
+            targets = [(action.layer, action.target)]
+            if action.cascade_target is not None:
+                targets.append(("windows", action.cascade_target))
+            item_applied = False
+            for sub_index, (layer, target) in enumerate(targets):
+                entry_root = (_target_path_any_layer(m, entry, layer)
+                              if entry is not None else None)
+                if action.kind == "delete_file":
+                    if not target.is_file():
+                        continue      # already gone: idempotent no-op
+                    back_up(index, action, layer, target,
+                            f"{index:03d}-{sub_index}")
+                    target.unlink()
+                else:
+                    if not target.is_dir():
+                        continue      # already swept: idempotent no-op
+                    files = sorted(p for p in target.rglob("*")
+                                   if p.is_file())
+                    for n, path in enumerate(files):
+                        back_up(index, action, layer, path,
+                                f"{index:03d}-{sub_index}-{n:03d}",
+                                flush=False)
+                    # Every backup is on disk before anything is destroyed.
+                    flush_manifest()
+                    shutil.rmtree(target)
+                item_applied = True
+                _prune_empty_dirs(target.parent, entry_root)
+            if item_applied:
+                applied.append(action.item_id)
+            continue
+
+        if action.kind == "delete_field":
+            targets = [(action.layer, action.target)]
+            if action.cascade_target is not None:
+                targets.append(("windows", action.cascade_target))
+            item_applied = False
+            for sub_index, (layer, target) in enumerate(targets):
+                if not target.is_file():
+                    continue
+                data = _load_json_object(target, "remove a field from it")
+                pruned = delete_pointer(data, action.pointer or "")
+                if pruned == data:
+                    continue          # field already absent: no-op
+                back_up(index, action, layer, target,
+                        f"{index:03d}-{sub_index}")
+                write_target(target, json.dumps(
+                    pruned, indent=2, sort_keys=True) + "\n")
+                item_applied = True
+            if item_applied:
+                applied.append(action.item_id)
+            continue
+
         if entry is None:
             continue
         raw = _read_source(action.source)
@@ -488,6 +788,9 @@ def restore(backup_dir: Path) -> list[str]:
     for record in reversed(data["files"]):
         target = Path(record["target"])
         if record["existed"]:
+            # A deletion may have pruned the directories too; a restore has
+            # to be able to rebuild the tree it removed.
+            target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(backup_dir / "files" / record["stored"], target)
         elif target.exists():
             target.unlink()
@@ -567,7 +870,9 @@ def main(argv=None) -> int:
     print(f"backup: {backup_dir}")
     for item_id in applied:
         print(f"applied {item_id}")
-    manual = [a for a in plan.actions if a.kind == "plugin_command"]
+    manual = [a for a in plan.actions
+              if a.command and a.kind in ("plugin_command",
+                                          "remove_plugin_from_record")]
     if manual:
         print("\nRun these by hand — this tool never executes a package "
               "manager:")

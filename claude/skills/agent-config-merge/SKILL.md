@@ -19,19 +19,28 @@ named, from `reports/<run-id>.md`).
 
 If Leland has not named specific ids, **ask** with AskUserQuestion — do not
 infer "all of them". Offer, as separate choices: the safe portable updates
-only, safe updates plus a specific reconcile-Windows id, or a list he types.
+only, the **deletions** as their own group, safe updates plus a specific
+reconcile-Windows id, or a list he types.
 
-**Not every item can be applied, even by id.** `merge.py` only turns four
-classifications into an action: `publish_to_repo`, `wsl_only`,
-`reconcile_windows`, and the plugin classifications (`plugin_missing`,
-`plugin_enabled_differs`, `plugin_version_differs`, `plugin_pin_violation`).
+**Always offer the deletions.** When the report holds items that are gone
+from WSL but still present in a target — `publish_to_repo` with a "Removed in
+WSL" detail, `additive_delete_requires_approval`, `windows_only`, and
+`plugin_removed` — list them and ask whether to remove them from the targets.
+WSL is the authority; these are removals Leland already made, waiting to be
+propagated. Naming the id is the approval; nothing is ever deleted unnamed.
+
+**Not every item can be applied, even by id.** `merge.py` turns these
+classifications into actions: `publish_to_repo`, `wsl_only`,
+`reconcile_windows`, the deletions above (`additive_delete_requires_approval`,
+`windows_only`, deletion-shaped `publish_to_repo`), `plugin_removed`, and the
+plugin command classifications (`plugin_missing`, `plugin_enabled_differs`,
+`plugin_version_differs`, `plugin_pin_violation`).
 Everything else — most importantly **`conflict`** — is skipped unconditionally,
 even when named, with "requires a decision, not an automatic action" (the
-same skip also catches `windows_only`, `additive_delete_requires_approval`,
-`plugin_extra`, and `plugin_incompatible`). `protected_overlay` is refused
-too, but earlier and by a different guard — the `platform_overlay` policy
-check, with the message "protected Windows state; never applied", not this
-one.
+same skip also catches `plugin_extra` and `plugin_incompatible`).
+`protected_overlay` is refused too, but earlier and by a different guard —
+the `platform_overlay` policy check, with the message "protected Windows
+state; never applied", not this one.
 
 There is no id-based way to make this tool pick a side in a conflict, but it
 is not a dead end — it is a loop back through WSL. `compare.py`'s `classify()`
@@ -103,6 +112,24 @@ to Leland. If a line does not end in `(mirrors to ...)`, only the shown target
 is written — for example, `reconcile_windows` actions only ever touch the
 Windows file, never the repo.
 
+**Deletion actions need the same two-file reading, plus one more caution.**
+
+- `[delete_file]` removes the named file; `(also deletes ...)` at the end of
+  the line means the Windows copy goes in the same action.
+- `[delete_tree]` removes a whole directory **recursively — including temp
+  files, scripts, and caches the scan never tracked**. The line carries the
+  file count. Read that count to Leland before asking for approval; approving
+  the id approves the sweep. A second selected id inside the same directory
+  shows as `[noop] ... covered by the directory deletion`.
+- `[delete_field]` removes the JSON key from the target document (never
+  writes `null`).
+- `[remove_plugin_from_record]` edits `enabledPlugins` in the repository's
+  `claude/settings.json` and may also print a `claude plugin uninstall`
+  command — printed for Leland to run by hand, never executed.
+
+Every deleted file is backed up first; `merge.py restore` rebuilds the full
+tree, untracked files included.
+
 ## 3. Get approval for the exact scope
 
 Ask explicitly, naming the item ids and the files that will be written —
@@ -164,10 +191,13 @@ Leland approves the final patch, not an agent-to-agent conversation.
 ## Rules
 
 - Never apply an id that was not named.
-- Never expect a `conflict`, `windows_only`, `protected_overlay`,
-  `additive_delete_requires_approval`, `plugin_extra`, or `plugin_incompatible`
-  item to apply — the tool always refuses these, even when named; do not look
-  for a workaround.
+- Never expect a `conflict`, `protected_overlay`, `plugin_extra`, or
+  `plugin_incompatible` item to apply — the tool always refuses these, even
+  when named; do not look for a workaround.
+- Deletions (`windows_only`, `additive_delete_requires_approval`,
+  deletion-shaped `publish_to_repo`, `plugin_removed`) apply only when named,
+  and a `delete_tree` sweep removes untracked files too — read its file count
+  to Leland before asking for approval.
 - Never touch a `platform_overlay` item; the tool refuses, and so should you.
 - Never edit `/home/leland` config to "fix" drift — WSL is the authority, and
   changing it is Leland's job, not a merge.

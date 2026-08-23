@@ -150,6 +150,33 @@ def classify_plugins(desired, wsl_native, windows_native, pins,
 
     for key in all_keys:
         want = desired.get(key)
+        in_wsl = key in wsl_native
+        in_windows = has_windows and key in windows_native
+
+        # WSL is the authority for plugin identity. A plugin absent from WSL
+        # native state is a removal wherever else it still appears -- in the
+        # portable record, on Windows, or both. Proposing an install here
+        # would re-create what Leland deliberately removed.
+        if not in_wsl:
+            if want is not None:
+                detail = ("Recorded as desired but absent from WSL, the "
+                          "authority. Approving this id removes it from the "
+                          "portable record")
+                if in_windows:
+                    detail += (" and proposes: claude plugin uninstall "
+                               f"{key}")
+                else:
+                    detail += "."
+                items.append(_item(key, "", "plugin_removed", "review",
+                                   detail))
+            elif in_windows:
+                items.append(_item(
+                    key, "", "plugin_removed", "review",
+                    "Installed on Windows but absent from WSL, the "
+                    "authority, and from the portable record. Remove it "
+                    f"with: claude plugin uninstall {key}"))
+            # A removal supersedes enabled/pin/version noise for this key.
+            continue
 
         if want is None:
             items.append(_item(
@@ -158,22 +185,14 @@ def classify_plugins(desired, wsl_native, windows_native, pins,
                 "No action proposed; add it to the record if it is intended."))
             continue
 
-        missing_layers = [layer for layer, native in natives if key not in native]
-        if missing_layers:
-            if len(missing_layers) == len(natives):
-                # Missing everywhere: one item, not one per layer.
+        # WSL has it; the only layer that can still be missing is Windows.
+        for layer, native in natives:
+            if key not in native:
                 items.append(_item(
-                    key, "", "plugin_missing", "review",
-                    "Desired plugin is not installed on any native layer. "
-                    f"Install it with the native manager: "
+                    key, f"#missing:{layer}", "plugin_missing", "review",
+                    f"Desired plugin is not installed on {layer}. Install "
+                    f"it with the native manager: "
                     f"claude plugin install {key}"))
-            else:
-                for layer in missing_layers:
-                    items.append(_item(
-                        key, f"#missing:{layer}", "plugin_missing", "review",
-                        f"Desired plugin is not installed on {layer}. Install "
-                        f"it with the native manager: "
-                        f"claude plugin install {key}"))
 
         for layer, native in natives:
             have = native.get(key)

@@ -62,6 +62,24 @@ kind = "tree"
 wsl = "agents"
 repo = "agents"
 windows = "agents"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "claude-skills"
+policy = "portable_additive"
+kind = "tree"
+wsl = "skills"
+repo = "skills"
+windows = "skills"
+globs = ["**/*.md"]
+
+[[entries]]
+id = "claude-plugins"
+policy = "portable_authoritative"
+kind = "plugins"
+wsl = "."
+repo = "."
+windows = "."
 
 [[entries]]
 id = "codex-config"
@@ -338,6 +356,298 @@ def test_a_target_that_is_a_directory_is_refused_not_written(scene):
     plan = merge.plan_merge(doc, m, ["claude-agents"])
     assert plan.actions == ()
     assert "directory" in plan.skipped[0][1]
+
+
+# --- deletions --------------------------------------------------------------
+#
+# WSL is the authority. A file or field that is gone from WSL and still
+# present in a target is drift the merge must be able to remove -- with the
+# same explicit-id approval, backup, and restore as every write. (Leland,
+# 2026-08-20: "offer to remove anything missing from the targets; 100%
+# thorough -- temp files, scripts, etc.")
+
+def seed_skill(roots, rel: str, *, wsl=None, repo=None, windows=None) -> None:
+    """Write one file inside the additive 'skills' tree entry, per layer."""
+    for layer, content in (("wsl", wsl), ("repo", repo), ("windows", windows)):
+        if content is not None:
+            roots.write(getattr(roots, layer), f"skills/{rel}", content)
+
+
+def test_a_deleted_tree_file_plans_a_delete_with_a_windows_cascade(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_tree(roots, "old.md", repo="body\n", windows="body\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    item = next(i for i in doc["items"] if i["id"] == "claude-agents:old.md")
+    assert item["classification"] == "publish_to_repo"
+    assert "wsl_fingerprint" not in item
+
+    plan = merge.plan_merge(doc, m, ["claude-agents:old.md"])
+    action = plan.actions[0]
+    assert action.kind == "delete_file"
+    assert action.target == roots.repo / "agents" / "old.md"
+    assert action.cascade_target == roots.windows / "agents" / "old.md"
+    assert "delete" in merge.render_plan(plan).lower()
+
+
+def test_applying_a_deletion_removes_the_file_from_both_targets(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_tree(roots, "old.md", repo="body\n", windows="body\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["claude-agents:old.md"])
+    _, applied = merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+
+    assert applied == ["claude-agents:old.md"]
+    assert not (roots.repo / "agents" / "old.md").exists()
+    assert not (roots.windows / "agents" / "old.md").exists()
+    assert (roots.repo / "agents" / "keep.md").exists()
+    assert (roots.windows / "agents" / "keep.md").exists()
+
+
+def test_restore_brings_a_deleted_file_back_in_both_targets(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_tree(roots, "old.md", repo="body\n", windows="body\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["claude-agents:old.md"])
+    backup_dir, _ = merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+
+    merge.restore(backup_dir)
+    assert (roots.repo / "agents" / "old.md").read_text(
+        encoding="utf-8") == "body\n"
+    assert (roots.windows / "agents" / "old.md").read_text(
+        encoding="utf-8") == "body\n"
+
+
+def test_applying_the_same_deletion_twice_changes_nothing(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_tree(roots, "old.md", repo="body\n", windows="body\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["claude-agents:old.md"])
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    _, applied = merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert applied == []
+
+
+def test_a_second_scan_after_a_deletion_shows_no_remaining_drift(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_tree(roots, "old.md", repo="body\n", windows="body\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m, ["claude-agents:old.md"])
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    after = scan_now(manifest_path)
+    assert [i for i in after["items"] if i["severity"] == "review"] == []
+
+
+def test_an_orphaned_directory_is_swept_including_untracked_files(scene):
+    """The manifest globs only **/*.md, so temp files, scripts, and caches
+    inside a directory are invisible to the scan. When the directory itself
+    is gone from WSL, everything under the target copy is orphaned -- the
+    sweep removes it all, not just the globbed files."""
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    roots.write(roots.repo, "agents/gone/a.md", "a\n")
+    roots.write(roots.repo, "agents/gone/temp.tmp", "scratch\n")
+    roots.write(roots.repo, "agents/gone/script.sh", "#!/bin/sh\n")
+    roots.write(roots.windows, "agents/gone/a.md", "a\n")
+    roots.write(roots.windows, "agents/gone/cache.pyc", "bytecode\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    plan = merge.plan_merge(doc, m, ["claude-agents:gone/a.md"])
+    action = plan.actions[0]
+    assert action.kind == "delete_tree"
+    assert action.target == roots.repo / "agents" / "gone"
+    assert action.cascade_target == roots.windows / "agents" / "gone"
+
+    backup_dir, applied = merge.apply_plan(plan, m,
+                                           backups_dir=roots.state / "backups")
+    assert applied == ["claude-agents:gone/a.md"]
+    assert not (roots.repo / "agents" / "gone").exists()
+    assert not (roots.windows / "agents" / "gone").exists()
+    assert (roots.repo / "agents" / "keep.md").exists()
+
+    merge.restore(backup_dir)
+    for root, rel in ((roots.repo, "agents/gone/temp.tmp"),
+                      (roots.repo, "agents/gone/script.sh"),
+                      (roots.repo, "agents/gone/a.md"),
+                      (roots.windows, "agents/gone/cache.pyc"),
+                      (roots.windows, "agents/gone/a.md")):
+        assert (root / rel).exists(), f"restore lost {rel}"
+    assert (roots.repo / "agents" / "gone" / "temp.tmp").read_text(
+        encoding="utf-8") == "scratch\n"
+
+
+def test_two_ids_in_one_orphaned_directory_plan_a_single_sweep(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    roots.write(roots.repo, "agents/gone/a.md", "a\n")
+    roots.write(roots.repo, "agents/gone/b.md", "b\n")
+    roots.write(roots.windows, "agents/gone/a.md", "a\n")
+    roots.write(roots.windows, "agents/gone/b.md", "b\n")
+    m = mf.load_manifest(manifest_path)
+    plan = merge.plan_merge(scan_now(manifest_path), m,
+                            ["claude-agents:gone/a.md",
+                             "claude-agents:gone/b.md"])
+    sweeps = [a for a in plan.actions if a.kind == "delete_tree"]
+    covered = [a for a in plan.actions if a.kind == "noop"]
+    assert len(sweeps) == 1
+    assert len(covered) == 1
+    assert "covered" in covered[0].description
+
+
+def test_a_deletion_under_an_additive_entry_applies_when_named(scene):
+    """portable_additive deletions classify additive_delete_requires_approval.
+    Naming the id IS the approval -- the plan turns it into a delete, where it
+    used to be skipped unconditionally."""
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_skill(roots, "keep/SKILL.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_skill(roots, "dead.md", repo="body\n", windows="body\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    item = next(i for i in doc["items"] if i["id"] == "claude-skills:dead.md")
+    assert item["classification"] == "additive_delete_requires_approval"
+
+    plan = merge.plan_merge(doc, m, ["claude-skills:dead.md"])
+    assert plan.actions[0].kind == "delete_file"
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert not (roots.repo / "skills" / "dead.md").exists()
+    assert not (roots.windows / "skills" / "dead.md").exists()
+
+
+def test_a_windows_only_file_is_deleted_from_windows_when_named(scene):
+    manifest_path, roots = scene
+    quiet(roots)
+    seed_tree(roots, "keep.md", wsl="k\n", repo="k\n", windows="k\n")
+    seed_tree(roots, "stray.md", windows="windows cruft\n")
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    item = next(i for i in doc["items"] if i["id"] == "claude-agents:stray.md")
+    assert item["classification"] == "windows_only"
+
+    plan = merge.plan_merge(doc, m, ["claude-agents:stray.md"])
+    action = plan.actions[0]
+    assert action.kind == "delete_file"
+    assert action.layer == "windows"
+    assert action.target == roots.windows / "agents" / "stray.md"
+    assert action.cascade_target is None
+
+    merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert not (roots.windows / "agents" / "stray.md").exists()
+
+
+def test_a_deleted_json_field_is_removed_not_written_as_null(scene):
+    """The latent field-shaped variant from the known-limitations doc: the
+    source file exists, the field does not. The old code wrote null into the
+    target; the fix removes the key."""
+    manifest_path, roots = scene
+    seed_text(roots, "a\n", "a\n", "a\n")
+    servers = {"gh": {"args": ["x"]}}
+    seed_json(roots,
+              {"model": "x"},
+              {"model": "x", "mcpServers": servers},
+              {"model": "x", "mcpServers": servers})
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    item = next(i for i in doc["items"] if i["id"] == "settings:mcpServers")
+    assert item["classification"] == "publish_to_repo"
+
+    plan = merge.plan_merge(doc, m, ["settings:mcpServers"])
+    assert plan.actions[0].kind == "delete_field"
+    backup_dir, _ = merge.apply_plan(plan, m,
+                                     backups_dir=roots.state / "backups")
+
+    for root in (roots.repo, roots.windows):
+        after = json.loads((root / "settings.json").read_text(encoding="utf-8"))
+        assert "mcpServers" not in after
+        assert after["model"] == "x"
+
+    merge.restore(backup_dir)
+    after = json.loads((roots.repo / "settings.json").read_text(encoding="utf-8"))
+    assert after["mcpServers"] == servers
+
+
+# --- plugin removal ----------------------------------------------------------
+
+def test_a_removed_plugin_is_dropped_from_the_record_when_named(scene):
+    import drift as drift_mod
+    manifest_path, roots = scene
+    seed_text(roots, "a\n", "a\n", "a\n")
+    seed_json(roots,
+              {"model": "x"},
+              {"model": "x",
+               "enabledPlugins": {"foo@bar": True, "keep@m": True}},
+              {"model": "x", "enabledPlugins": {"foo@bar": True}})
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+    assert drift_mod.validate_document(doc) == []
+
+    item = next(i for i in doc["items"] if i["id"] == "claude-plugins:foo@bar")
+    assert item["classification"] == "plugin_removed"
+
+    plan = merge.plan_merge(doc, m, ["claude-plugins:foo@bar"])
+    action = plan.actions[0]
+    assert action.kind == "remove_plugin_from_record"
+    assert action.command == ("claude", "plugin", "uninstall", "foo@bar")
+
+    backup_dir, applied = merge.apply_plan(plan, m,
+                                           backups_dir=roots.state / "backups")
+    assert applied == ["claude-plugins:foo@bar"]
+    record = json.loads((roots.repo / "settings.json").read_text(
+        encoding="utf-8"))
+    assert "foo@bar" not in record["enabledPlugins"]
+    assert record["enabledPlugins"]["keep@m"] is True
+    assert record["model"] == "x"
+    # The Windows native state is never touched -- the uninstall is proposed,
+    # not executed.
+    windows = json.loads((roots.windows / "settings.json").read_text(
+        encoding="utf-8"))
+    assert windows["enabledPlugins"] == {"foo@bar": True}
+
+    merge.restore(backup_dir)
+    record = json.loads((roots.repo / "settings.json").read_text(
+        encoding="utf-8"))
+    assert record["enabledPlugins"]["foo@bar"] is True
+
+
+def test_a_windows_only_plugin_proposes_uninstall_without_a_record_edit(scene):
+    manifest_path, roots = scene
+    seed_text(roots, "a\n", "a\n", "a\n")
+    seed_json(roots,
+              {"model": "x"},
+              {"model": "x"},
+              {"model": "x", "enabledPlugins": {"loner@m": True}})
+    m = mf.load_manifest(manifest_path)
+    doc = scan_now(manifest_path)
+
+    item = next(i for i in doc["items"] if i["id"] == "claude-plugins:loner@m")
+    assert item["classification"] == "plugin_removed"
+
+    plan = merge.plan_merge(doc, m, ["claude-plugins:loner@m"])
+    action = plan.actions[0]
+    assert action.command == ("claude", "plugin", "uninstall", "loner@m")
+
+    before = (roots.repo / "settings.json").read_text(encoding="utf-8")
+    _, applied = merge.apply_plan(plan, m, backups_dir=roots.state / "backups")
+    assert applied == []
+    assert (roots.repo / "settings.json").read_text(
+        encoding="utf-8") == before
 
 
 # --- toml entries (fix wave, C2) -------------------------------------------

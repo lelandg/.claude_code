@@ -16,8 +16,9 @@ import extract as ex
 ACTIONABLE = frozenset({
     "publish_to_repo", "reconcile_windows", "conflict", "wsl_only",
     "windows_only", "additive_delete_requires_approval",
-    "plugin_missing", "plugin_enabled_differs", "plugin_version_differs",
-    "plugin_pin_violation", "plugin_incompatible", "error",
+    "plugin_missing", "plugin_removed", "plugin_enabled_differs",
+    "plugin_version_differs", "plugin_pin_violation", "plugin_incompatible",
+    "error",
 })
 
 
@@ -87,8 +88,9 @@ def classify(wsl: str | None, repo: str | None, windows: str | None,
         if wsl is None:
             if policy == "portable_additive":
                 return ("additive_delete_requires_approval", "review",
-                        "Removed in WSL. This item is portable-additive, so the "
-                        "deletion is never applied without explicit approval.")
+                        "Removed in WSL. This item is portable-additive, so "
+                        "the deletion is applied only when you approve this "
+                        "id explicitly.")
             return ("publish_to_repo", "review",
                     "Removed in WSL. Publishing records the deletion in the "
                     "baseline; review it as a deletion, not an update.")
@@ -115,7 +117,8 @@ def classify(wsl: str | None, repo: str | None, windows: str | None,
                     "Present in WSL only; a new portable item.")
         if windows:
             return ("windows_only", "review",
-                    "Present on Windows only; ownership is not declared.")
+                    "Present on Windows only; ownership is not declared. "
+                    "Approving this id deletes the Windows copy.")
         return ("unchanged", "info", "Absent everywhere.")
 
     # Removed from WSL.
@@ -123,7 +126,8 @@ def classify(wsl: str | None, repo: str | None, windows: str | None,
         if policy == "portable_additive":
             return ("additive_delete_requires_approval", "review",
                     "Removed in WSL. This item is portable-additive, so the "
-                    "deletion is never applied without explicit approval.")
+                    "deletion is applied only when you approve this id "
+                    "explicitly.")
         return ("publish_to_repo", "review",
                 "Removed in WSL. Publishing records the deletion in the "
                 "baseline; review it as a deletion, not an update.")

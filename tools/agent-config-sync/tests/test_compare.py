@@ -63,6 +63,17 @@ def test_windows_only_item_is_reported_as_windows_only():
     assert cmp.classify(None, None, A, AUTH, has_windows=True)[0] == "windows_only"
 
 
+def test_windows_only_detail_offers_the_deletion():
+    _, _, detail = cmp.classify(None, None, A, AUTH, has_windows=True)
+    assert "delete" in detail.lower()
+
+
+def test_additive_deletion_detail_names_explicit_approval():
+    _, _, detail = cmp.classify(None, A, A, ADD, has_windows=True)
+    assert "approv" in detail.lower()
+    assert "never applied" not in detail
+
+
 def test_no_baseline_with_agreeing_layers_captures_the_baseline():
     kind, _, detail = cmp.classify(A, None, A, AUTH, has_windows=True)
     assert kind == "publish_to_repo"

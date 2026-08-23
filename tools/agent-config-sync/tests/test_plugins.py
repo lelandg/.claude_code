@@ -112,8 +112,8 @@ def state(key=KEY, enabled=True, version=None) -> dict[str, pl.PluginState]:
     return {key: pl.PluginState(key=key, enabled=enabled, version=version)}
 
 
-def test_desired_plugin_absent_from_a_native_manager_is_missing():
-    items = pl.classify_plugins(state(), {}, {}, {})
+def test_desired_plugin_present_on_wsl_but_not_windows_is_missing():
+    items = pl.classify_plugins(state(), state(version="6.2.0"), {}, {})
     kinds = {(i.classification, i.severity) for i in items}
     assert ("plugin_missing", "review") in kinds
     assert all(i.kind == "plugin" for i in items)
@@ -123,6 +123,44 @@ def test_native_plugin_not_in_the_record_is_extra_and_only_informational():
     items = pl.classify_plugins({}, state(), {}, {})
     assert [(i.classification, i.severity) for i in items] == [
         ("plugin_extra", "info")]
+
+
+# --- removal (WSL is the authority) -----------------------------------------
+
+def test_recorded_plugin_absent_from_wsl_is_removed_not_missing():
+    # In the record and on Windows, gone from WSL: the record is stale and
+    # Windows holds an orphan -- never an install proposal.
+    items = pl.classify_plugins(state(), {}, state(version="6.2.0"), {})
+    assert [(i.classification, i.severity) for i in items] == [
+        ("plugin_removed", "review")]
+    assert f"claude plugin uninstall {KEY}" in items[0].detail
+
+
+def test_recorded_plugin_absent_everywhere_is_removed_with_no_command():
+    items = pl.classify_plugins(state(), {}, {}, {})
+    assert [i.classification for i in items] == ["plugin_removed"]
+    assert "claude plugin" not in items[0].detail
+
+
+def test_windows_only_plugin_not_in_the_record_proposes_uninstall():
+    items = pl.classify_plugins({}, {}, state(version="6.2.0"), {})
+    assert [(i.classification, i.severity) for i in items] == [
+        ("plugin_removed", "review")]
+    assert f"claude plugin uninstall {KEY}" in items[0].detail
+
+
+def test_a_removal_suppresses_enabled_and_version_noise_for_that_key():
+    items = pl.classify_plugins(state(enabled=True),
+                                {},
+                                state(enabled=False, version="6.2.0"),
+                                {KEY: "6.1.0"})
+    assert [i.classification for i in items] == ["plugin_removed"]
+
+
+def test_has_windows_false_recorded_plugin_absent_from_wsl_is_removed():
+    items = pl.classify_plugins(state(), {}, {}, {}, has_windows=False)
+    assert [i.classification for i in items] == ["plugin_removed"]
+    assert "claude plugin" not in items[0].detail
 
 
 def test_enabled_state_difference_is_reported_per_layer():
