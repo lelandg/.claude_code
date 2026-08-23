@@ -43,6 +43,9 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── repo-doctor.md            # /repo-doctor slash command
 │       ├── update-hermes.md          # /update-hermes slash command
 │       └── yt-transcript.md          # /yt-transcript slash command
+├── agents/                            # Mirrors ~/.agents — cross-CLI skills record
+│   └── skills/
+│       └── rag-blueprint/             # NVIDIA RAG Blueprint skill (Apache-2.0, upstream copy)
 ├── config/
 │   └── agents/
 │       └── AGENTS.md                  # Shared house rules for EVERY AI coding CLI
@@ -56,16 +59,12 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   ├── mcp.json                       # MCP server configurations
 │   ├── agentic_prompt_template.md     # Template for agentic workflows
 │   ├── statusline-command.sh          # Custom status line script
+│   ├── commands/                      # Repo record of ~/.claude/commands (agent-config-sync)
 │   ├── agents/                        # Custom agent definitions
 │   │   ├── README.md                  # Agent documentation
 │   │   ├── CLAUDE.md                  # Agent-specific instructions
 │   │   ├── Claude-Code-Agents-Documentation.md  # Full agent architecture reference
 │   │   ├── code-reviewer.md           # Code review agent (Opus)
-│   │   ├── documentation-specialist.md# Documentation agent (Sonnet)
-│   │   ├── performance-optimizer.md   # Performance analysis agent (Opus)
-│   │   ├── research-assistant.md      # Research agent (Sonnet)
-│   │   ├── software-engineer.md       # Coding agent (Opus)
-│   │   ├── test-generator.md          # Test generation agent (Sonnet)
 │   │   └── specs/
 │   │       └── CLAUDE_CodeMap.md      # CodeMap spec (copy for agent access)
 │   ├── instructions/                  # On-demand reference docs
@@ -101,6 +100,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── disk-doctor/               # Disk cleanup + install hygiene (safe-trash, undo)
 │       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
 │       ├── feature-documenter/        # Feature documentation skill
+│       ├── github-stacked-prs/        # Split a big feature into a chain of dependent PRs (gh-stack)
 │       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
 │       ├── html-doc/                  # Standalone HTML deliverables (reports, explainers)
 │       ├── imageai-cli/               # Drive the ImageAI CLI (images/video/layouts, any provider)

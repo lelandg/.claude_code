@@ -1,10 +1,101 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "env": {
-    "ENABLE_TOOL_SEARCH": "true",
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_CODE_FORK_SUBAGENT": "1"
+  "agentPushNotifEnabled": true,
+  "alwaysThinkingEnabled": true,
+  "awaySummaryEnabled": false,
+  "effortLevel": "high",
+  "enabledPlugins": {
+    "adobe-for-creativity@claude-plugins-official": true,
+    "agent-sdk-dev@claude-plugins-official": false,
+    "aws-agents@claude-plugins-official": false,
+    "aws-amplify@claude-plugins-official": true,
+    "aws-core@claude-plugins-official": false,
+    "blueprint@owainlewis-blueprint": false,
+    "canva@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "cli-anything@cli-anything": true,
+    "code-review@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "codex@openai-codex": true,
+    "commit-commands@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
+    "databases-on-aws@claude-plugins-official": false,
+    "discord@claude-plugins-official": true,
+    "explanatory-output-style@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": true,
+    "hookify@claude-plugins-official": true,
+    "learning-output-style@claude-plugins-official": false,
+    "mcp-server-dev@claude-plugins-official": true,
+    "mintlify@claude-plugins-official": true,
+    "obsidian-cli@obsidian-cli-skill": true,
+    "playground@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "plugin-dev@claude-plugins-official": false,
+    "pyright-lsp@claude-plugins-official": true,
+    "ralph-loop@claude-plugins-official": true,
+    "remember@claude-plugins-official": true,
+    "session-report@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
   },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_FORK_SUBAGENT": "1",
+    "ENABLE_TOOL_SEARCH": "true"
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "repo": "anthropics/claude-plugins-official",
+        "source": "github"
+      }
+    },
+    "cli-anything": {
+      "source": {
+        "repo": "HKUDS/CLI-Anything",
+        "source": "github"
+      }
+    },
+    "obsidian-cli-skill": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/pablo-mano/Obsidian-CLI-skill.git"
+      }
+    },
+    "openai-codex": {
+      "source": {
+        "repo": "openai/codex-plugin-cc",
+        "source": "github"
+      }
+    },
+    "owainlewis-blueprint": {
+      "source": {
+        "repo": "owainlewis/blueprint",
+        "source": "github"
+      }
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python3 ~/.claude/tools/config-secrets-guard.py",
+            "statusMessage": "Checking for secret-bearing config access",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Read"
+      }
+    ]
+  },
+  "inputNeededNotifEnabled": true,
+  "installMethod": "native",
   "permissions": {
     "allow": [
       "GitDiff",
@@ -89,116 +180,17 @@
       "Bash(aws logs tail:*)",
       "Bash(aws s3 ls:*)"
     ],
-    "deny": [],
     "ask": [],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "acceptEdits",
+    "deny": []
   },
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline-command.sh"
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/tools/config-secrets-guard.py",
-            "timeout": 10,
-            "statusMessage": "Checking for secret-bearing config access"
-          }
-        ]
-      }
-    ]
-  },
-  "enabledPlugins": {
-    "context7@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true,
-    "code-review@claude-plugins-official": true,
-    "security-guidance@claude-plugins-official": true,
-    "agent-sdk-dev@claude-plugins-official": false,
-    "explanatory-output-style@claude-plugins-official": false,
-    "playwright@claude-plugins-official": true,
-    "plugin-dev@claude-plugins-official": false,
-    "learning-output-style@claude-plugins-official": false,
-    "clangd-lsp@claude-plugins-official": true,
-    "csharp-lsp@claude-plugins-official": true,
-    "pyright-lsp@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true,
-    "example-skills@anthropic-agent-skills": true,
-    "github@claude-plugins-official": true,
-    "serena@claude-plugins-official": false,
-    "commit-commands@claude-plugins-official": true,
-    "ralph-loop@claude-plugins-official": true,
-    "huggingface-skills@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": true,
-    "gitlab@claude-plugins-official": false,
-    "playground@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true,
-    "blueprint@owainlewis-blueprint": false,
-    "codex@openai-codex": true,
-    "claude-code-setup@claude-plugins-official": true,
-    "cli-anything@cli-anything": true,
-    "remember@claude-plugins-official": true,
-    "atomic-agents@claude-plugins-official": true,
-    "mintlify@claude-plugins-official": true,
-    "session-report@claude-plugins-official": true,
-    "discord@claude-plugins-official": true,
-    "mcp-server-dev@claude-plugins-official": true,
-    "databases-on-aws@claude-plugins-official": false,
-    "aws-amplify@claude-plugins-official": true,
-    "aws-dev-toolkit@claude-plugins-official": true,
-    "adobe-for-creativity@claude-plugins-official": true,
-    "aws-core@claude-plugins-official": false,
-    "aws-agents@claude-plugins-official": false,
-    "obsidian-cli@obsidian-cli-skill": true,
-    "hookify@claude-plugins-official": true,
-    "canva@claude-plugins-official": true
-  },
-  "extraKnownMarketplaces": {
-    "owainlewis-blueprint": {
-      "source": {
-        "source": "github",
-        "repo": "owainlewis/blueprint"
-      }
-    },
-    "openai-codex": {
-      "source": {
-        "source": "github",
-        "repo": "openai/codex-plugin-cc"
-      }
-    },
-    "cli-anything": {
-      "source": {
-        "source": "github",
-        "repo": "HKUDS/CLI-Anything"
-      }
-    },
-    "claude-plugins-official": {
-      "source": {
-        "source": "github",
-        "repo": "anthropics/claude-plugins-official"
-      }
-    },
-    "obsidian-cli-skill": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/pablo-mano/Obsidian-CLI-skill.git"
-      }
-    }
-  },
-  "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
-  "tui": "default",
   "preferredNotifChannel": "terminal_bell",
+  "statusLine": {
+    "command": "bash ~/.claude/statusline-command.sh",
+    "type": "command"
+  },
   "teammateMode": "in-process",
-  "installMethod": "native",
-  "agentPushNotifEnabled": true,
-  "awaySummaryEnabled": false,
-  "inputNeededNotifEnabled": true,
+  "tui": "default",
   "verbose": true,
   "worktree": {
     "baseRef": "fresh"

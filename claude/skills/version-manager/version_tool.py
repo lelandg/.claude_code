@@ -54,7 +54,10 @@ def is_repo(repo: Path) -> bool:
 
 
 def is_dirty(repo: Path) -> bool:
-    return bool(git(repo, "status", "--porcelain").strip())
+    # untracked files inside a submodule are not this repo's dirt; a changed
+    # submodule pointer or modified content still counts
+    return bool(git(repo, "status", "--porcelain",
+                    "--ignore-submodules=untracked").strip())
 
 
 def existing_tags(repo: Path) -> set[str]:
