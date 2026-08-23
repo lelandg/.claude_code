@@ -79,8 +79,9 @@ Customize this section for your own infra tooling. Non-negotiables:
 ## Dates & time
 
 Determine the **real** current date/time before writing any date — from your
-environment's date context or `date '+%Y-%m-%d %H:%M'`; never guess, never use
-placeholder times. Timestamps: `YYYY-MM-DD HH:MM`.
+environment's date context, `date '+%Y-%m-%d %H:%M'` (WSL/Linux), or
+`Get-Date -Format 'yyyy-MM-dd HH:mm'` (Windows PowerShell); never guess, never
+use placeholder times. Timestamps: `YYYY-MM-DD HH:MM`.
 
 ---
 
@@ -121,9 +122,12 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
 - Code reviews are structured: verify against the actual code, read files
   before claiming problems, check for existing handling, and separate real
   from hypothetical issues.
-- Typecheck/lint before every commit; never commit on a broken build. In
-  multi-task plans, run the full build once per group and before declaring the
-  feature done or opening a PR — not per task.
+- Typecheck/lint before every commit; never commit on a known-broken build.
+  In multi-task / subagent plans, each task's gate is scoped lint (touched
+  files) + project typecheck + that task's tests — never the full build. The
+  full build runs exactly once, in the branch-finish pass (build → fix →
+  final review → version bump → push/PR). Solo small changes still build
+  before any push to a deploying branch.
 - One PR per finished **whole feature**, not per sub-project or phase. Commit
   along the way; open the PR when the feature is complete. Commit/push/PR only
   when asked; on the default branch, branch first (subject to rule 4 above).
@@ -159,6 +163,14 @@ data-migration work gets a Claude review **plus** an independent
 `/codex:adversarial-review`; reconcile disagreements explicitly. Keep the
 Codex stop-review gate **off**; invoke reviews at commit/PR boundaries.
 
+### Review BEFORE push — always
+
+Local/model code reviews run **before** `git push` and before opening a PR —
+never after, never in parallel with PR creation. Automated PR review fires on
+push, so a late local review duplicates it and its findings arrive after the
+commits are already published. Sequence: implement → tests green → commit →
+local review → reconcile/fix → version bump → push → PR.
+
 ### Sol is REVIEW-ONLY — CRITICAL (standing policy; lift it deliberately)
 
 `gpt-5.6-sol` has a record of destructive autonomous action elsewhere
@@ -192,6 +204,21 @@ explicitly asks.
 
 ## Output & prompt formatting
 
+- **Simplified Technical English (STE) — all output.** Write every word in
+  ASD-STE100 *style*: chat replies, docs, runbooks, commit bodies, PR and
+  issue text. Apply these mechanical rules:
+  - Use the active voice. Use the present tense where the meaning allows it.
+  - Write one instruction per sentence. Keep procedural sentences to 20 words
+    and descriptive sentences to 25 words.
+  - Do not use a gerund as a noun. Write "start the build", not "starting the
+    build".
+  - Use one term for one concept. Do not vary a word for style.
+  - Do not use idiom, metaphor, or slang.
+  - State the cause before the effect. Name the noun. Do not depend on "it",
+    "this", or "that" to carry the meaning.
+  - Keep the rationale. Put the reason in its own sentence after the rule.
+  - Do not claim ASD-STE100 conformance. The approved-word dictionary is a paid
+    ASD specification, and you cannot check your text against it.
 - **Input to a model:** delimit sections with XML-style tags (`<context>`,
   `<instructions>`, `<example>`).
 - **Chat/report output:** Markdown, never HTML in a terminal. Structured data →
@@ -206,6 +233,10 @@ explicitly asks.
 
 - **Never use `cd`** — absolute paths always (`git -C /abs/path …`). Details:
   `~/.claude/instructions/file-operations.md`.
+- **Two runtimes can share this file.** If you work from both WSL and native
+  Windows: WSL agents use `python3` + a Linux venv (e.g. `.venv_linux`);
+  native Windows agents use `python` + `.venv`. A command written here as
+  `python3 ...` runs as `python ...` on Windows.
 - Prefer even-numbered minor versions of open-source software (Python 3.12,
   Node LTS); if a dependency forces an odd version, say so.
 - IDEs, Python/.NET/Node details, debugging targets, screenshots:

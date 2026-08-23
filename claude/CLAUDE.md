@@ -10,7 +10,8 @@ implement those rules here.
 ## Dates
 
 The real current date is in the `<env>` block ("Today's date", `YYYY-MM-DD`).
-Read it there before writing any date; otherwise run `date '+%Y-%m-%d %H:%M'`.
+Read it there before writing any date; otherwise run `date '+%Y-%m-%d %H:%M'`
+(WSL) or `Get-Date -Format 'yyyy-MM-dd HH:mm'` (Windows).
 
 ## Skills & agents to use (mechanisms for the shared rules)
 
@@ -48,9 +49,11 @@ The shared rules' "Model delegation & cross-provider review" section is
 implemented here by the `codex` plugin (full guide:
 `~/.claude/instructions/model-delegation.md`):
 
-- `/codex:review [--base <ref>]` and `/codex:adversarial-review [focus ...]` —
+- `/codex:review [--base <ref>]` —
   read-only reviews; they inherit Sol from `~/.codex/config.toml` (the only
   place Sol is allowed). Commit everything first.
+- `/codex:adversarial-review [focus ...]` — restricted to the user. When the
+  user asks you to, tell them how to run it for the task at hand.
 - `/codex:rescue --model gpt-5.6-terra|gpt-5.6-luna --effort <e> [--background] <task>`
   — **`--model` is mandatory** (unpinned would inherit Sol, which is
   review-only). Plugin caps effort at `xhigh` (`max` exists in the CLI/API but

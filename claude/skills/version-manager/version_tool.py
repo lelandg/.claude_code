@@ -114,6 +114,10 @@ PATTERNS: dict[str, re.Pattern[str]] = {
         r"(?P<pre>\A[ \t]*)(?P<v>\d+\.\d+\.\d+)(?P<post>[ \t]*(?:\r?\n|\Z))"),
     "readme": re.compile(
         r"(?P<pre>\*\*Version\s+)(?P<v>\d+\.\d+\.\d+)(?P<post>\*\*)"),
+    # .NET SDK-style project: <Version> is canonical; write_version also syncs
+    # the 4-part <AssemblyVersion>/<FileVersion> siblings when present.
+    "csproj": re.compile(
+        r"(?P<pre><Version>\s*)(?P<v>\d+\.\d+\.\d+)(?P<post>\s*</Version>)"),
     # Claude Code plugin marketplace: the repo version lives on the single
     # plugin entry, NOT metadata.version (the catalog's own series). First
     # "version" key after the plugins array opens is plugins[0]'s — detect()
@@ -147,7 +151,8 @@ def _pointer_target(text: str) -> str | None:
 # QuickStock release.
 SKIP_DIRS = {".git", ".venv", ".venv_linux", "node_modules", "__pycache__",
              "dist", "build", ".next", "venv", "site-packages",
-             "generated", "vendor", ".prisma", "out", "coverage", "target"}
+             "generated", "vendor", ".prisma", "out", "coverage", "target",
+             "obj", "bin"}
 
 MAX_DEPTH = 3   # project version files live near the root; deeper is vendored
 
@@ -204,6 +209,9 @@ def _candidate_files(repo: Path) -> list[tuple[Path, str]]:
             if name in MODULE_FILES:
                 out.append((rel_root / name if rel_root.parts else Path(name),
                             "py_const"))
+            elif name.endswith(".csproj"):
+                out.append((rel_root / name if rel_root.parts else Path(name),
+                            "csproj"))
     return out
 
 
@@ -272,6 +280,7 @@ def detect(repo: Path) -> tuple[Location | None, list[Location], list[str]]:
         if loc.mirror_only:
             return 90
         return {"pyproject": 10, "package_json": 11, "marketplace": 12,
+                "csproj": 13,
                 "py_const": 20, "version_file": 30}.get(loc.kind, 50)
 
     real = [loc for loc in found if not loc.mirror_only]
@@ -293,6 +302,12 @@ def write_version(repo: Path, loc: Location, new: str) -> None:
         raise GitError(f"no version pattern in {loc.path}")
     updated = pattern.sub(lambda m: m.group("pre") + new + m.group("post"),
                           text, count=1)
+    if loc.kind == "csproj":
+        # Keep the 4-part assembly metadata in step with <Version>.
+        for tag in ("AssemblyVersion", "FileVersion"):
+            updated = re.sub(
+                rf"(<{tag}>\s*)\d+\.\d+\.\d+(?:\.\d+)?(\s*</{tag}>)",
+                rf"\g<1>{new}.0\g<2>", updated, count=1)
     (repo / loc.path).write_text(updated, encoding="utf-8")
 
 
@@ -324,7 +339,7 @@ def _history_paths(repo: Path, canonical: Location | None) -> list[Path]:
         if not line:
             continue
         p = Path(line)
-        if (p.name in names
+        if ((p.name in names or p.suffix == ".csproj")
                 and not any(d in p.parts for d in SKIP_DIRS)
                 and len(p.parts) <= MAX_DEPTH):
             paths.append(p)
@@ -340,6 +355,8 @@ def _kind_for(path: Path) -> str:
         return "package_json"
     if path.name == "VERSION":
         return "version_file"
+    if path.suffix == ".csproj":
+        return "csproj"
     return "py_const"
 
 
