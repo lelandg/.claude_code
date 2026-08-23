@@ -76,6 +76,17 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.5.1] - 2026-08-23
+
+### Added
+- House rules (`config/agents/AGENTS.md`): the Simplified Technical English output rules, the review-BEFORE-push sequence, and a two-runtimes note for WSL + native Windows setups.
+- version-manager: `.csproj` support. The tool reads `<Version>` as canonical, keeps `<AssemblyVersion>`/`<FileVersion>` in step, and skips `obj/`/`bin/` during scans.
+- feature-team command: Verification tiers per task and a Finishing phase that owns the full build, the final review, and the version bump.
+
+### Changed
+- House rules: the multi-task build gate is now precise — scoped lint + project typecheck + task tests per task; the full build runs once, in the branch-finish pass.
+- `claude/CLAUDE.md`: `/codex:adversarial-review` is restricted to the user; date commands now cover Windows PowerShell.
+
 ## [0.5.0] - 2026-08-23
 
 ### Added
