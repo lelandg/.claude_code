@@ -76,6 +76,25 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.5.0] - 2026-08-23
+
+### Added
+- agent-config-sync: a `plugin_removed` classification. The scanner now reports a plugin that WSL removed as its own item class, in the schema, the report, and the merge plan.
+- agent-config-sync: PowerShell renderer tests (`test_render_ps1.py`). Windows-side plugin actions render as a reviewable `.ps1` script.
+- New repo records synced from the live machine: `claude/commands/` (six slash-command pointers), the `github-stacked-prs` skill, and `agents/skills/rag-blueprint/` (NVIDIA's Apache-2.0 RAG Blueprint skill, upstream copy).
+
+### Changed
+- agent-config-sync: the house-rules family (AGENTS.md, CLAUDE.md, instructions, per-CLI mirrors) now keeps its faithful baseline under the gitignored `baseline/` directory. The public tree keeps only sanitized copies, owned by `/publish-claude-config`. This ends the permanent-conflict noise on every scan.
+- agent-config-sync: ephemeral tool caches (pytest, Copilot session state, Codex visualizations) and the three-platform `yt-transcript` copies are excluded from scans.
+- `claude/settings.json` example refreshed from the live config: current plugin roster after 13 approved removals, the config-secrets-guard hook, canonical key order. The machine-personal `model` key stays out of the public example.
+- version-manager: the dirty-repo check ignores untracked files inside submodules.
+
+### Fixed
+- agent-config-sync: the Windows `.ps1` script emitted `claude plugin enable` for both directions of an enabled mismatch. The record's desired state now decides the verb, so a plugin the record wants disabled gets `claude plugin disable`.
+
+### Removed
+- Five retired agents: `documentation-specialist`, `performance-optimizer`, `research-assistant`, `software-engineer`, `test-generator`. The README trees now match the current roster.
+
 ## [0.4.1] - 2026-08-11
 
 - **The config merge tool could not apply most of what it reported.** `merge.py` resolved a *tree* item — anything under `claude/agents/`, `claude/skills/`, `claude/instructions/`, and the other directory-shaped entries — to the directory that holds the file instead of the file itself. The dry run named the directory, so an approval covered a path that would never be written, and the apply then crashed on it. 128 of the 340 items a scan finds here are tree items, so this was most of the tool's real work. Tree items now resolve to the file the item id names, and the plan carries the source path it will read, so the dry run and the apply can no longer disagree.
