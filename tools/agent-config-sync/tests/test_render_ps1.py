@@ -29,7 +29,7 @@ def doc_with(items: list[dict], repo: str = "/repo") -> dict:
         "scanner_version": "1.0.0",
         "manifest_version": 1,
         "roots": {"wsl": "/home/leland", "repo": repo,
-                  "windows": "/mnt/c/Users/aboog"},
+                  "windows": "/mnt/c/Users/winuser"},
         "layer_fingerprints": {"wsl": "a" * 64, "repo": "b" * 64,
                                "windows": "c" * 64},
         "counts": {},
@@ -96,6 +96,22 @@ class TestWindowsScript:
         assert ("claude plugin uninstall hookify@claude-plugins-official"
                 in script)
         assert "ghost" not in script
+
+    def test_enable_mismatch_follows_the_record_direction(self):
+        # Record wants the plugin DISABLED, Windows has it enabled: the
+        # script must disable, not re-assert the drift with an enable.
+        item = plugin_item(
+            "plugin_enabled_differs",
+            "claude-plugins:mintlify@claude-plugins-official#enabled:windows",
+            "mintlify@claude-plugins-official",
+            "Record says enabled=False, windows says enabled=True. "
+            "Reconcile with: claude plugin disable "
+            "mintlify@claude-plugins-official")
+        script = rd.windows_script(doc_with([item]))
+        assert script is not None
+        assert ("claude plugin disable mintlify@claude-plugins-official"
+                in script)
+        assert "claude plugin enable" not in script
 
     def test_selects_only_windows_side_actions(self):
         script = rd.windows_script(doc_with(WINDOWS_ACTIONS + SKIPPED_ACTIONS))

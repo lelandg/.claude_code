@@ -302,14 +302,11 @@ And in `CLAUDE.md`: the skill triggers, if you install a different skill set.
 ## Key Features
 
 ### Agents
-Six specialized agents for different tasks. Each has a focused system prompt, specified model (Opus for complex tasks, Sonnet for simpler ones), and tool access:
+One specialized agent ships today, with a focused system prompt, a specified model, and scoped tool access:
 
 - **Code Reviewer** - Thorough code review with verification-before-claims approach
-- **Software Engineer** - Full implementation capability with quality standards
-- **Performance Optimizer** - Algorithmic analysis, database optimization, caching strategies
-- **Test Generator** - Multi-framework test suite generation
-- **Documentation Specialist** - User and developer documentation
-- **Research Assistant** - Technology comparison and best practices research
+
+Earlier revisions carried five more agents (software-engineer, performance-optimizer, test-generator, documentation-specialist, research-assistant). They retired in August 2026 — built-in Claude Code capabilities and the skills below cover their jobs — and their definitions remain in git history.
 
 ### Skills
 Custom skills extend Claude Code with repeatable workflows:

@@ -121,11 +121,12 @@ def windows_script(doc: dict) -> str | None:
     run, CRLF-terminated, or None when the run proposes none.
 
     Selection mirrors the actions the report asks Leland to run by hand on
-    the Windows machine: installs missing there, enables recorded-enabled
-    plugins disabled there, updates where Windows holds the older build,
-    and uninstalls where the plugin is gone from WSL (the authority) but
-    still installed on Windows. WSL-side enable mismatches are record
-    maintenance, not Windows work, so they are excluded."""
+    the Windows machine: installs missing there, applies the record's
+    enabled state where Windows disagrees (either direction), updates
+    where Windows holds the older build, and uninstalls where the plugin
+    is gone from WSL (the authority) but still installed on Windows.
+    WSL-side enable mismatches are record maintenance, not Windows work,
+    so they are excluded."""
     commands: list[str] = []
     for item in doc.get("items", []):
         classification = item.get("classification")
@@ -136,7 +137,10 @@ def windows_script(doc: dict) -> str | None:
             commands.append(f"claude plugin install {item['path']}")
         elif (classification == "plugin_enabled_differs"
                 and item_id.endswith("#enabled:windows")):
-            commands.append(f"claude plugin enable {item['path']}")
+            # The record decides the direction; the detail's proposed
+            # command already carries the right verb.
+            verb = "disable" if "claude plugin disable" in detail else "enable"
+            commands.append(f"claude plugin {verb} {item['path']}")
         elif (classification == "plugin_version_differs"
                 and "upgrade windows with:" in detail):
             commands.append(f"claude plugin update {item['path']}")
