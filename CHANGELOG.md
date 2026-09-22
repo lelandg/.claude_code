@@ -76,6 +76,21 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.6.0] - 2026-09-22
+
+### Added
+- `claude/instructions/pr-review-automation.md`: the GitHub App PR review and autofix inspection procedure, referenced from the house rules.
+- House rules: site UI verification for every site, an `AI-Model` attribution trailer for commits and PRs, "a local pass is not deployment", and a missing-script lookup rule across Windows and WSL.
+- `github-issues.md`: generic opt-out marker and `skip-auto-fix` conventions for automated investigation and review pipelines.
+- `environment.md`: checkout-scoped `safe.directory` override for Windows dubious-ownership errors.
+
+### Changed
+- Model selection: `gpt-6-astra` at `high` is the standing Codex default, preferred over Terra for every task including reviews, and allowed on the write-capable rescue path on a committed tree. `model-delegation.md` is rewritten and gains the Codex auth-expiry procedure.
+- The PR-review rule replaces the mandatory local review gate when the Claude Code GitHub App is installed on the repo.
+- The Sol review-only rule moves from the shared `AGENTS.md` to `CLAUDE.md`, because it governs how Claude Code invokes the codex plugin.
+- The hookify Codex guard now blocks Sol and the bare `gpt-5.6` alias on the rescue and exec paths instead of requiring a Terra or Luna pin. Its test harness locates the installed plugin directory and covers ten cases.
+- agent-config-sync: the manifest excludes Codex worktrees and the claude.ai synced-skills bundle, which removed 1735 spurious drift items and a 30-minute scan. The operator guide and report skill no longer describe a stale-lock case that cannot occur.
+
 ## [0.5.1] - 2026-08-23
 
 ### Added
