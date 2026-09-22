@@ -28,6 +28,21 @@ the mechanics.
 | `needs-info` | `#FF6F00` | Awaiting clarification from reporter |
 | `test` | `#77FFAC` | Ready for testing |
 
-If you run an automated issue-investigation pipeline on your repos, add its
-opt-out marker/label conventions here so assistant-created issues don't
-trigger redundant investigations.
+| `no-agent` | `#6E7781` | Automated investigator skips this issue |
+| `agent-investigated` | `#5319E7` | Set by the investigator when it posts a proposal — don't create manually |
+
+## Automated investigation — opt-out marker
+
+If an auto-investigation pipeline watches your repos, an issue *you* create
+from a dev machine (gh CLI / API) should carry its opt-out marker in the body
+by default (for example `[skip-agent]`), because the work is already happening
+where you are. Omit the marker only when the user wants the pipeline to
+investigate. The manual equivalent is the `no-agent` label.
+
+## Automated PR review — keep the review, skip the auto-fix
+
+If the same pipeline reviews PRs and can open draft auto-fix PRs: when *you*
+open a PR and will apply the review findings yourself, put `skip-auto-fix` on
+its own line in the PR body. The review comment still arrives; wait for it,
+then apply it. Only the auto-fix seam is silenced. Manual equivalent: a
+`skip-autofix` label.

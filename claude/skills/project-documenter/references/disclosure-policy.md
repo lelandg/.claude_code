@@ -39,6 +39,9 @@ reviewer** apply this policy. The reviewer is the gate of record.
 
 **Business & strategy**
 - Pricing **formulas**, cost structure, margins, vendor/wholesale costs
+- Dollar prices, plan amounts, and discount percentages. Prices live in the billing
+  system and a generated doc drifts the day a price changes. Name the plans,
+  describe what each includes, and link to the live pricing page for numbers.
 - Proprietary algorithms, model prompts, ranking/scoring logic, trade-secret methods
 - Internal roadmap, unreleased or feature-flagged capabilities not yet public
 - Revenue figures, customer counts, internal metrics

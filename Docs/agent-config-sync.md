@@ -149,7 +149,7 @@ different meaning — each of these five states is distinct:
 ├── reports/             # one timestamped report per run, retained
 ├── backups/             # one directory per applied merge, keyed by run id
 │                        # (empty until Task 11 ships merge.py -- not a bug)
-├── scan.lock            # held only while a scan is in progress
+├── scan.lock            # flock target; the file persists, the lock does not
 └── wrapper.log           # a few UTC-timestamped lines per wrapper run
 ```
 
@@ -290,7 +290,7 @@ distinct causes and their two distinct fixes.
 | Symptom | Cause | Fix |
 |---|---|---|
 | exit `20` every run | manifest path wrong for this machine | fix `config/agent-sync.toml` roots |
-| exit `21` every run | a stale lock from a killed run | `rm ~/.local/state/agent-config-sync/scan.lock` |
+| exit `21` | another `scan.py` process is still running. The lock is an `flock` on the open handle, so the file alone never blocks a run and a killed run leaves nothing to clear | `pgrep -af agent-config-sync/scan.py`; wait for it, or stop that process |
 | exit `30` every run | `ACS_CLAUDE` is not the real executable | `command -v claude`, then set `ACS_CLAUDE` |
 | huge `errors` list | a declared path does not exist on this machine | remove or correct that `[[entries]]` block |
 | exit `10` every run on this machine | expected — real drift exists here (180 items on 2026-08-20) | not a bug; review `latest-report.md` and apply what you approve with `merge.py` |

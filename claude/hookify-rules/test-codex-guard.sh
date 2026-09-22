@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Test the block-unpinned-codex-rescue hookify rule end-to-end.
+# Policy since 2026-09-22: block Sol / bare gpt-5.6 on write paths; Astra default allowed.
 # Run from any project whose .claude/ contains (or symlinks) the rule:
 #   bash ~/.claude/hookify-rules/test-codex-guard.sh
 # Exit code 0 = all cases behaved as expected.
 
 set -u
-HOOK_ROOT="$HOME/.claude/plugins/cache/claude-plugins-official/hookify/unknown"
+HOOK_ROOT="$(ls -d "$HOME"/.claude/plugins/cache/claude-plugins-official/hookify/*/ | tail -1)"
+HOOK_ROOT="${HOOK_ROOT%/}"
 
 if [ ! -f ".claude/hookify.block-unpinned-codex-rescue.local.md" ]; then
   echo "FAIL: no .claude/hookify.block-unpinned-codex-rescue.local.md in $(pwd)"
@@ -21,12 +23,14 @@ HOOK = os.environ['CLAUDE_PLUGIN_ROOT'] + '/hooks/pretooluse.py'
 
 # (label, command, expect_deny)
 CASES = [
-    ("unpinned rescue task",      'node "/x/codex-companion.mjs" task --background fix the bug', True),
+    ("unpinned rescue task (inherits Astra)", 'node "/x/codex-companion.mjs" task --background fix the bug', False),
     ("sol-pinned rescue task",    'node "/x/codex-companion.mjs" task --model gpt-5.6-sol fix it', True),
     ("bare-alias rescue task",    'node "/x/codex-companion.mjs" task --model gpt-5.6 fix it',   True),
-    ("direct codex exec unpinned",'codex exec "investigate flaky test"',                          True),
+    ("bare-alias with equals",    'node "/x/codex-companion.mjs" task --model=gpt-5.6 fix it',   True),
+    ("direct codex exec sol",     'codex exec --model gpt-5.6-sol "investigate flaky test"',      True),
+    ("direct codex exec unpinned",'codex exec "investigate flaky test"',                          False),
+    ("astra-pinned rescue task",  'node "/x/codex-companion.mjs" task --model gpt-6-astra --effort high fix', False),
     ("terra-pinned rescue task",  'node "/x/codex-companion.mjs" task --model gpt-5.6-terra --effort high fix', False),
-    ("luna-pinned rescue task",   'node "/x/codex-companion.mjs" task --model gpt-5.6-luna cleanup', False),
     ("review (Sol allowed)",      'node "/x/codex-companion.mjs" review --base origin/main',      False),
     ("unrelated command",         'git status',                                                   False),
 ]

@@ -43,24 +43,45 @@ At startup, if `./CLAUDE.md` exists and there's no project-level
 When presenting non-visual options to me, use the `AskUserQuestion` tool. (Visual
 artifacts → HTML file, per the shared output rules.)
 
-## Codex delegation (GPT-5.6) — plugin mechanics
+## Codex delegation (GPT-6 Astra / GPT-5.6) — plugin mechanics
 
 The shared rules' "Model delegation & cross-provider review" section is
 implemented here by the `codex` plugin (full guide:
 `~/.claude/instructions/model-delegation.md`):
 
 - `/codex:review [--base <ref>]` —
-  read-only reviews; they inherit Sol from `~/.codex/config.toml` (the only
-  place Sol is allowed). Commit everything first.
+  read-only reviews; they inherit the `~/.codex/config.toml` default
+  (`gpt-6-astra` at `high`). Commit everything first.
 - `/codex:adversarial-review [focus ...]` — restricted to the user. When the
   user asks you to, tell them how to run it for the task at hand.
-- `/codex:rescue --model gpt-5.6-terra|gpt-5.6-luna --effort <e> [--background] <task>`
-  — **`--model` is mandatory** (unpinned would inherit Sol, which is
-  review-only). Plugin caps effort at `xhigh` (`max` exists in the CLI/API but
-  the plugin rejects it — workaround in the guide); multi-file jobs → `--background`.
+- `/codex:rescue --model gpt-6-astra --effort <e> [--background] <task>`
+  — pin `--model` explicitly; an unpinned call inherits the config default
+  (Astra, allowed). Prefer Astra over Terra; Terra only as a named fallback.
+  Never `gpt-5.6-sol` and never the bare `gpt-5.6` alias. Plugin caps effort
+  at `xhigh` (`max` exists in the CLI/API but the plugin rejects it —
+  workaround in the guide); multi-file jobs → `--background`. A clean
+  `git status` first, same as any writer.
 - `/codex:status` / `/codex:result` / `/codex:cancel` — background jobs;
   `/codex:setup` — health check. There is no `/codex:transfer`.
 - Leave the stop-review gate disabled (`/codex:setup` shows its state).
+
+### Sol is REVIEW-ONLY — CRITICAL (standing policy; lift it deliberately)
+
+(Lives here rather than in the shared AGENTS.md: the rule governs how Claude
+Code invokes the codex plugin, so it is a Claude mechanism.)
+
+`gpt-5.6-sol` has a record of destructive autonomous action elsewhere
+(deleted home dirs, intrusion into other systems in pursuit of a goal). So:
+
+- Sol runs **only** through read-only review commands
+  (`/codex:review`, `/codex:adversarial-review`) — never on `/codex:rescue`
+  or anything that can write.
+- **Commit everything first** — clean `git status` before any Sol run; review
+  the committed work (`--base <ref>` for branch review).
+- `~/.codex/config.toml` defaults to `gpt-6-astra`, so the review commands
+  run Astra and Sol is reachable only by editing that file. To run a Sol
+  review: set `model = "gpt-5.6-sol"`, run the review, set it back. Never
+  pass Sol to `/codex:rescue`. Never the bare `gpt-5.6` alias (= Sol).
 
 ## Custom skill triggers
 

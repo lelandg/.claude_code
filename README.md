@@ -73,15 +73,16 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── file-dispositions.md       # Standing approvals for working-tree files (template)
 │   │   ├── file-operations.md         # File operation guidelines
 │   │   ├── github-issues.md           # Issue workflow mechanics + label conventions
-│   │   ├── model-delegation.md        # Cross-provider routing: Claude + Codex/GPT-5.6
-│   │   │                              #   (ratings, effort ladder, Sol review-only lockdown)
+│   │   ├── model-delegation.md        # Cross-provider routing: Claude + Codex (GPT-6 Astra / GPT-5.6)
+│   │   │                              #   (ratings, effort ladder, Astra default, Sol review-only)
 │   │   ├── package-min-age.md         # 7-day min package age: per-manager config
 │   │   ├── plan-templates.md          # Implementation plan format
+│   │   ├── pr-review-automation.md    # GitHub App PR review + autofix inspection procedure
 │   │   └── runbook-standards.md       # Fully-specified runbooks (zero-inference steps)
 │   ├── hookify-rules/                 # Hookify guard rules (symlink into a project's .claude/)
-│   │   ├── hookify.block-unpinned-codex-rescue.local.md  # Blocks Codex rescue/exec without
-│   │   │                              #   an explicit --model pin (enforces the Sol lockdown)
-│   │   └── test-codex-guard.sh        # 8-case test harness for the rule
+│   │   ├── hookify.block-unpinned-codex-rescue.local.md  # Blocks Codex rescue/exec pinned to
+│   │   │                              #   Sol or the bare gpt-5.6 alias (Sol lockdown)
+│   │   └── test-codex-guard.sh        # 10-case test harness for the rule
 │   ├── tools/                         # Hook scripts wired in settings.json
 │   │   ├── config-secrets-guard.py    # PreToolUse hook: blocks printing config*.yaml / .env* secrets
 │   │   │                              #   (also speaks Codex hooks + Antigravity --agy protocols)
@@ -363,9 +364,10 @@ On-demand reference files that Claude Code reads only when needed (reduces conte
 - **credentials.md** - Platform-specific secret storage patterns
 - **file-operations.md** - Absolute path conventions and parallel search patterns
 - **plan-templates.md** - Implementation checklist format with status markers
+- **pr-review-automation.md** - Waiting for and inspecting the GitHub App review and autofix PRs
 
-### Cross-Provider Model Delegation (Claude + Codex/GPT-5.6)
-`instructions/model-delegation.md` is a full routing guide for pairing Claude with OpenAI's Codex through the official `openai-codex` Claude Code plugin: per-model routing scores (quota/intelligence/taste), a reasoning-effort ladder with quota impact, and the shipping loop — *write with Claude, audit with Codex, reconcile the findings*. It encodes a hard safety policy: **`gpt-5.6-sol` is review-only** (it inherits from `~/.codex/config.toml` on the un-pinnable review commands, which are read-only), so every `/codex:rescue` must pin `--model gpt-5.6-terra|luna` explicitly. `hookify-rules/hookify.block-unpinned-codex-rescue.local.md` enforces that mechanically — it denies any Bash invocation of the Codex rescue/exec path without an allowed model pin (symlink it into a project's `.claude/` to arm it; `test-codex-guard.sh` verifies all 8 allow/deny cases). The compact version of the policy lives in `AGENTS.md` § "Model delegation & cross-provider review".
+### Cross-Provider Model Delegation (Claude + Codex: GPT-6 Astra / GPT-5.6)
+`instructions/model-delegation.md` is a full routing guide for pairing Claude with OpenAI's Codex through the official `openai-codex` Claude Code plugin: per-model routing scores (quota/intelligence/taste), a reasoning-effort ladder with quota impact, and the shipping loop — *write with Claude, audit with Codex, reconcile the findings*. Since 2026-09-22 the standing default is **`gpt-6-astra` at `high`** (preferred over Terra for every task, including reviews), and Astra may run write-capable `/codex:rescue` jobs on a committed tree. It keeps a hard safety policy: **`gpt-5.6-sol` is review-only** and reachable only by editing `~/.codex/config.toml`; it never runs on the rescue path. `hookify-rules/hookify.block-unpinned-codex-rescue.local.md` enforces that mechanically — it denies any Bash invocation of the Codex rescue/exec path pinned to Sol or the bare `gpt-5.6` alias (symlink it into a project's `.claude/` to arm it; `test-codex-guard.sh` verifies all 10 allow/deny cases). The Sol rule itself lives in `CLAUDE.md` § "Codex delegation"; the compact routing rule is in `AGENTS.md` § "Model delegation & cross-provider review", and the auth-expiry procedure (prompt for `codex login`, wait for confirm or a reason to skip) is in the guide.
 
 ### Output Styles
 Three output styles for different contexts:

@@ -89,6 +89,12 @@ deny_path_globs = [
   "**/claude/skills/yt-transcript/**",
   "**/.claude/commands/yt-transcript.md",
   "**/claude/commands/yt-transcript.md",
+  # 2026-09-21: Codex worktrees are ephemeral and machine-local; they are not part of the
+  # portable record. The worktree directory is a sibling of the .codex root,
+  # so the glob must match the leading dot in the wsl/windows layers and the
+  # missing dot in the repo layer.
+  "**/.codex/worktrees/**",
+  "**/.claude/skills/synced/**",
 ]
 
 # ---------------------------------------------------------------------------

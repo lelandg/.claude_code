@@ -17,7 +17,9 @@ Operator guide: `Docs/agent-config-sync.md`
 
 A full scan takes about **146 seconds** (measured twice on this machine, both
 runs 140–150s). It is disk-bound, not stuck — do not kill it partway through
-and do not re-run it while waiting; a killed run leaves a stale lock behind.
+and do not re-run it while waiting; a second run exits `21` while the first
+holds the lock. The lock is released when the process ends, so a killed run
+leaves nothing to clean up, only wasted time.
 Tell Leland up front that this takes over two minutes before running it.
 
 On this machine (as of the 2026-08-20 scan), a scan reports **180 items**,

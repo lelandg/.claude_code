@@ -48,3 +48,9 @@ pin per-project with `.nvmrc` + `nvm use`.
 - Most recent: `ls -lt _screenshots/*.png | head -3 | awk '{print $9}'`.
 - "The screenshot" (singular) = the newest by timestamp; correlate with log
   timestamps when relevant.
+
+## Git on Windows
+
+- **Dubious-ownership errors** (repo owned by another user or reached through
+  a network path): use a checkout-scoped override, never a global one:
+  `git -c safe.directory='<abs path>' -C '<abs path>' status`.

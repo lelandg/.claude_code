@@ -115,7 +115,8 @@ your global house rules?"* Proceed only on yes.
    `references/tool-matrix.md`). Only create a symlink when the target is absent
    (guard with `[ -e ] || [ -L ]`); never clobber:
    - **Claude:** `~/.claude/CLAUDE.md` → line 1 `@/home/<user>/.config/agents/AGENTS.md`
-     + Claude-only extras. (Use the absolute path; `~` may not expand in imports.)
+     + Claude-only extras. (`@~/.config/agents/AGENTS.md` also works — confirmed on
+     Claude Code desktop for Windows. Absolute is still the safe default.)
    - **Codex:** `ln -s ~/.config/agents/AGENTS.md ~/.codex/AGENTS.md` (no import —
      it concatenates).
    - **Copilot:** `ln -s ~/.config/agents/AGENTS.md ~/.copilot/copilot-instructions.md`.
