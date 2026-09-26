@@ -18,9 +18,9 @@ These apply to **every** task. They are not repeated per task.
 - **Import convention:** modules in `tools/agent-config-sync/` import each other by bare module name (`import normalize`). Running `python3 tools/agent-config-sync/scan.py` puts that directory on `sys.path[0]`. Tests do `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` before importing — copy this from `claude/skills/version-manager/tests/test_version_tool.py`.
 - **Every module starts with `from __future__ import annotations`** and a module docstring naming the design section it implements.
 - **Never `cd`.** Absolute paths always; `git -C <abs-path> …` for git.
-- **Tests never read or write the live user profile.** Every test builds a fixture tree under pytest's `tmp_path`. A test that references `/home/leland`, `~`, `Path.home()`, or `/mnt/c/Users` outside of a *string literal being normalized* is a plan violation.
+- **Tests never read or write the live user profile.** Every test builds a fixture tree under pytest's `tmp_path`. A test that references `/home/user`, `~`, `Path.home()`, or `/mnt/c/Users` outside of a *string literal being normalized* is a plan violation.
 - **Secret boundary (design §Secret and state boundary):** the tools use allowlist extraction, never ingest-then-redact. No secret value may appear in a drift document, prompt, report, log line, test snapshot, exception message, or commit. Values that are excluded are represented by *path, type, and hash* only.
-- **Report-only by default.** Nothing in Tasks 1–10 may write to `/home/leland` or `/mnt/c/Users/aboog`. Only Task 11's merge tool writes to targets, and only with an explicit `--apply` flag plus selected item IDs.
+- **Report-only by default.** Nothing in Tasks 1–10 may write to `/home/user` or `/mnt/c/Users/aboog`. Only Task 11's merge tool writes to targets, and only with an explicit `--apply` flag plus selected item IDs.
 - **Atomic writes only.** Every output file is written to a temporary file in the same directory, `fsync`ed, then `os.replace`d into position.
 - **Exit codes (fixed contract, used by the cron wrapper):** `0` = success/no drift, `10` = drift reported, `20` = scan failure, `21` = lock held by another run, `30` = model/analysis failure. Never conflate ordinary drift with an infrastructure error.
 - **Versions:** `SCANNER_VERSION = "1.0.0"`, `DRIFT_SCHEMA_VERSION = 1`, `RESPONSE_SCHEMA_VERSION = 1`, `REPORT_TEMPLATE_VERSION = 1`, `MANIFEST_SCHEMA_VERSION = 1`. Bump only when the shape changes.
@@ -644,7 +644,7 @@ Create `config/agent-sync.toml`. Paths trace to design §Paths and the policy ta
 schema_version = 1
 
 [roots]
-wsl_home = "/home/leland"
+wsl_home = "/home/user"
 repo = "/mnt/d/Documents/Code/GitHub/.claude_code"
 windows_home = "/mnt/c/Users/aboog"
 
@@ -1042,7 +1042,7 @@ git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(agent-config-sy
 
 ## Task 2: Normalization, path tokenization, and fingerprints
 
-Two layers can hold the *same intent* in different bytes: CRLF vs LF, key order in JSON, `/home/leland/...` vs `C:\Users\aboog\...`. Comparing raw bytes would report drift that isn't there. This task makes "same intent" mechanically decidable.
+Two layers can hold the *same intent* in different bytes: CRLF vs LF, key order in JSON, `/home/user/...` vs `C:\Users\aboog\...`. Comparing raw bytes would report drift that isn't there. This task makes "same intent" mechanically decidable.
 
 **Files:**
 - Create: `tools/agent-config-sync/normalize.py`
@@ -1086,7 +1086,7 @@ import manifest as mf  # noqa: E402
 import normalize as nz  # noqa: E402
 
 ROOTS = mf.Roots(
-    wsl_home=Path("/home/leland"),
+    wsl_home=Path("/home/user"),
     repo=Path("/mnt/d/Documents/Code/GitHub/.claude_code"),
     windows_home=Path("/mnt/c/Users/aboog"),
 )
@@ -1161,7 +1161,7 @@ def test_normalize_for_kind_dispatches():
 # --- path tokenization -----------------------------------------------------
 
 def test_tokenize_replaces_wsl_home_with_home_token():
-    out = nz.tokenize_paths("see /home/leland/.claude/tools/guard.py now", ROOTS)
+    out = nz.tokenize_paths("see /home/user/.claude/tools/guard.py now", ROOTS)
     assert out == "see {HOME}/.claude/tools/guard.py now"
 
 
@@ -1190,13 +1190,13 @@ def test_tokenize_leaves_unrelated_absolute_paths_alone():
 
 def test_render_paths_to_wsl_layer():
     out = nz.render_paths("{HOME}/.claude/x.md", "wsl", ROOTS)
-    assert out == "/home/leland/.claude/x.md"
+    assert out == "/home/user/.claude/x.md"
 
 
 def test_render_paths_to_repo_layer_uses_the_wsl_spelling():
     # The repo is a mirror of WSL intent, so publishing round-trips exactly.
     out = nz.render_paths("{HOME}/.claude/x.md", "repo", ROOTS)
-    assert out == "/home/leland/.claude/x.md"
+    assert out == "/home/user/.claude/x.md"
 
 
 def test_render_paths_falls_back_when_a_root_is_not_a_mount(tmp_path: Path):
@@ -1218,7 +1218,7 @@ def test_render_repo_token_for_windows_layer():
 
 
 def test_tokenize_then_render_round_trips_wsl_to_windows():
-    wsl_text = "hook: /home/leland/.claude/tools/guard.py --strict\n"
+    wsl_text = "hook: /home/user/.claude/tools/guard.py --strict\n"
     tokenized = nz.tokenize_paths(wsl_text, ROOTS)
     assert nz.render_paths(tokenized, "windows", ROOTS) == (
         "hook: C:\\Users\\aboog\\.claude\\tools\\guard.py --strict\n")
@@ -1230,7 +1230,7 @@ def test_wsl_mount_to_windows_converts_drive_letters():
 
 
 def test_wsl_mount_to_windows_returns_none_for_non_mount_paths():
-    assert nz.wsl_mount_to_windows(Path("/home/leland")) is None
+    assert nz.wsl_mount_to_windows(Path("/home/user")) is None
 
 
 # --- portability warnings --------------------------------------------------
@@ -1278,7 +1278,7 @@ Create `tools/agent-config-sync/normalize.py`:
 """Normalization, path tokenization, and fingerprints.
 
 Two layers can express the same intent with different bytes (CRLF vs LF, JSON
-key order, /home/leland vs C:\\Users\\aboog). Everything here exists so that
+key order, /home/user vs C:\\Users\\aboog). Everything here exists so that
 "same intent" is mechanically decidable before anything is called drift.
 
 Design: "Deterministic scan" steps 5-6.
@@ -1401,8 +1401,8 @@ def _spellings(path: Path | None) -> list[str]:
 
 def _replace_prefix(text: str, prefixes: list[str], token: str) -> str:
     for prefix in sorted(prefixes, key=len, reverse=True):
-        # The lookahead is load-bearing: without it, /home/lelandxyz (a
-        # different directory) matches the /home/leland prefix and becomes
+        # The lookahead is load-bearing: without it, /home/userxyz (a
+        # different directory) matches the /home/user prefix and becomes
         # "{HOME}xyz", which is not even a valid path. Admit / and \ (real
         # children) and end-of-token punctuation; reject name characters.
         # (Review ruling, 2026-08-11.)
@@ -1522,7 +1522,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import extract as ex  # noqa: E402
 import manifest as mf  # noqa: E402
 
-ROOTS = mf.Roots(wsl_home=Path("/home/leland"), repo=Path("/repo"),
+ROOTS = mf.Roots(wsl_home=Path("/home/user"), repo=Path("/repo"),
                  windows_home=Path("/mnt/c/Users/aboog"))
 
 SECRETS = mf.SecretPolicy(
@@ -1648,7 +1648,7 @@ def test_extract_absent_layer_root_yields_nothing():
 
 
 def test_extract_tokenizes_paths_so_layers_compare_equal(tmp_path: Path):
-    (tmp_path / "a.md").write_text("run /home/leland/.claude/x.py\n",
+    (tmp_path / "a.md").write_text("run /home/user/.claude/x.py\n",
                                    encoding="utf-8")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     assert units[0].normalized == "run {HOME}/.claude/x.py\n"
@@ -3706,7 +3706,7 @@ DOC = {
     "generated_at": "2026-08-10T14:03:22+00:00",
     "scanner_version": "1.0.0",
     "manifest_version": 1,
-    "roots": {"wsl": "/home/leland", "repo": "/repo", "windows": "/mnt/c/Users/aboog"},
+    "roots": {"wsl": "/home/user", "repo": "/repo", "windows": "/mnt/c/Users/aboog"},
     "layer_fingerprints": {"wsl": "a" * 64, "repo": "b" * 64, "windows": "c" * 64},
     "counts": {"publish_to_repo": 1, "conflict": 1, "protected_overlay": 1,
                "plugin_version_differs": 1},
@@ -4114,7 +4114,7 @@ Added 2026-08-11, after Task 7's implementer found that `normalize.portability_w
 
 **Runs after Task 7 and before Task 8** (Task 8 also edits `render.py`).
 
-**Key subtlety:** warnings run on the **tokenized** text, after `tokenize_paths` has replaced the configured roots. A hook pointing at `/home/leland/.claude/tools/guard.py` becomes `{HOME}/.claude/tools/guard.py` and is genuinely portable — that substitution is exactly how WSL and Windows compare equal. What survives tokenization is what actually cannot travel: `/usr/`, `/opt/`, `.venv_linux`, `\\wsl$`, and `/mnt/` paths to drives no root claims.
+**Key subtlety:** warnings run on the **tokenized** text, after `tokenize_paths` has replaced the configured roots. A hook pointing at `/home/user/.claude/tools/guard.py` becomes `{HOME}/.claude/tools/guard.py` and is genuinely portable — that substitution is exactly how WSL and Windows compare equal. What survives tokenization is what actually cannot travel: `/usr/`, `/opt/`, `.venv_linux`, `\\wsl$`, and `/mnt/` paths to drives no root claims.
 
 **Files:**
 - Modify: `tools/agent-config-sync/extract.py` (`Unit` gains a field; both unit builders populate it)
@@ -4137,7 +4137,7 @@ Add to `tools/agent-config-sync/tests/test_extract.py`:
 ```python
 def test_extract_records_portability_warnings_after_tokenization(tmp_path: Path):
     (tmp_path / "a.md").write_text(
-        "hook: /usr/bin/python3 /home/leland/.claude/tools/guard.py\n",
+        "hook: /usr/bin/python3 /home/user/.claude/tools/guard.py\n",
         encoding="utf-8")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     # The home path tokenizes to {HOME} and is portable; /usr/bin is not.
@@ -4147,7 +4147,7 @@ def test_extract_records_portability_warnings_after_tokenization(tmp_path: Path)
 
 
 def test_extract_records_no_portability_warning_for_portable_text(tmp_path: Path):
-    (tmp_path / "a.md").write_text("hook: /home/leland/.claude/x.py\n",
+    (tmp_path / "a.md").write_text("hook: /home/user/.claude/x.py\n",
                                    encoding="utf-8")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     assert units[0].portability == ()
@@ -6303,7 +6303,7 @@ Leland approves the final patch, not an agent-to-agent conversation.
 
 - Never apply an id that was not named.
 - Never touch a `platform_overlay` item; the tool refuses, and so should you.
-- Never edit `/home/leland` config to "fix" drift — WSL is the authority, and
+- Never edit `/home/user` config to "fix" drift — WSL is the authority, and
   changing it is Leland's job, not a merge.
 - Never bypass a stale-report rejection.
 - Never run `claude plugin install/update/enable/disable` yourself.
@@ -6500,7 +6500,7 @@ cat > /tmp/claude-1000/acs-notes.md <<'EOF'
   desktop without ever applying a change unattended. A deterministic scanner
   (`tools/agent-config-sync/scan.py`) reads only what `config/agent-sync.toml`
   declares, normalizes away cosmetic differences (line endings, JSON key order,
-  `/home/leland` vs `C:\Users\...`), and emits a drift document that carries no
+  `/home/user` vs `C:\Users\...`), and emits a drift document that carries no
   secret values — denied keys are represented by a pointer, a reason code, a
   type, and a hash. When there is no drift, no model runs at all. When there is,
   a bounded `claude -p` call supplies judgment only, and a deterministic renderer

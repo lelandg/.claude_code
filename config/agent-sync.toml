@@ -9,7 +9,7 @@
 schema_version = 1
 
 [roots]
-wsl_home = "/home/leland"
+wsl_home = "~"
 repo = "/mnt/d/Documents/Code/GitHub/.claude_code"
 windows_home = "/mnt/c/Users/aboog"
 

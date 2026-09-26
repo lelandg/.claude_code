@@ -2,7 +2,7 @@
 
 - **Generated:** 2026-08-10T14:03:22+00:00
 - **Versions:** scanner 1.0.0 · manifest 1 · drift schema 1 · template 1 · response schema 1
-- **wsl:** `/home/leland` (`aaaaaaaaaaaa`)
+- **wsl:** `/home/user` (`aaaaaaaaaaaa`)
 - **repo:** `/repo` (`bbbbbbbbbbbb`)
 - **windows:** `/mnt/c/Users/aboog` (`cccccccccccc`)
 - **Severity:** conflict

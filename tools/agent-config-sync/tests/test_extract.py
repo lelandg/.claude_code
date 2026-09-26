@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import extract as ex  # noqa: E402
 import manifest as mf  # noqa: E402
 
-ROOTS = mf.Roots(wsl_home=Path("/home/leland"), repo=Path("/repo"),
+ROOTS = mf.Roots(wsl_home=Path("/home/user"), repo=Path("/repo"),
                  windows_home=Path("/mnt/c/Users/aboog"))
 
 SECRETS = mf.SecretPolicy(
@@ -151,7 +151,7 @@ def test_extract_absent_layer_root_yields_nothing():
 
 
 def test_extract_tokenizes_paths_so_layers_compare_equal(tmp_path: Path):
-    (tmp_path / "a.md").write_text("run /home/leland/.claude/x.py\n",
+    (tmp_path / "a.md").write_text("run /home/user/.claude/x.py\n",
                                    encoding="utf-8")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     assert units[0].normalized == "run {HOME}/.claude/x.py\n"
@@ -249,7 +249,7 @@ def test_extract_unreadable_file_records_an_error(tmp_path: Path):
 
 def test_extract_records_portability_warnings_after_tokenization(tmp_path: Path):
     (tmp_path / "a.md").write_text(
-        "hook: /usr/bin/python3 /home/leland/.claude/tools/guard.py\n",
+        "hook: /usr/bin/python3 /home/user/.claude/tools/guard.py\n",
         encoding="utf-8")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     # The home path tokenizes to {HOME} and is portable; /usr/bin is not.
@@ -259,7 +259,7 @@ def test_extract_records_portability_warnings_after_tokenization(tmp_path: Path)
 
 
 def test_extract_records_no_portability_warning_for_portable_text(tmp_path: Path):
-    (tmp_path / "a.md").write_text("hook: /home/leland/.claude/x.py\n",
+    (tmp_path / "a.md").write_text("hook: /home/user/.claude/x.py\n",
                                    encoding="utf-8")
     units = ex.extract_entry(make_entry(), "wsl", tmp_path, SECRETS, ROOTS)
     assert units[0].portability == ()

@@ -31,7 +31,7 @@ DOC = {
     "generated_at": "2026-08-10T14:03:22+00:00",
     "scanner_version": "1.0.0",
     "manifest_version": 1,
-    "roots": {"wsl": "/home/leland", "repo": "/repo", "windows": "/mnt/c/Users/aboog"},
+    "roots": {"wsl": "/home/user", "repo": "/repo", "windows": "/mnt/c/Users/aboog"},
     "layer_fingerprints": {"wsl": "a" * 64, "repo": "b" * 64, "windows": "c" * 64},
     "counts": {"publish_to_repo": 1, "conflict": 1, "protected_overlay": 1,
                "plugin_version_differs": 1},

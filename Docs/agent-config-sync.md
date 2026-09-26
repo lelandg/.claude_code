@@ -97,13 +97,13 @@ Set `ACS_CLAUDE` to the absolute path of your Claude executable if it is not
 command -v claude
 ```
 
-Expected output: an absolute path, for example `/home/leland/.local/bin/claude`.
+Expected output: an absolute path, for example `/home/user/.local/bin/claude`.
 If the command prints nothing, `claude` is not on `PATH` for this shell —
 find it another way (for example `which -a claude` or check your install
 directory) and set `ACS_CLAUDE` to that absolute path in the crontab line:
 
 ```cron
-15 6 * * * ACS_CLAUDE=/home/leland/.local/bin/claude /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/bin/agent-config-sync.sh
+15 6 * * * ACS_CLAUDE=/home/user/.local/bin/claude /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/bin/agent-config-sync.sh
 ```
 
 ## Environment variables the wrapper reads
@@ -163,10 +163,10 @@ exit line — on every path, including the no-drift and failure paths. A
 healthy drift-reporting run looks like this:
 
 ```text
-2026-08-11T16:15:44Z run start; manifest=/mnt/d/Documents/Code/GitHub/.claude_code/config/agent-sync.toml state=/home/leland/.local/state/agent-config-sync
+2026-08-11T16:15:44Z run start; manifest=/mnt/d/Documents/Code/GitHub/.claude_code/config/agent-sync.toml state=/home/user/.local/state/agent-config-sync
 2026-08-11T16:18:10Z scan exit=10 duration=146s
 2026-08-11T16:18:10Z drift detected; invoking the analyzer
-2026-08-11T16:18:10Z report written to /home/leland/.local/state/agent-config-sync/latest-report.md
+2026-08-11T16:18:10Z report written to /home/user/.local/state/agent-config-sync/latest-report.md
 2026-08-11T16:18:10Z wrapper exit=10
 ```
 

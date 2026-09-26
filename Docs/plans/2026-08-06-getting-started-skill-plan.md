@@ -136,14 +136,14 @@ Every command and every example prompt gets a copy button. Save as
 
 - [ ] **Step 2: Verify the frontmatter parses and the description is within limits**
 
-Run: `python3 -c "import yaml,sys; d=yaml.safe_load(open('/home/leland/.claude/skills/getting-started/SKILL.md').read().split('---')[1]); print(d['name'], len(d['description']))"`
+Run: `python3 -c "import yaml,sys; d=yaml.safe_load(open('/home/user/.claude/skills/getting-started/SKILL.md').read().split('---')[1]); print(d['name'], len(d['description']))"`
 Expected: prints `getting-started` and a number ≤ 1024.
 
 - [ ] **Step 3: Mirror to the repo**
 
 ```bash
 mkdir -p /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started
-rsync -a --delete /home/leland/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
+rsync -a --delete /home/user/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
 ```
 
 - [ ] **Step 4: Commit**
@@ -291,7 +291,7 @@ Expected: exactly the ten owner/repo pairs listed in Global Constraints (`.claud
 - [ ] **Step 3: Mirror and commit**
 
 ```bash
-rsync -a --delete /home/leland/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
+rsync -a --delete /home/user/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
 git -C /mnt/d/Documents/Code/GitHub/.claude_code add claude/skills/getting-started
 git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(skills): getting-started — curated OSS catalog reference"
 ```
@@ -366,7 +366,7 @@ Cowork is for controlling your computer.*
 - [ ] **Step 2: Mirror and commit**
 
 ```bash
-rsync -a --delete /home/leland/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
+rsync -a --delete /home/user/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
 git -C /mnt/d/Documents/Code/GitHub/.claude_code add claude/skills/getting-started
 git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(skills): getting-started — claude-basics reference (Chat/Code/Cowork, tokens, managed agents)"
 ```
@@ -429,7 +429,7 @@ respect their setup and move on.
 - [ ] **Step 2: Mirror and commit**
 
 ```bash
-rsync -a --delete /home/leland/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
+rsync -a --delete /home/user/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
 git -C /mnt/d/Documents/Code/GitHub/.claude_code add claude/skills/getting-started
 git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(skills): getting-started — other-tools reference (Codex/Copilot/Gemini/Antigravity, PyCharm CE)"
 ```
@@ -541,7 +541,7 @@ function copy(btn) {
 Extract the HTML block to a scratch file and open it:
 
 ```bash
-awk '/^```html$/{f=1;next} /^```$/{f=0} f' /home/leland/.claude/skills/getting-started/assets/plan-style.md > /tmp/claude-1000/-mnt-d-Documents-Code-GitHub--claude-code/d798075f-a18d-474a-8666-bbcf9f48b0f7/scratchpad/plan-preview.html
+awk '/^```html$/{f=1;next} /^```$/{f=0} f' /home/user/.claude/skills/getting-started/assets/plan-style.md > /tmp/claude-1000/-mnt-d-Documents-Code-GitHub--claude-code/d798075f-a18d-474a-8666-bbcf9f48b0f7/scratchpad/plan-preview.html
 ```
 
 Then render `plan-preview.html` (Playwright browser or send the file) and confirm: page renders, clicking Copy changes the button to "Copied!". Expected: both true, zero network requests.
@@ -549,7 +549,7 @@ Then render `plan-preview.html` (Playwright browser or send the file) and confir
 - [ ] **Step 3: Mirror and commit**
 
 ```bash
-rsync -a --delete /home/leland/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
+rsync -a --delete /home/user/.claude/skills/getting-started/ /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started/
 git -C /mnt/d/Documents/Code/GitHub/.claude_code add claude/skills/getting-started
 git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(skills): getting-started — HTML action-plan template with copy buttons"
 ```
@@ -621,7 +621,7 @@ git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(marketplace): g
 
 - [ ] **Step 1: Dry-run the release**
 
-Run: `python3 /home/leland/.claude/skills/version-manager/version_tool.py --repo /mnt/d/Documents/Code/GitHub/.claude_code release minor`
+Run: `python3 /home/user/.claude/skills/version-manager/version_tool.py --repo /mnt/d/Documents/Code/GitHub/.claude_code release minor`
 Expected: dry-run output proposing the next minor version and showing detected version locations (marketplace.json) and generated notes. Review that the version locations are the marketplace/plugin version fields.
 
 - [ ] **Step 2: Curate notes and apply**
@@ -637,7 +637,7 @@ PyCharm CE advice scaled to whether an IDE exists), checks configuration with co
 recommends from a curated catalog of Leland's open source, and generates a personalized
 HTML action plan with copy-to-clipboard commands.
 EOF
-python3 /home/leland/.claude/skills/version-manager/version_tool.py --repo /mnt/d/Documents/Code/GitHub/.claude_code release minor --notes /tmp/claude-1000/-mnt-d-Documents-Code-GitHub--claude-code/d798075f-a18d-474a-8666-bbcf9f48b0f7/scratchpad/release-notes.md --apply
+python3 /home/user/.claude/skills/version-manager/version_tool.py --repo /mnt/d/Documents/Code/GitHub/.claude_code release minor --notes /tmp/claude-1000/-mnt-d-Documents-Code-GitHub--claude-code/d798075f-a18d-474a-8666-bbcf9f48b0f7/scratchpad/release-notes.md --apply
 ```
 
 Expected: version fields bumped + CHANGELOG entry written.
@@ -666,12 +666,12 @@ Do NOT push — Leland pushes after final review (house rule: review before push
 
 - [ ] **Step 1: Structural check against the spec**
 
-Run: `find /home/leland/.claude/skills/getting-started -type f | sort`
-Expected: exactly `SKILL.md`, `references/catalog.md`, `references/claude-basics.md`, `references/other-tools.md`, `assets/plan-style.md`. Also run `diff -r /home/leland/.claude/skills/getting-started /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started` — expected: no output (mirror in sync).
+Run: `find /home/user/.claude/skills/getting-started -type f | sort`
+Expected: exactly `SKILL.md`, `references/catalog.md`, `references/claude-basics.md`, `references/other-tools.md`, `assets/plan-style.md`. Also run `diff -r /home/user/.claude/skills/getting-started /mnt/d/Documents/Code/GitHub/.claude_code/claude/skills/getting-started` — expected: no output (mirror in sync).
 
 - [ ] **Step 2: Persona dry-runs (three, fresh context each)**
 
-For each persona, dispatch a fresh subagent whose prompt is: "Read /home/leland/.claude/skills/getting-started/SKILL.md and role-play the concierge for this user, following it exactly. I will play the user: PERSONA. Report: which questions you asked in what order, which adaptation rules fired, which catalog entries you recommended, and whether anything in the skill was ambiguous or contradictory." Personas:
+For each persona, dispatch a fresh subagent whose prompt is: "Read /home/user/.claude/skills/getting-started/SKILL.md and role-play the concierge for this user, following it exactly. I will play the user: PERSONA. Report: which questions you asked in what order, which adaptation rules fired, which catalog entries you recommended, and whether anything in the skill was ambiguous or contradictory." Personas:
 
 1. *Newcomer-business*: runs a small business (warehouse/inventory, SEO), desktop app, Windows, Claude trial via a free pass, no other AI subscriptions, no coding.
    Expected: efficiency mode fires; Chat/Code/Cowork guidance given; recommends the two marketplaces + Agent Spawner; no PyCharm mention.

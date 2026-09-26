@@ -151,7 +151,7 @@ A plain-English history of what changed in this repository and why. Newest first
   desktop without ever applying a change unattended. A deterministic scanner
   (`tools/agent-config-sync/scan.py`) reads only what `config/agent-sync.toml`
   declares, normalizes away cosmetic differences (line endings, JSON key order,
-  `/home/leland` vs `C:\Users\...`), and emits a drift document that carries no
+  `/home/user` vs `C:\Users\...`), and emits a drift document that carries no
   secret values — denied keys are represented by a pointer, a reason code, a
   type, and a hash. When there is no drift, no model runs at all. When there is,
   a bounded `claude -p` call supplies judgment only, and a deterministic renderer

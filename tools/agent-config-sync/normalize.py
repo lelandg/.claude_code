@@ -2,7 +2,7 @@
 """Normalization, path tokenization, and fingerprints.
 
 Two layers can express the same intent with different bytes (CRLF vs LF, JSON
-key order, /home/leland vs C:\\Users\\aboog). Everything here exists so that
+key order, /home/user vs C:\\Users\\aboog). Everything here exists so that
 "same intent" is mechanically decidable before anything is called drift.
 
 Design: "Deterministic scan" steps 5-6.
@@ -126,7 +126,7 @@ def _spellings(path: Path | None) -> list[str]:
 def _replace_prefix(text: str, prefixes: list[str], token: str) -> str:
     for prefix in sorted(prefixes, key=len, reverse=True):
         # Negative lookahead ensures the character after prefix is not a path name char.
-        # This prevents /home/lelandxyz from matching /home/leland.
+        # This prevents /home/userxyz from matching /home/user.
         pattern = re.compile(re.escape(prefix) + r"(?![\w.+@~%-])"
                              + f"(?P<rest>{_PATH_TAIL})")
         text = pattern.sub(

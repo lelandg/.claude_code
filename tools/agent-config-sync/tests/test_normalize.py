@@ -15,7 +15,7 @@ import manifest as mf  # noqa: E402
 import normalize as nz  # noqa: E402
 
 ROOTS = mf.Roots(
-    wsl_home=Path("/home/leland"),
+    wsl_home=Path("/home/user"),
     repo=Path("/mnt/d/Documents/Code/GitHub/.claude_code"),
     windows_home=Path("/mnt/c/Users/aboog"),
 )
@@ -92,7 +92,7 @@ def test_normalize_for_kind_dispatches():
 # --- path tokenization -----------------------------------------------------
 
 def test_tokenize_replaces_wsl_home_with_home_token():
-    out = nz.tokenize_paths("see /home/leland/.claude/tools/guard.py now", ROOTS)
+    out = nz.tokenize_paths("see /home/user/.claude/tools/guard.py now", ROOTS)
     assert out == "see {HOME}/.claude/tools/guard.py now"
 
 
@@ -118,9 +118,9 @@ def test_tokenize_leaves_unrelated_absolute_paths_alone():
 
 
 def test_tokenize_does_not_match_sibling_paths():
-    # /home/lelandxyz is a sibling, not a child of /home/leland
-    out = nz.tokenize_paths("see /home/lelandxyz/file.py here", ROOTS)
-    assert out == "see /home/lelandxyz/file.py here"
+    # /home/userxyz is a sibling, not a child of /home/user
+    out = nz.tokenize_paths("see /home/userxyz/file.py here", ROOTS)
+    assert out == "see /home/userxyz/file.py here"
     assert "{HOME}" not in out
 
 
@@ -132,21 +132,21 @@ def test_tokenize_does_not_match_different_users():
 
 
 def test_tokenize_does_not_match_hidden_directories():
-    # /home/leland.bak is not a child of /home/leland
-    out = nz.tokenize_paths("see /home/leland.bak/file.py here", ROOTS)
-    assert out == "see /home/leland.bak/file.py here"
+    # /home/user.bak is not a child of /home/user
+    out = nz.tokenize_paths("see /home/user.bak/file.py here", ROOTS)
+    assert out == "see /home/user.bak/file.py here"
     assert "{HOME}" not in out
 
 
 def test_tokenize_bare_root_with_no_tail():
     # Bare root reference should still tokenize
-    out = nz.tokenize_paths("path /home/leland end", ROOTS)
+    out = nz.tokenize_paths("path /home/user end", ROOTS)
     assert out == "path {HOME} end"
 
 
 def test_tokenize_quoted_root_path():
     # Quoted path should still tokenize
-    out = nz.tokenize_paths('run "/home/leland/x" now', ROOTS)
+    out = nz.tokenize_paths('run "/home/user/x" now', ROOTS)
     assert out == 'run "{HOME}/x" now'
 
 
@@ -154,13 +154,13 @@ def test_tokenize_quoted_root_path():
 
 def test_render_paths_to_wsl_layer():
     out = nz.render_paths("{HOME}/.claude/x.md", "wsl", ROOTS)
-    assert out == "/home/leland/.claude/x.md"
+    assert out == "/home/user/.claude/x.md"
 
 
 def test_render_paths_to_repo_layer_uses_the_wsl_spelling():
     # The repo is a mirror of WSL intent, so publishing round-trips exactly.
     out = nz.render_paths("{HOME}/.claude/x.md", "repo", ROOTS)
-    assert out == "/home/leland/.claude/x.md"
+    assert out == "/home/user/.claude/x.md"
 
 
 def test_render_paths_falls_back_when_a_root_is_not_a_mount(tmp_path: Path):
@@ -182,7 +182,7 @@ def test_render_repo_token_for_windows_layer():
 
 
 def test_tokenize_then_render_round_trips_wsl_to_windows():
-    wsl_text = "hook: /home/leland/.claude/tools/guard.py --strict\n"
+    wsl_text = "hook: /home/user/.claude/tools/guard.py --strict\n"
     tokenized = nz.tokenize_paths(wsl_text, ROOTS)
     assert nz.render_paths(tokenized, "windows", ROOTS) == (
         "hook: C:\\Users\\aboog\\.claude\\tools\\guard.py --strict\n")
@@ -194,7 +194,7 @@ def test_wsl_mount_to_windows_converts_drive_letters():
 
 
 def test_wsl_mount_to_windows_returns_none_for_non_mount_paths():
-    assert nz.wsl_mount_to_windows(Path("/home/leland")) is None
+    assert nz.wsl_mount_to_windows(Path("/home/user")) is None
 
 
 # --- portability warnings --------------------------------------------------

@@ -28,7 +28,7 @@ def doc_with(items: list[dict], repo: str = "/repo") -> dict:
         "generated_at": "2026-08-14T19:38:33+00:00",
         "scanner_version": "1.0.0",
         "manifest_version": 1,
-        "roots": {"wsl": "/home/leland", "repo": repo,
+        "roots": {"wsl": "/home/user", "repo": repo,
                   "windows": "/mnt/c/Users/winuser"},
         "layer_fingerprints": {"wsl": "a" * 64, "repo": "b" * 64,
                                "windows": "c" * 64},
@@ -147,7 +147,7 @@ class TestWindowsPath:
                 == "D:\\Documents\\Code\\GitHub\\.claude_code")
 
     def test_non_mnt_paths_have_no_windows_name(self):
-        assert rd.windows_path("/home/leland/x") is None
+        assert rd.windows_path("/home/user/x") is None
 
 
 class TestReportReference:

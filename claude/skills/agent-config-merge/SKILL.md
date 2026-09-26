@@ -199,7 +199,7 @@ Leland approves the final patch, not an agent-to-agent conversation.
   and a `delete_tree` sweep removes untracked files too — read its file count
   to Leland before asking for approval.
 - Never touch a `platform_overlay` item; the tool refuses, and so should you.
-- Never edit `/home/leland` config to "fix" drift — WSL is the authority, and
+- Never edit the WSL home (`~`) config to "fix" drift — WSL is the authority, and
   changing it is Leland's job, not a merge.
 - Never bypass a stale-report rejection.
 - Never run `claude plugin install/update/enable/disable` yourself.

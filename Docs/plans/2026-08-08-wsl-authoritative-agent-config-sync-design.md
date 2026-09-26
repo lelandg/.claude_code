@@ -51,7 +51,7 @@ Codex.
 There are three distinct layers:
 
 1. **WSL live configuration — operational authority.** Portable user-authored intent is
-   read from `/home/leland`.
+   read from `/home/user`.
 2. **`.claude_code` — portable record and comparison baseline.** The repository stores
    sanitized, reviewable configuration suitable for version control and distribution.
 3. **Windows configuration — derived target plus protected overlay.** Portable intent is
@@ -88,16 +88,16 @@ When run from WSL, the same checkout is normally:
 Authoritative WSL roots include:
 
 ```text
-/home/leland/.config/agents
-/home/leland/.agents
-/home/leland/.claude
-/home/leland/.codex
-/home/leland/.copilot
-/home/leland/.gemini
-/home/leland/.pi
+/home/user/.config/agents
+/home/user/.agents
+/home/user/.claude
+/home/user/.codex
+/home/user/.copilot
+/home/user/.gemini
+/home/user/.pi
 ```
 
-`/home/leland/agents` is not a configured root. Roots and targets are declared in one
+`/home/user/agents` is not a configured root. Roots and targets are declared in one
 manifest and may be overridden for fixtures or another machine; path literals are not
 spread throughout the implementation.
 
