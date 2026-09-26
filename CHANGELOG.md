@@ -76,6 +76,15 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.6.1] - 2026-09-26
+
+### Changed
+- `AGENTS.md` working procedures: agents keep going on steps that don't need the user's input, put status notes in the same message as the next action, and stop to ask only when blocked or before destructive actions (deleting data, force-pushing, changing anything outside the repo).
+- `AGENTS.md` branching rule 1 now names `origin/master` as well as `origin/main` as the base for feature branches.
+
+### Fixed
+- Added a `.snyk` exclude for `claude/tools/config-secrets-guard.pi.ts`. Snyk Code read its secret-filename regex as a hardcoded secret, and the resulting false positive blocked every commit.
+
 ## [0.6.0] - 2026-09-22
 
 ### Added
