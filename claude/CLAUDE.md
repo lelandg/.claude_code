@@ -38,11 +38,6 @@ Read it there before writing any date; otherwise run `date '+%Y-%m-%d %H:%M'`
 At startup, if `./CLAUDE.md` exists and there's no project-level
 `Docs/CodeMap.md`, offer to create it.
 
-## Output
-
-When presenting non-visual options to me, use the `AskUserQuestion` tool. (Visual
-artifacts → HTML file, per the shared output rules.)
-
 ## Codex delegation (GPT-6 Astra / GPT-5.6) — plugin mechanics
 
 The shared rules' "Model delegation & cross-provider review" section is
