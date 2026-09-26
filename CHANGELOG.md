@@ -76,6 +76,11 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.6.2] - 2026-09-26
+
+### Removed
+- The `## Output` section of `claude/CLAUDE.md` ("use AskUserQuestion for non-visual options"). It was dropped from the live config, so the mirror no longer carries it.
+
 ## [0.6.1] - 2026-09-26
 
 ### Changed
