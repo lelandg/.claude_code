@@ -1,0 +1,8 @@
+# Snyk (https://snyk.io) policy file
+version: v1.25.0
+exclude:
+  global:
+    # False positive: "Hardcoded Non-Cryptographic Secret" on line 22 is the
+    # SECRET_FILE filename regex (config*.yaml / .env*) the guard matches
+    # against -- a pattern, not a secret. Excluded 2026-09-26.
+    - claude/tools/config-secrets-guard.pi.ts

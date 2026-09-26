@@ -98,13 +98,17 @@ use placeholder times. Timestamps: `YYYY-MM-DD HH:MM`.
 - Instructions the user will execute (runbooks, handoffs, PR/issue steps) must
   be executable exactly as written, zero inference:
   `~/.claude/instructions/runbook-standards.md`.
+- When a step doesn't need the user's input, keep going. Put status notes in
+  the same message as your next action. Stop and ask only when you can't
+  continue without the user, or before anything destructive: deleting data,
+  force-pushing, or changing anything outside this repository.
 
 ### Branching & working-tree hygiene (CRITICAL)
 
 Local `main` and the working tree often carry things that must not leak into a
 PR — unpushed commits kept local on purpose, WIP edits, untracked scratch files.
 
-1. **Always cut feature branches from `origin/main`, never local `main`:**
+1. **Always cut feature branches from `origin/main` (or `origin/master`), never local `main`:**
    `git fetch && git checkout -b feat/x origin/main`.
 2. **Before branching, triage the working tree** per
    `~/.claude/instructions/file-dispositions.md`: apply standing defaults
