@@ -76,6 +76,14 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.6.3] - 2026-09-26
+
+### Changed
+- `config/agent-sync.toml` now sets `wsl_home = "~"` instead of a hardcoded home directory. The tool expands it at load time, so on a fresh machine the manifest works without editing.
+
+### Fixed
+- Replaced hardcoded personal home-directory paths in the agent-config-sync docs, design and plan documents, code comments, test fixtures, and the `agent-config-merge` skill. They now use `~` or `/home/user`.
+
 ## [0.6.2] - 2026-09-26
 
 ### Removed
