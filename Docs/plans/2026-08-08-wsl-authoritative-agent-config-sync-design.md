@@ -1,3 +1,5 @@
+> **Superseded 2026-10-17** by `2026-10-17-slim-agent-config-sync-design.md`. The tool described here was removed; kept for history.
+
 # WSL-Authoritative Agent Configuration Sync — Design
 
 **Date:** 2026-08-08

@@ -1,338 +1,40 @@
-# Ownership manifest for tools/agent-config-sync.
+# Scope for tools/agent-config-sync/sync.py — two-way WSL <-> Windows sync of
+# agent instruction files. Paths are relative to each home directory.
+# Design: Docs/plans/2026-10-17-slim-agent-config-sync-design.md
 #
-# WSL is the operational authority for portable intent; this repository is the
-# sanitized record; Windows is a derived target with a protected overlay.
-# Design: Docs/plans/2026-08-08-wsl-authoritative-agent-config-sync-design.md
-#
-# Policies: portable_authoritative | portable_additive | platform_overlay | excluded
+# Out of scope on purpose: skills and plugins (Claude Code syncs them),
+# agents (Leland, 2026-10-17), and the public mirror (/publish-claude-config).
 
-schema_version = 1
+schema_version = 2
 
-[roots]
-wsl_home = "~"
-repo = "/mnt/d/Documents/Code/GitHub/.claude_code"
-windows_home = "/mnt/c/Users/aboog"
-
-[state]
-dir = "~/.local/state/agent-config-sync"
-
-[secrets]
-# Keys whose VALUES are never collected. Matched case-insensitively against
-# each JSON/TOML key on the path to a scalar.
-deny_key_patterns = [
-  "(?i)token",
-  "(?i)secret",
-  "(?i)password",
-  "(?i)passwd",
-  "(?i)api[_-]?key",
-  "(?i)access[_-]?key",
-  "(?i)credential",
-  "(?i)authorization",
-  "(?i)bearer",
-  "(?i)private[_-]?key",
-  "(?i)session[_-]?id",
-]
-# Paths never read at all, relative to any layer root.
-deny_path_globs = [
-  "**/.credentials.json",
-  "**/history.jsonl",
-  "**/*.sqlite",
-  "**/*.db",
-  "**/.env",
-  "**/.env.*",
-  "**/projects/**",
-  "**/sessions/**",
-  "**/session-env/**",
-  "**/shell-snapshots/**",
-  "**/file-history/**",
-  "**/todos/**",
-  "**/tasks/**",
-  "**/statsig/**",
-  "**/telemetry/**",
-  "**/downloads/**",
-  "**/plugins/cache/**",
-  "**/security/**",
-  "**/*.log",
+# Kept identical on both sides; a one-sided change is copied across.
+files = [
+  ".config/agents/AGENTS.md",
+  ".claude/CLAUDE.md",
+  ".claude/tools/config-secrets-guard.py",
 ]
 
-# ---------------------------------------------------------------------------
-# Non-portable machine state. Never read -- not because it is secret, but
-# because it is tool-generated: plugin caches, temp dirs, vendored imports,
-# staging areas. Distinct from [secrets] on purpose. Design non-goal:
-# "Plugin caches, downloads, logs, telemetry state, and temporary files."
-# Measured 2026-08-11: these accounted for 4,286 of 4,626 drift items.
-# ---------------------------------------------------------------------------
-
-[exclusions]
-deny_path_globs = [
-  "**/.codex/.tmp/**",
-  "**/.codex/vendor_imports/**",
-  "**/.codex/plugins/**",
-  "**/.codex/memories/**",
-  "**/.codex/skills/.system/**",
-  "**/.gemini/antigravity*/**",
-  "**/.copilot/installed-plugins/**",
-  # Ephemeral tool artifacts surfaced by the 2026-08-11 first-run report:
-  # pytest caches, Copilot per-session checkpoints, Codex visualization dumps.
-  "**/.pytest_cache/**",
-  "**/.copilot/session-state/**",
-  "**/.codex/visualizations/**",
-  # yt-transcript is three legitimate platform variants (bash on WSL,
-  # PowerShell on Windows, portable copy in the repo record). Schema v1 has no
-  # per-file platform_overlay, so the platform-overlay decision from report
-  # 2026-08-11T17-32-13Z-4d244f is expressed as an exclusion: each layer owns
-  # its own copy and the trio stops reporting as a conflict on every scan.
-  # Both layouts: the wsl/windows layers use dotted paths (.claude/...), the
-  # repo drops the leading dot (claude/...). Without the second pair the repo
-  # copies misclassify as "removed in WSL".
-  "**/.claude/skills/yt-transcript/**",
-  "**/claude/skills/yt-transcript/**",
-  "**/.claude/commands/yt-transcript.md",
-  "**/claude/commands/yt-transcript.md",
-  # 2026-09-21: Codex worktrees are ephemeral and machine-local; they are not part of the
-  # portable record. The worktree directory is a sibling of the .codex root,
-  # so the glob must match the leading dot in the wsl/windows layers and the
-  # missing dot in the repo layer.
-  "**/.codex/worktrees/**",
-  "**/.claude/skills/synced/**",
+trees = [
+  { path = ".claude/instructions", glob = "*.md" },
 ]
 
-# ---------------------------------------------------------------------------
-# Portable authoritative: WSL intent is the desired value.
-#
-# House-rules family (2026-08-14 restructure): these entries record their
-# baseline under the gitignored baseline/ directory, NOT the public tree.
-# The public tree's sanitized copies (config/agents/, claude/CLAUDE.md,
-# claude/instructions/) are deliberately different from WSL forever, so using
-# them as the baseline made these items permanent conflicts. The private
-# baseline restores honest three-way classification; /publish-claude-config
-# owns the sanitized public copies.
-# ---------------------------------------------------------------------------
+# Per-CLI copies of the canonical house rules. WSL uses symlinks (left alone);
+# Windows uses plain copies, which are regenerated from the source.
+derived = [
+  { path = ".codex/AGENTS.md", from = ".config/agents/AGENTS.md" },
+  { path = ".copilot/copilot-instructions.md", from = ".config/agents/AGENTS.md" },
+  { path = ".gemini/AGENTS.md", from = ".config/agents/AGENTS.md" },
+]
 
-[[entries]]
-id = "agents-md"
-policy = "portable_authoritative"
-kind = "text"
-wsl = ".config/agents/AGENTS.md"
-repo = "baseline/config/agents/AGENTS.md"
-windows = ".config/agents/AGENTS.md"
+# Report only: these hold per-platform paths, so they are compared by key name
+# and never written. Values are never printed.
+[[report]]
+path = ".claude/settings.json"
+fields = ["hooks", "permissions", "env", "model"]
 
-[[entries]]
-id = "claude-md"
-policy = "portable_authoritative"
-kind = "text"
-wsl = ".claude/CLAUDE.md"
-repo = "baseline/claude/CLAUDE.md"
-windows = ".claude/CLAUDE.md"
+[[report]]
+path = ".codex/config.toml"
+fields = ["model", "model_reasoning_effort"]
 
-[[entries]]
-id = "claude-instructions"
-policy = "portable_authoritative"
-kind = "tree"
-wsl = ".claude/instructions"
-repo = "baseline/claude/instructions"
-windows = ".claude/instructions"
-globs = ["**/*.md"]
-
-[[entries]]
-id = "claude-agents"
-policy = "portable_authoritative"
-kind = "tree"
-wsl = ".claude/agents"
-repo = "claude/agents"
-windows = ".claude/agents"
-globs = ["**/*.md"]
-
-# ---------------------------------------------------------------------------
-# Portable additive: additions/updates are candidates; deletions need approval.
-# ---------------------------------------------------------------------------
-
-[[entries]]
-id = "claude-skills"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".claude/skills"
-repo = "claude/skills"
-windows = ".claude/skills"
-globs = ["**/*.md", "**/*.py", "**/*.sh", "**/*.json", "**/*.toml"]
-
-[[entries]]
-id = "claude-commands"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".claude/commands"
-repo = "claude/commands"
-windows = ".claude/commands"
-globs = ["**/*.md"]
-
-[[entries]]
-id = "claude-tools"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".claude/tools"
-repo = "claude/tools"
-windows = ".claude/tools"
-globs = ["**/*.py", "**/*.ts", "**/*.sh"]
-
-# The per-CLI instruction mirrors carry the same house-rules content (symlinks
-# or copies of AGENTS.md), so their baselines are private too — publishing
-# them to the public tree would leak the unsanitized rules.
-
-[[entries]]
-id = "codex-instructions"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".codex"
-repo = "baseline/codex"
-windows = ".codex"
-globs = ["**/*.md"]
-
-[[entries]]
-id = "copilot-instructions"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".copilot"
-repo = "baseline/copilot"
-windows = ".copilot"
-globs = ["**/*.md"]
-
-[[entries]]
-id = "gemini-instructions"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".gemini"
-repo = "baseline/gemini"
-windows = ".gemini"
-globs = ["**/*.md"]
-
-[[entries]]
-id = "pi-instructions"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".pi"
-repo = "baseline/pi"
-windows = ".pi"
-globs = ["**/*.md"]
-
-[[entries]]
-id = "agents-dir"
-policy = "portable_additive"
-kind = "tree"
-wsl = ".agents"
-repo = "agents"
-windows = ".agents"
-globs = ["**/*.md"]
-
-# ---------------------------------------------------------------------------
-# Settings: semantic field-level merge.
-# ---------------------------------------------------------------------------
-
-[[entries]]
-id = "claude-settings"
-policy = "portable_authoritative"
-kind = "json"
-wsl = ".claude/settings.json"
-repo = "claude/settings.json"
-windows = ".claude/settings.json"
-
-[entries.fields]
-"model" = "portable_authoritative"
-"outputStyle" = "portable_authoritative"
-"permissions" = "portable_authoritative"
-"hooks" = "portable_authoritative"
-"env" = "portable_authoritative"
-"statusLine.command" = "platform_overlay"
-"awsAuthRefresh" = "excluded"
-"forceLoginMethod" = "platform_overlay"
-# Declared after the 2026-08-11 first-run report flagged these as
-# "ownership undeclared":
-# tui is a per-machine display preference (WSL: default, Windows: fullscreen).
-"tui" = "platform_overlay"
-# effortLevel surfaced undeclared in the 2026-08-12 verification scan after a
-# WSL-side settings change; per-machine preference like tui.
-"effortLevel" = "platform_overlay"
-# Plugin identity and enabled state are already portable through the
-# claude-plugins entry (kind = "plugins"), which reads the same file. The
-# settings-level view stays machine-owned so each machine curates its own set.
-"enabledPlugins" = "platform_overlay"
-# The WSL marketplace list includes private sources (a local-directory
-# marketplace and the mirror repo itself) that must never enter the public
-# record; each machine registers its own marketplaces by hand.
-"extraKnownMarketplaces" = "platform_overlay"
-
-[[entries]]
-id = "codex-config"
-policy = "portable_authoritative"
-kind = "toml"
-wsl = ".codex/config.toml"
-repo = "codex/config.toml"
-windows = ".codex/config.toml"
-
-[entries.fields]
-"model" = "portable_authoritative"
-"model_reasoning_effort" = "portable_authoritative"
-"projects" = "platform_overlay"
-"desktop" = "platform_overlay"
-"windows" = "platform_overlay"
-"shell" = "platform_overlay"
-# Hook-trust bookkeeping: entries keyed by absolute path with per-file
-# integrity hashes. Keys can never match across machines, so this state is
-# machine-local by construction and is not collected at all.
-"hooks" = "excluded"
-
-# 2026-08-14 Codex-audit reconciliation: ~/.claude/mcp.json is a dead config
-# on BOTH machines — `claude mcp list` loads nothing from it (verified on WSL;
-# the audit verified Windows). Current Claude Code stores user-level MCP
-# servers in ~/.claude.json via `claude mcp add`, and that file is excluded as
-# machine state (claude-local-state below). Servers are re-added natively per
-# machine; this file is no longer synced.
-[[entries]]
-id = "claude-mcp"
-policy = "excluded"
-kind = "json"
-wsl = ".claude/mcp.json"
-repo = "claude/mcp.json"
-windows = ".claude/mcp.json"
-
-# ---------------------------------------------------------------------------
-# Plugins: identities reconciled through native managers, never copied.
-#
-# The path below is a BASE directory, not a file. plugins.py reads two
-# well-known files under it (verified against the live machine 2026-08-10):
-#   <base>/settings.json                  -> enabledPlugins {"name@market": bool}
-#                                            extraKnownMarketplaces
-#   <base>/plugins/installed_plugins.json -> {"plugins": {"name@market": [
-#                                              {"scope","installPath",
-#                                               "version","installedAt"}]}}
-# installed_plugins.json is native runtime state -- gitignored, never committed,
-# and present only in the wsl/windows layers. The repo layer therefore supplies
-# desired identity + enabled state only, which is exactly the design's rule that
-# plugin code is never copied across the boundary.
-# ---------------------------------------------------------------------------
-
-[[entries]]
-id = "claude-plugins"
-policy = "portable_authoritative"
-kind = "plugins"
-wsl = ".claude"
-repo = "claude"
-windows = ".claude"
-
-# ---------------------------------------------------------------------------
-# Explicitly excluded: never collected (belt-and-braces alongside [secrets]).
-# ---------------------------------------------------------------------------
-
-[[entries]]
-id = "claude-local-state"
-policy = "excluded"
-kind = "tree"
-wsl = ".claude"
-globs = [".claude.json", "my-projects.yaml", "policy-limits.json"]
-
-# ---------------------------------------------------------------------------
-# Explicit plugin version pins. A pin -- and only a pin -- authorizes a
-# downgrade. Empty by default: newer native builds are preserved.
-# Format: "<plugin>@<marketplace>" = "<exact version>"
-# ---------------------------------------------------------------------------
-
-[plugin_pins]
+[[report]]
+path = ".codex/hooks.json"
