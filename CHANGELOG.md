@@ -76,6 +76,28 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.7.0] - 2026-10-25
+
+### Changed
+- **Breaking:** `tools/agent-config-sync/` is now one script, `sync.py`. It replaces
+  the WSL-authoritative three-layer scanner and merger (about 4,000 lines and 279
+  tests). It runs a two-way, three-way sync of agent instruction files between the
+  WSL and Windows homes. A change on one side is copied to the other side. A
+  change on both sides is a conflict that you resolve with `--take`.
+- `config/agent-sync.toml` now uses schema 2. Skills, plugins and agents are out of
+  scope: Claude Code syncs skills and plugins itself.
+- The `agent-config-sync` skill replaces `agent-config-report` and
+  `agent-config-merge`.
+
+### Added
+- The per-CLI `AGENTS.md` copies (Codex, Copilot, Gemini) are regenerated from the
+  canonical file. A WSL symlink is never written. The script detects WSL symlinks
+  seen from Windows (`IO_REPARSE_TAG_LX_SYMLINK`) as links.
+- Report-only checks for `settings.json` and the Codex config. The report names
+  keys only and never prints values.
+- The script runs from PowerShell or WSL with the standard library only. A check
+  takes seconds (the old scan took 22 minutes).
+
 ## [0.6.3] - 2026-09-26
 
 ### Changed
