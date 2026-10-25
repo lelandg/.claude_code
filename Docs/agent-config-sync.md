@@ -32,6 +32,7 @@ Out of scope:
 | `sync.py diff <path>...` | Show what each side changed since the last sync |
 | `sync.py apply [<path>...]` | Apply every non-conflict item (or only the named paths) |
 | `sync.py apply --take wsl\|windows <path>...` | Resolve conflicts with the chosen side |
+| `sync.py apply --allow-deletes` | Permit more than 2 deletes on one side. Without it, apply refuses because the cause is usually a wiped or wrong home |
 
 Run from PowerShell with `python` or from WSL with `python3`. Each runtime
 finds the other home by itself: from WSL with `cmd.exe` + `wslpath`, from

@@ -19,9 +19,9 @@ import io
 import json
 import os
 import posixpath
+import stat
 import subprocess
 import sys
-import stat
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -93,12 +93,15 @@ def load_scope(path: Path) -> Scope:
         raise SyncError(f"cannot read scope file {path}: {exc}") from exc
     if data.get("schema_version") != 2:
         raise SyncError(f"{path}: schema_version must be 2")
-    return Scope(
-        files=list(data.get("files", [])),
-        trees=[(t["path"], t.get("glob", "*.md")) for t in data.get("trees", [])],
-        derived=[Derived(d["path"], d["from"]) for d in data.get("derived", [])],
-        report=[Report(r["path"], r.get("fields")) for r in data.get("report", [])],
-    )
+    try:
+        return Scope(
+            files=list(data.get("files", [])),
+            trees=[(t["path"], t.get("glob", "*.md")) for t in data.get("trees", [])],
+            derived=[Derived(d["path"], d["from"]) for d in data.get("derived", [])],
+            report=[Report(r["path"], r.get("fields")) for r in data.get("report", [])],
+        )
+    except (KeyError, TypeError) as exc:
+        raise SyncError(f"{path}: malformed entry, missing {exc}") from exc
 
 
 def _is_link(p: Path) -> bool:
@@ -243,7 +246,11 @@ def plan(scope: Scope, roots: Roots) -> list[Item]:
         if d.source in finals:
             items.append(_derived_item(roots, d, finals[d.source]))
         else:  # source absent on both sides: nothing to derive from
-            items.append(Item(d.path, "derived", "ok", f"{d.source} absent", source=d.source))
+            left = [s for s in SIDES if (roots.side(s) / d.path).is_file()
+                    and not _is_link(roots.side(s) / d.path)]
+            items.append(Item(d.path, "derived", "orphan" if left else "ok",
+                              f"{d.source} is gone; remove the {'/'.join(left)} copy by hand"
+                              if left else f"{d.source} absent", source=d.source))
     items += [_report_item(roots, r) for r in scope.report]
     return items
 
@@ -272,8 +279,11 @@ class _Writer:
                 self._backup(side, rel, p)
             p.parent.mkdir(parents=True, exist_ok=True)
             tmp = p.with_name(p.name + ".acs-tmp")
-            tmp.write_bytes(text.replace("\n", eol).encode("utf-8"))
-            os.replace(tmp, p)
+            try:
+                tmp.write_bytes(text.replace("\n", eol).encode("utf-8"))
+                os.replace(tmp, p)
+            finally:
+                tmp.unlink(missing_ok=True)
         except OSError as exc:
             raise SyncError(f"cannot write {side} {rel}: {exc}") from exc
         self.done.append(f"wrote   {side:<7} {rel}")
@@ -313,8 +323,8 @@ def _apply_file(wr: _Writer, item: Item, take: str | None) -> None:
         wr.write(dest, item.path, final, item.eols[other_of[action]])
     elif action in ("delete_wsl", "delete_windows"):
         wr.delete(action.removeprefix("delete_"), item.path)
-    elif action not in ("record", "forget", "ok"):
-        return
+    elif action not in ("record", "forget"):
+        return  # ok (baseline already current), or an unresolved conflict
     wr.baseline(item.path, final)
 
 
@@ -415,6 +425,29 @@ def normalize_rel(rel: str) -> str:
     return norm
 
 
+MAX_DELETES = 2
+
+
+def _guard_deletes(items: list[Item], roots: Roots, scope: Scope) -> None:
+    """Refuse an apply that looks like a wiped or mis-pointed home, not a deletion.
+
+    A home that lost its files (profile reinstall, wrong --windows-home) makes
+    every file read as "deleted on that side", and a plain apply would delete
+    the other side's copies too. Backups exist, but this stops it first.
+    """
+    present = {s: any((roots.side(s) / f).is_file() for f in scope.files) for s in SIDES}
+    for side in SIDES:
+        if any(present.values()) and not present[side]:
+            raise SyncError(f"{side} home has none of the core files ({roots.side(side)}); "
+                            "wrong home or a wiped profile? Nothing applied")
+        other = "windows" if side == "wsl" else "wsl"
+        deletes = [i.path for i in items if i.action == f"delete_{other}"]
+        if len(deletes) > MAX_DELETES:
+            raise SyncError(f"{len(deletes)} files would be deleted on {other} because they are "
+                            f"missing on {side}. Check {roots.side(side)}, then re-run with "
+                            "--allow-deletes if that is intended. Nothing applied")
+
+
 def _print_diff(roots: Roots, rel: str) -> None:
     w, _ = read_text(roots.wsl / rel)
     n, _ = read_text(roots.windows / rel)
@@ -436,6 +469,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("command", nargs="?", default="check", choices=["check", "diff", "apply"])
     ap.add_argument("paths", nargs="*", help="limit to these relative paths")
     ap.add_argument("--take", choices=SIDES, help="resolve the named conflicts with this side")
+    ap.add_argument("--allow-deletes", action="store_true",
+                    help=f"permit more than {MAX_DELETES} deletes on one side in a single apply")
     ap.add_argument("--scope", default=str(DEFAULT_SCOPE))
     ap.add_argument("--wsl-home")
     ap.add_argument("--windows-home")
@@ -463,8 +498,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.take and not args.paths:
             raise SyncError("--take needs the conflict paths it resolves")
         # A derived copy follows its source, so selecting the source selects it too.
+        known = {i.path for i in items}
+        unknown = [p for p in args.paths if p not in known]
+        if unknown:
+            raise SyncError(f"no such in-scope item: {', '.join(unknown)}")
         selected = [i for i in items if not args.paths or i.path in args.paths
                     or (i.kind == "derived" and i.source in args.paths)]
+        if not args.allow_deletes:
+            _guard_deletes(selected, roots, scope)
         take = {p: args.take for p in args.paths} if args.take else None
         done: list[str] = []
         try:

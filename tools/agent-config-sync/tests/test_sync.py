@@ -394,3 +394,97 @@ def test_forget_is_pending_until_applied(env):
     assert sync.main(["check", *_args(roots, scope_file)]) == 10
     assert sync.main(["apply", *_args(roots, scope_file)]) == 0
     assert not (roots.state / "sync/.claude/instructions/gone.md").exists()
+
+
+def test_wiped_home_refuses_mass_delete(env):
+    roots, scope, scope_file = env
+    for i in range(4):
+        put(roots.wsl, f".claude/instructions/f{i}.md", "x\n")
+        put(roots.windows, f".claude/instructions/f{i}.md", "x\n")
+    put(roots.wsl, "AGENTS.md", "a\n")
+    put(roots.windows, "AGENTS.md", "a\n")
+    sync_all(roots, scope)
+    for i in range(4):
+        (roots.windows / f".claude/instructions/f{i}.md").unlink()
+    assert sync.main(["apply", *_args(roots, scope_file)]) == 20
+    assert all((roots.wsl / f".claude/instructions/f{i}.md").exists() for i in range(4))
+    assert sync.main(["apply", "--allow-deletes", *_args(roots, scope_file)]) == 0
+    assert not (roots.wsl / ".claude/instructions/f0.md").exists()
+
+
+def test_home_without_core_files_is_refused(env):
+    roots, scope, scope_file = env
+    put(roots.wsl, "AGENTS.md", "a\n")
+    put(roots.windows, "AGENTS.md", "a\n")
+    sync_all(roots, scope)
+    (roots.windows / "AGENTS.md").unlink()
+    assert sync.main(["apply", *_args(roots, scope_file)]) == 20
+    assert (roots.wsl / "AGENTS.md").exists()
+
+
+def test_take_deleting_side_deletes_the_other_copy(env):
+    roots, scope, scope_file = env
+    put(roots.wsl, "AGENTS.md", "a\n")
+    put(roots.windows, "AGENTS.md", "a\n")
+    put(roots.wsl, ".claude/instructions/x.md", "v1\n")
+    put(roots.windows, ".claude/instructions/x.md", "v1\n")
+    sync_all(roots, scope)
+    (roots.wsl / ".claude/instructions/x.md").unlink()
+    put(roots.windows, ".claude/instructions/x.md", "edited\n")
+    assert sync.main(["apply", "--take", "wsl", ".claude/instructions/x.md",
+                      *_args(roots, scope_file)]) == 0
+    assert not (roots.windows / ".claude/instructions/x.md").exists()
+    assert list((roots.state / "backups").rglob("x.md"))
+
+
+def test_take_with_unknown_path_errors(env):
+    roots, _, scope_file = env
+    put(roots.wsl, "AGENTS.md", "a\n")
+    put(roots.windows, "AGENTS.md", "b\n")
+    assert sync.main(["apply", "--take", "wsl", "AGENTS.mdx", *_args(roots, scope_file)]) == 20
+
+
+def test_orphaned_derived_copy_is_reported(env):
+    roots, scope, _ = env
+    put(roots.windows, ".codex/AGENTS.md", "stale\n")
+    item = by_path(sync.plan(scope, roots))[".codex/AGENTS.md"]
+    assert item.action == "orphan" and "windows" in item.detail
+
+
+def test_report_missing_unparsable_and_toml(tmp_path):
+    wsl, win = tmp_path / "w", tmp_path / "n"
+    put(wsl, "a.json", "{}")
+    put(wsl, "b.json", "{not json")
+    put(win, "b.json", "{}")
+    put(wsl, "c.toml", 'model = "x"\nkey = "s3cret"\n')
+    put(win, "c.toml", 'model = "y"\nkey = "other"\n')
+    roots = sync.Roots(wsl=wsl, windows=win, state=tmp_path / "s")
+    a = sync._report_item(roots, sync.Report("a.json", None))
+    b = sync._report_item(roots, sync.Report("b.json", None))
+    c = sync._report_item(roots, sync.Report("c.toml", ["model"]))
+    assert (a.action, a.detail) == ("differs", "missing on windows")
+    assert (b.action, b.detail) == ("differs", "cannot parse on wsl")
+    assert c.action == "differs" and "model" in c.detail and "s3cret" not in c.detail
+
+
+def test_malformed_scope_is_an_error(tmp_path):
+    bad = tmp_path / "s.toml"
+    bad.write_text('schema_version = 2\nderived = [{ path = "x" }]\n')
+    with pytest.raises(sync.SyncError, match="malformed"):
+        sync.load_scope(bad)
+
+
+def test_failed_replace_leaves_no_temp_file(env, monkeypatch):
+    roots, scope, _ = env
+    put(roots.wsl, "AGENTS.md", "v1\n")
+    put(roots.windows, "AGENTS.md", "v1\n")
+    sync_all(roots, scope)
+    put(roots.wsl, "AGENTS.md", "v2\n")
+
+    def boom(*_a):
+        raise OSError("share went away")
+
+    monkeypatch.setattr(sync.os, "replace", boom)
+    with pytest.raises(sync.SyncError):
+        sync.apply(sync.plan(scope, roots), roots)
+    assert not list(roots.windows.glob("*.acs-tmp"))

@@ -37,12 +37,17 @@ Read the exit code first:
 | `regen ...` | A per-CLI copy of AGENTS.md is stale. Apply regenerates it |
 | `conflict` | Both sides changed. Run `sync.py diff <path>` and say what each side changed. Never pick a winner |
 | `blocked` | A derived copy is waiting for a conflict on its source |
+| `orphan` | A derived copy whose source is gone. Remove it by hand after Leland agrees |
 | `differs` | Report only: `settings.json` / Codex config keys differ (key names, never values). Platform paths make this normal. A secrets-guard hook missing on either side is a security gap. Say so |
 
 ## 3. Apply (only after Leland approves)
 
 - `sync.py apply` applies every non-conflict item.
 - `sync.py apply --take wsl|windows <path>...` resolves the conflicts Leland chose.
+- Apply refuses (exit `20`) when one home is missing every core file, or
+  when more than 2 files would be deleted on one side. Both usually mean a
+  wrong or wiped home. Check the home path with Leland. Add
+  `--allow-deletes` only when he confirms the deletions.
 - Backups go to `baseline/backups/<timestamp>/<side>/` in the repo (gitignored).
   To restore, copy a file back from there.
 - Re-run `check` afterwards. Expect exit `0`.
