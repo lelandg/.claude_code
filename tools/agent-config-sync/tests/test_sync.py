@@ -356,3 +356,41 @@ def test_take_on_source_also_regenerates_derived(env):
     put(roots.windows, ".codex/AGENTS.md", "old\n")
     assert sync.main(["apply", "--take", "wsl", "AGENTS.md", *_args(roots, scope_file)]) == 0
     assert (roots.windows / ".codex/AGENTS.md").read_text() == "a\n"
+
+
+@pytest.mark.parametrize("spelling", ["./.claude/settings.json", ".claude//settings.json",
+                                      ".claude\\settings.json", "x/../.claude/settings.json"])
+def test_diff_refuses_report_paths_in_any_spelling(env, capsys, spelling):
+    roots, _, scope_file = env
+    put(roots.wsl, ".claude/settings.json", '{"env": {"TOKEN": "s3cret"}}')
+    put(roots.windows, ".claude/settings.json", "{}")
+    assert sync.main(["diff", spelling, *_args(roots, scope_file)]) == 20
+    assert "s3cret" not in capsys.readouterr().out
+
+
+def test_diff_refuses_paths_outside_scope(env, capsys, tmp_path):
+    roots, _, scope_file = env
+    put(roots.wsl, ".ssh/config", "secret host\n")
+    for bad in [".ssh/config", "../outside.md", "/etc/passwd"]:
+        assert sync.main(["diff", bad, *_args(roots, scope_file)]) == 20
+    assert "secret host" not in capsys.readouterr().out
+
+
+def test_apply_accepts_dot_slash_paths(env):
+    roots, _, scope_file = env
+    put(roots.wsl, "AGENTS.md", "a\n")
+    put(roots.windows, "AGENTS.md", "b\n")
+    assert sync.main(["apply", "--take", "wsl", "./AGENTS.md", *_args(roots, scope_file)]) == 0
+    assert (roots.windows / "AGENTS.md").read_text() == "a\n"
+
+
+def test_forget_is_pending_until_applied(env):
+    roots, scope, scope_file = env
+    put(roots.wsl, ".claude/instructions/gone.md", "x\n")
+    put(roots.windows, ".claude/instructions/gone.md", "x\n")
+    sync_all(roots, scope)
+    (roots.wsl / ".claude/instructions/gone.md").unlink()
+    (roots.windows / ".claude/instructions/gone.md").unlink()
+    assert sync.main(["check", *_args(roots, scope_file)]) == 10
+    assert sync.main(["apply", *_args(roots, scope_file)]) == 0
+    assert not (roots.state / "sync/.claude/instructions/gone.md").exists()

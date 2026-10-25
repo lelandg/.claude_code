@@ -22,7 +22,8 @@ python3 /mnt/d/Documents/Code/GitHub/.claude_code/tools/agent-config-sync/sync.p
 
 Read the exit code first:
 
-- `0`: in sync. Say so and stop.
+- `0`: nothing to apply. Still read every `differs` line and explain it
+  (step 2). A secrets-guard hook missing on one side is not "in sync".
 - `10`: work pending. Continue to step 2.
 - `20`: an error. Report the stderr line.
 

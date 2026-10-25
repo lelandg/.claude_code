@@ -18,6 +18,7 @@ import difflib
 import io
 import json
 import os
+import posixpath
 import subprocess
 import sys
 import stat
@@ -32,7 +33,7 @@ DEFAULT_STATE = REPO / "baseline"  # gitignored; on shared storage, so both runt
 
 SIDES = ("wsl", "windows")
 IO_REPARSE_TAG_LX_SYMLINK = 0xA000001D
-PENDING = {"record", "to_wsl", "to_windows", "delete_wsl", "delete_windows",
+PENDING = {"record", "forget", "to_wsl", "to_windows", "delete_wsl", "delete_windows",
            "regen_wsl", "regen_windows", "regen_both", "conflict", "blocked"}
 
 
@@ -238,7 +239,11 @@ def plan(scope: Scope, roots: Roots) -> list[Item]:
     items = [i for i in (_file_item(roots, rel) for rel in _sync_paths(scope, roots))
              if i.action != "skip"]
     finals = {i.path: i.final for i in items}
-    items += [_derived_item(roots, d, finals.get(d.source)) for d in scope.derived]
+    for d in scope.derived:
+        if d.source in finals:
+            items.append(_derived_item(roots, d, finals[d.source]))
+        else:  # source absent on both sides: nothing to derive from
+            items.append(Item(d.path, "derived", "ok", f"{d.source} absent", source=d.source))
     items += [_report_item(roots, r) for r in scope.report]
     return items
 
@@ -402,6 +407,14 @@ def _print_plan(items: list[Item], roots: Roots) -> int:
     return 10 if pending else 0
 
 
+def normalize_rel(rel: str) -> str:
+    """Canonical home-relative POSIX spelling of a user-supplied path."""
+    norm = posixpath.normpath(rel.replace("\\", "/"))
+    if norm.startswith(("/", "../")) or norm in ("..", ".") or ":" in norm:
+        raise SyncError(f"{rel}: give a path relative to the home directory")
+    return norm
+
+
 def _print_diff(roots: Roots, rel: str) -> None:
     w, _ = read_text(roots.wsl / rel)
     n, _ = read_text(roots.windows / rel)
@@ -437,15 +450,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "diff":
             if not args.paths:
                 raise SyncError("diff needs at least one path")
-            report_paths = {r.path for r in scope.report}
-            for rel in args.paths:
-                if rel in report_paths:
-                    raise SyncError(f"{rel} is report-only; diff would print its values")
+            allowed = set(_sync_paths(scope, roots)) | {d.path for d in scope.derived}
+            for rel in map(normalize_rel, args.paths):
+                if rel not in allowed:
+                    raise SyncError(f"{rel} is not a synced instruction file; diff only shows those")
                 _print_diff(roots, rel)
             return 0
         items = plan(scope, roots)
         if args.command == "check":
             return _print_plan(items, roots)
+        args.paths = [normalize_rel(p) for p in args.paths]
         if args.take and not args.paths:
             raise SyncError("--take needs the conflict paths it resolves")
         # A derived copy follows its source, so selecting the source selects it too.
