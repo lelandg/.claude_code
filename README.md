@@ -59,7 +59,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   ├── mcp.json                       # MCP server configurations
 │   ├── agentic_prompt_template.md     # Template for agentic workflows
 │   ├── statusline-command.sh          # Custom status line script
-│   ├── commands/                      # Repo record of ~/.claude/commands (agent-config-sync)
+│   ├── commands/                      # Repo record of ~/.claude/commands
 │   ├── agents/                        # Custom agent definitions
 │   │   ├── README.md                  # Agent documentation
 │   │   ├── CLAUDE.md                  # Agent-specific instructions
@@ -333,23 +333,22 @@ Custom skills extend Claude Code with repeatable workflows:
 - **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default.
 - **time** - Tracks execution time for each step in a workflow
 
-### Agent config sync (WSL-authoritative)
+### Agent config sync (two-way, WSL <-> Windows)
 
-`tools/agent-config-sync/` keeps agent configuration aligned across WSL, this
-repository, and a Windows desktop — **report-first, never automatic**.
+`tools/agent-config-sync/sync.py` keeps agent instruction files identical in
+the WSL and Windows homes: the canonical `AGENTS.md`, `CLAUDE.md`,
+`~/.claude/instructions/`, and the config-secrets guard. It regenerates the
+per-CLI copies of `AGENTS.md` (Codex, Copilot, Gemini).
 
-- WSL is the authority for portable intent; this repo is the sanitized record;
-  Windows is a derived target with a protected overlay.
-- A deterministic scanner (`scan.py`) produces a drift document containing no
-  secret values — only pointers, reason codes, types, and hashes.
-- When (and only when) there is drift, a bounded `claude -p` call adds judgment
-  and `render.py` writes the Markdown report.
-- Applying anything is a separate, approved operation (`merge.py`), which
-  re-verifies fingerprints, backs up every target, and can restore.
-- Plugin code is never copied; plugin commands are proposed, never executed.
+- Neither side is the authority. A change on one side is copied to the other.
+  A change on both sides is a conflict that you resolve with `--take`.
+- `settings.json` hooks/permissions/env and the Codex config are report-only,
+  compared by key name and never by value.
+- Every write is backed up first. The script uses the standard library only
+  and runs from PowerShell or WSL in a few seconds.
+- Skills, plugins and agents are out of scope (Claude Code syncs them).
 
-Skills: `agent-config-report` (scan and explain) and `agent-config-merge`
-(apply approved items). Operator guide: `Docs/agent-config-sync.md`.
+Skill: `agent-config-sync`. Operator guide: `Docs/agent-config-sync.md`.
 
 ### CodeMap System
 The CodeMap is a structured documentation file (`Docs/CodeMap.md`) that provides:
