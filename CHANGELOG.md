@@ -3,6 +3,22 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.8.1] - 2026-10-26
+
+### Removed
+- **Simplified Technical English and the output-formatting bullets.** These
+  rules were removed from every live copy on 2026-09-25. The 2026-09-26 sync
+  dropped the matching `CLAUDE.md` section but missed this one in
+  `config/agents/AGENTS.md`, which now matches live: a "Prompt formatting"
+  section holding only the XML-tags rule.
+
+### Fixed
+- **The changelog reads newest-first again.** `version-manager` inserts each
+  release above the first versioned heading, which sat under the older
+  date-headed entries, so v0.7.0 and v0.8.0 landed at the bottom of the file.
+  The dated entries (2026-02-09 to 2026-08-06) now follow the versioned ones;
+  every versioned entry is newer, and no line was edited, only moved.
+
 ## [0.8.0] - 2026-10-26
 
 ### Changed
