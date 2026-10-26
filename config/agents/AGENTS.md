@@ -371,31 +371,10 @@ explicitly asks.
 
 ---
 
-## Output & prompt formatting
+## Prompt formatting
 
-- **Simplified Technical English (STE) — all output.** Write every word in
-  ASD-STE100 *style*: chat replies, docs, runbooks, commit bodies, PR and
-  issue text. Apply these mechanical rules:
-  - Use the active voice. Use the present tense where the meaning allows it.
-  - Write one instruction per sentence. Keep procedural sentences to 20 words
-    and descriptive sentences to 25 words.
-  - Do not use a gerund as a noun. Write "start the build", not "starting the
-    build".
-  - Use one term for one concept. Do not vary a word for style.
-  - Do not use idiom, metaphor, or slang.
-  - State the cause before the effect. Name the noun. Do not depend on "it",
-    "this", or "that" to carry the meaning.
-  - Keep the rationale. Put the reason in its own sentence after the rule.
-  - Do not claim ASD-STE100 conformance. The approved-word dictionary is a paid
-    ASD specification, and you cannot check your text against it.
 - **Input to a model:** delimit sections with XML-style tags (`<context>`,
   `<instructions>`, `<example>`).
-- **Chat/report output:** Markdown, never HTML in a terminal. Structured data →
-  JSON Schema / structured outputs, not free-form XML or Markdown.
-- **Genuinely visual deliverables** (mockups, dashboards, option comparisons)
-  and runbooks of >1 command: produce a real HTML artifact or file and surface
-  it — with a copy-to-clipboard button next to every command, prompt, or code
-  snippet.
 
 ---
 
