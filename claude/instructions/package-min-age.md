@@ -58,7 +58,7 @@ upgrade to a version published <7 days ago without explicit approval.
 
 | Manager | Configuration |
 |---------|---------------|
-| **npm** (≥ 11.10.0) | `min-release-age=7` in `~/.npmrc` and in the repo's `.npmrc` (value in **DAYS**). Per-package exemption `min-release-age-exclude=<name or glob>` needs **npm ≥ 11.17.0** and is best-effort (open bugs for `npx` and `npm pack`). `minimumReleaseAge` is the **pnpm** key; npm ignores it |
+| **npm** (≥ 11.10.0) | `min-release-age=7` in `~/.npmrc` and in the repo's `.npmrc` (value in **DAYS**). Per-package exemption `min-release-age-exclude=<name or glob>` needs **npm ≥ 11.17.0** (npm/cli#9534) and is best-effort: `npm pack` honors it only from **11.19.0** (npm/cli#9811), and `npx` has an open bug. `minimumReleaseAge` is the **pnpm** key; npm ignores it |
 | **pnpm** (≥ 10.16) | `minimum-release-age=10080` in `~/.npmrc` or `pnpm-workspace.yaml` (minutes) |
 | **Dependabot** | `cooldown: { default-days: 7 }` in `.github/dependabot.yml`. Version updates only — GitHub's docs: "This default cooldown does not apply to security updates" |
 | **yarn** | No native flag — pin versions; verify with `npm view <pkg> time` before bumping |

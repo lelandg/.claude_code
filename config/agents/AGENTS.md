@@ -303,7 +303,8 @@ Gates before merge, by the riskiest thing the change touches:
 ### Versioning & changelog (every repo)
 
 Before opening a PR (there is no other path to `main`) bump the version and
-add the changelog entry **in the same commit** via
+add the changelog entry **in the same commit** — except a docs-only PR, which
+needs no bump (rule 4) — via
 `python3 ~/.claude/skills/version-manager/version_tool.py --repo <abs-path>
 release <major|minor|patch>` (dry-run first; curate the generated notes into
 prose with `--notes FILE --apply`). **Never hand-edit a version number or a

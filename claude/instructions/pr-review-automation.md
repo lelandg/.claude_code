@@ -11,10 +11,11 @@ older sequence in AGENTS.md instead (local review before push).
 
 ## Procedure
 
-1. Complete local checks, commit the feature, apply the required version bump,
-   push, and open the PR. The request authorizes the automation to review the
-   PR. Do not require a separate local Claude CLI review or another confirmation
-   before opening it.
+1. Complete local checks, commit the feature, run the Codex review against the
+   committed branch, push, and open the PR. Cut the version bump last,
+   immediately before merging (see "Shipping autonomy" and "Versioning" in
+   `~/.config/agents/AGENTS.md`). The request authorizes the automation to
+   review the PR; no further confirmation is needed before opening it.
 2. After opening the PR, wait for the automated Claude Code review. It normally
    arrives in 2-5 minutes. Autofix is conditional and can create a separate
    draft PR without adding a comment or changing the original PR head.

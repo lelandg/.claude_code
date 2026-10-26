@@ -120,6 +120,14 @@ A plain-English history of what changed in this repository and why. Newest first
   scope entries exit with code 20 instead of a traceback.
 - The README's size claim for `AGENTS.md` said ~2,500 tokens; it was already
   ~3,500 and is now ~6,000. The figure is corrected.
+- Three places still described the rules this release retires, in the live
+  config as well as here: the Versioning section required a bump on every PR
+  while rule 4 exempts docs-only PRs (the exception is now stated in both);
+  `github-stacked-prs` still sent small changes straight to `main`; and step 1
+  of `pr-review-automation.md` still bumped first and skipped the Codex review.
+- `package-min-age.md` cited `npm pack` as ignoring `min-release-age-exclude`;
+  npm 11.19.0 fixed that (npm/cli#9811). The exclude itself arrived in 11.17.0
+  (npm/cli#9534), now cited.
 
 ## [0.7.0] - 2026-10-25
 
