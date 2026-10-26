@@ -76,6 +76,51 @@ A plain-English history of what changed in this repository and why. Newest first
 - Added the `install-claude-config` skill (diff-and-ask installer), the `sync-claude-config` skill (sanitizing reverse sync), and `Docs/SETUP_GUIDE.md`.
 - Everything was reorganized under a `claude/` subdirectory so the repo maps cleanly onto `~/.claude/`, clone URLs were fixed, unused MCP entries removed, and the README expanded with detailed installation options.
 
+## [0.8.0] - 2026-10-26
+
+### Changed
+- **Security now outranks velocity.** `config/agents/AGENTS.md` opens its security
+  section with a precedence rule: when any rule would delay removing a known
+  vulnerability, the vulnerability goes first. The minimum-package-age rule is
+  rebuilt around it — a reported vulnerability with a fixed version is patched
+  immediately, taking the lowest version that clears the advisory, and the 7-day
+  floor applies only when nothing is vulnerable.
+- **New "Dependency, code, and secret scanning" section.** Free scanners
+  (`npm audit`, `osv-scanner`, `pip-audit`, `gitleaks`) run on every commit and
+  PR; Dependabot alerts — not the Dependabot PR list — are the source of truth;
+  metered Snyk runs only where it adds something. A high or critical finding with
+  a fix available gets its own remediation PR within 7 days.
+- **Shipping rules.** Everything reaches `main` through a PR (the old
+  small-changes-straight-to-main rule is retired); a new "Shipping autonomy"
+  section lets green gates authorize the merge; the version bump is the last
+  commit before merge, and a version tag another branch holds is moved aside,
+  never deleted. `claude/instructions/pr-review-automation.md` now defers to
+  that section instead of ending with "do not merge unless asked", so the
+  procedure no longer contradicts the policy that points to it.
+- **System dependencies** split into machine scope (the user runs it) and user
+  scope (the agent may run it when the tool is free and clears the age floor).
+- **Version picks follow the longest security-support window**, replacing the
+  even/odd heuristic, which generalised a Node-only, pre-Node-27 fact to all
+  software. `claude/instructions/environment.md` carries the verified Node and
+  Python EOL dates.
+- `claude/instructions/package-min-age.md` is rewritten: why the age floor and
+  scanners defend against different threats, a provenance check that replaces
+  the age check when a security fix overrides the floor, and where the npm floor
+  does not reach (`npm ci` ignores it). It also tells you to verify the floor is
+  actually configured, and warns that a Node.js installer can silently downgrade
+  npm below the version that supports it.
+
+### Fixed
+- `agent-config-sync` review fixes that merged with PR #2 after v0.7.0 was cut,
+  released here for the first time. `diff` no longer prints environment values
+  from `.claude/settings.json`. An apply that would mass-delete one side now
+  refuses unless `--allow-deletes`. `--take` with a path that matches nothing is
+  an error, not a silent no-op. Orphaned derived copies are reported instead of
+  passing as ok, a failed atomic replace cleans up its temp file, and malformed
+  scope entries exit with code 20 instead of a traceback.
+- The README's size claim for `AGENTS.md` said ~2,500 tokens; it was already
+  ~3,500 and is now ~6,000. The figure is corrected.
+
 ## [0.7.0] - 2026-10-25
 
 ### Changed
