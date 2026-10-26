@@ -190,6 +190,11 @@ A plain-English history of what changed in this repository and why. Newest first
   `agent-config-report` and `agent-config-merge`. Operator guide:
   `Docs/agent-config-sync.md`.
 
+---
+
+*Entries below predate versioning (v0.4.0 was the first tagged release) and
+are headed by date rather than version.*
+
 ## 2026-08-06
 
 - **New skill: `getting-started`.** Added the `getting-started` concierge — the marketplace's new headline skill. It interviews newcomers one question at a time (goals, subscriptions, surface), adapts (efficiency mode on trial plans, companion-tool pointers for other AI subscriptions, PyCharm CE advice scaled to whether an IDE exists), checks configuration with consent, recommends from a curated catalog of Leland's open source, and generates a personalized HTML action plan with copy-to-clipboard commands. Wired into `.claude-plugin/marketplace.json` (`claude-config-skills` now at 0.3.0, nine skills) and the README.
