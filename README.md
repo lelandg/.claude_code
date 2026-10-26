@@ -75,7 +75,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── github-issues.md           # Issue workflow mechanics + label conventions
 │   │   ├── model-delegation.md        # Cross-provider routing: Claude + Codex (GPT-6 Astra / GPT-5.6)
 │   │   │                              #   (ratings, effort ladder, Astra default, Sol review-only)
-│   │   ├── package-min-age.md         # 7-day min package age: per-manager config
+│   │   ├── package-min-age.md         # Vuln fixes beat the 7-day age floor: per-manager config
 │   │   ├── plan-templates.md          # Implementation plan format
 │   │   ├── pr-review-automation.md    # GitHub App PR review + autofix inspection procedure
 │   │   └── runbook-standards.md       # Fully-specified runbooks (zero-inference steps)
@@ -398,13 +398,14 @@ The same guard extends to the other agent CLIs:
 ## Design Philosophy
 
 ### Context Efficiency
-The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a slim (~2,500-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
+The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a compact (~6,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
 
 ### Security First
 - Credentials are never stored in project directories
 - Bash commands never contain inline secrets
 - All issues/inputs are treated as untrusted (prompt injection awareness)
-- Supply-chain defense: 7-day minimum package age enforced across npm/pnpm/pip/uv/poetry/cargo (see `AGENTS.md`)
+- Security outranks velocity: a reported vulnerability with a fixed version is patched immediately, overriding the 7-day minimum package age that otherwise guards npm/pnpm/pip/uv/poetry/cargo against compromised fresh publishes (see `AGENTS.md`)
+- Free scanners everywhere (`npm audit`, `osv-scanner`, `pip-audit`, `gitleaks` on every commit and PR), Dependabot alerts as the source of truth, metered Snyk where it counts
 - GitHub Actions: `pull_request_target` is banned — the #1 source of Actions supply-chain compromises
 
 ### Convention Over Configuration
