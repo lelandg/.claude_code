@@ -1,6 +1,6 @@
 # Environment & tooling details
 
-The always-loaded rules (no `cd`, even-minor-version preference) live in
+The always-loaded rules (no `cd`, the support-window version rule) live in
 `~/.config/agents/AGENTS.md`. This file holds the rest — customize each
 section for your machine.
 
@@ -10,10 +10,28 @@ Customize for your setup (e.g. JetBrains, VS Code, Vim).
 
 ## Version picks
 
-Prefer even-numbered minor versions of open-source software (e.g. Python 3.12,
-not 3.11/3.13; Node.js LTS majors are even) — treat the even line as stable.
-If a needed package doesn't support the even version yet, use the odd one and
-say so.
+Pick the release line with the **longest remaining security-support window**
+that the project's dependencies allow. (This replaces an earlier "prefer even
+minors" rule, which generalised a Node-only fact to all software.)
+
+- **Node.js:** pin a line that is in LTS. Verified against nodejs/Release
+  `schedule.json` on 2026-10-23: **22** Maintenance LTS, EOL 2027-04-30;
+  **24** Maintenance LTS since 2026-10-20, EOL 2028-04-30; **26** becomes LTS
+  2026-10-28, EOL 2029-04-30; **23** and **25** were Current-only and are EOL
+  (2025-06-01, 2026-06-01). From **27** (alpha 2026-10-28, LTS 2027-10-20) the
+  cycle is annual and every major becomes LTS — do not encode "odd = unstable".
+  Pin in `.nvmrc`; bound `engines` per major at the patched minimums, naming
+  the EOL lines explicitly rather than by parity.
+- **Python:** no even/odd convention exists. Every minor is a stable release
+  with five years of support (bugfix, then security-only). Verified 2026-10-23:
+  **3.15** is newest (released 2026-10-09; EOL 2031-10-31); 3.14 EOL
+  2030-10-31; 3.13 EOL 2029-10-31 (security-only since 2026-10-01); 3.12 EOL
+  2028-10-31; 3.11 EOL 2027-10-31; **3.10 is EOL** (2026-10-01). Prefer the
+  newest minor the dependencies support. Existing `>=3.11`/`>=3.12` floors can
+  stay as they are — no churn — but nothing new targets 3.10.
+- **Everything else:** read the project's own support policy; most have none
+  and simply patch the latest stable. Never run an end-of-life line.
+- If a dependency forces an older line, say so and name the date it goes EOL.
 
 ## Python
 

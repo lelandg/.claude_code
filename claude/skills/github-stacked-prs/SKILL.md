@@ -23,7 +23,7 @@ This feature is in **public preview** and this skill was written 2026-08-08 agai
 
 **Use for:** a single feature whose diff would be large (roughly >400 lines) AND separates into dependent layers (schema → API → UI; refactor → behavior change; migration → code using it). The stack still merges as one unit, so Leland's "one PR per finished whole feature" rule holds — the stack IS the feature's PR, in reviewable slices.
 
-**Do not use for:** small changes (house rules: those go straight to `main`); independent changes (open separate ordinary PRs); repos where exit 9 says the preview isn't enabled; or splitting for its own sake — if one PR reviews fine, ship one PR.
+**Do not use for:** small changes (house rules: a small change is one small PR); independent changes (open separate ordinary PRs); repos where exit 9 says the preview isn't enabled; or splitting for its own sake — if one PR reviews fine, ship one PR.
 
 ## Agent safety: never trigger a TUI
 
