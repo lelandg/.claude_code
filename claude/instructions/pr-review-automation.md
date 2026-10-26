@@ -54,7 +54,8 @@ older sequence in AGENTS.md instead (local review before push).
    autofix, address verified findings directly. Do not assume every review
    triggers autofix. Push tested manual corrections within the authorized scope
    and wait for the updated review. Report missing review or unresolved
-   automation status as pending. Do not merge unless asked.
+   automation status as pending. Commit/push/PR/merge per "Shipping autonomy"
+   in `~/.config/agents/AGENTS.md`.
 
 ## Notes
 
