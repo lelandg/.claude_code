@@ -276,7 +276,8 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
    safe only because something preventive still runs on a direct commit. A
    bypassed branch with no local gate has nothing checking it at all, and the
    server-side scans then report the secret after it is already in history.
-   Install the hook first, or keep using PRs. For the same reason, a commit
+   Install one first (`tools/githooks/install.sh` in the config repo ships the
+   hook this rule assumes), or keep using PRs. For the same reason, a commit
    that used the hook's degraded-scan override has never been scanned: run
    `gitleaks` over it yourself before pushing, because nothing downstream will
    stop it and rule 2 above says local `main` may hold things on purpose.
