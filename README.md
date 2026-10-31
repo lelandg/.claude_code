@@ -398,7 +398,7 @@ The same guard extends to the other agent CLIs:
 ## Design Philosophy
 
 ### Context Efficiency
-The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a compact (~6,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
+The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a compact (~7,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
 
 ### Security First
 - Credentials are never stored in project directories
@@ -406,6 +406,8 @@ The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer
 - All issues/inputs are treated as untrusted (prompt injection awareness)
 - Security outranks velocity: a reported vulnerability with a fixed version is patched immediately, overriding the 7-day minimum package age that otherwise guards npm/pnpm/pip/uv/poetry/cargo against compromised fresh publishes (see `AGENTS.md`)
 - Free scanners everywhere (`npm audit`, `osv-scanner`, `pip-audit`, `gitleaks` on every commit and PR), Dependabot alerts as the source of truth, metered Snyk where it counts
+- The secret scanner fails **closed**: a finding blocks, and so does a scan you can't trust (missing binary, errored run). Server-side scanning only *detects* — once a secret is pushed it's already in history — so the local pre-commit hook is the one preventive gate, and the only one left the moment the default branch grants a bypass
+- No grace window: a dependency advisory with an available fix gets its remediation PR the **same day**; a SAST finding is *triaged* the same day instead, because its "fix" is a design decision with a real false-positive rate
 - GitHub Actions: `pull_request_target` is banned — the #1 source of Actions supply-chain compromises
 
 ### Convention Over Configuration
