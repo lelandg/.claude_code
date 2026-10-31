@@ -45,8 +45,10 @@ COMMANDS = [
 
     # --- baseline: cloud reads and money mutations -----------------------
     (A + "get-app --app-id XYZ", "aws"),
-    (A + "list-apps", None),
     ("aws ssm get-parameter --name /x --with-decryption", "aws"),
+    # Allowed only under the convention that secrets are SecureString, which
+    # returns ciphertext without --with-decryption. A `String` parameter returns
+    # its value in plaintext and no flag marks that. Recorded as the trade.
     ("aws ssm get-parameter --name /x", None),
     ("printenv HOME", None),
     (S + "prices create --unit-amount 500", "stripe"),
@@ -130,6 +132,24 @@ COMMANDS = [
     ("Get-ChildItem \"Env:\"", "env"),
     ("Get-ChildItem Env:\\", "env"),
     ("Get-ChildItem Env:\\PATH", None),
+
+    # 14. The *list* forms leak more than the get forms the guard was named
+    #     for: per the ListApps API reference each element of `apps` is a full
+    #     App object with environmentVariables and basicAuthCredentials, so
+    #     this hands over every app's secrets instead of one app's. This case
+    #     asserted `None` for two review rounds — a bypass written down as
+    #     correct behaviour, which is worse than no test.
+    (A + "list-apps", "aws"),
+    (A + "list-branches --app-id XYZ", "aws"),
+
+    # 15. `--debug` prints the unfiltered response body to stderr before the
+    #     projection is applied, so an allowlisted --query proves nothing.
+    (A + "get-app --app-id X --query app.name --debug", "aws"),
+    (A + "get-app --app-id X --debug --query app.name", "aws"),
+
+    # 16. A commented-out flag is not an argument.
+    (A + "get-app --app-id X # --query app.name", "aws"),
+    (A + "get-app --app-id X --query 'a#b'", "aws"),
 ]
 
 GREPS = [
@@ -167,6 +187,12 @@ GREPS = [
     ({"glob": "*.example.yaml"}, True),
     ({"glob": "**/.env.*.local"}, True),
     ({"glob": "*.yaml.tmpl"}, False),
+
+    # 17. Grep's glob syntax expands brace alternatives and `fnmatch` does not,
+    #     so this selected config.yaml while matching no probe and no suffix.
+    ({"glob": "*.{yaml,yml}"}, True),
+    ({"glob": "{.env,.env.*}"}, True),
+    ({"glob": "**/*.{js,ts}"}, False),
 ]
 
 

@@ -57,7 +57,7 @@ There are three distinct layers:
 2. **`.claude_code` — portable record and comparison baseline.** The repository stores
    sanitized, reviewable configuration suitable for version control and distribution.
 3. **Windows configuration — derived target plus protected overlay.** Portable intent is
-   reconciled into `C:\Users\aboog`, while Windows/Desktop-specific values remain locally
+   reconciled into `C:\Users\user`, while Windows/Desktop-specific values remain locally
    owned.
 
 The scanner performs a three-way comparison:
@@ -103,7 +103,7 @@ Authoritative WSL roots include:
 manifest and may be overridden for fixtures or another machine; path literals are not
 spread throughout the implementation.
 
-The Windows target defaults to `/mnt/c/Users/aboog` when invoked from WSL. Report and
+The Windows target defaults to `/mnt/c/Users/user` when invoked from WSL. Report and
 backup state is kept outside Git:
 
 ```text

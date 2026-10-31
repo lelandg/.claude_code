@@ -3,7 +3,7 @@
 # Design: Docs/plans/2026-10-17-slim-agent-config-sync-design.md
 #
 # Out of scope on purpose: skills and plugins (Claude Code syncs them),
-# agents (Leland, 2026-10-17), and the public mirror (/publish-claude-config).
+# agents, and the public mirror (/publish-claude-config).
 
 schema_version = 2
 

@@ -95,6 +95,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   └── technical-quality.md       # Comprehensive technical analysis
 │   └── skills/                        # Custom skills (slash commands)
 │       ├── time.md                    # Execution time tracking
+│       ├── agent-config-sync/         # Report/reconcile drift between two runtimes' agent config
 │       ├── astrocade-game-creation/   # Design, prompt-plan, playtest & ship games on Astrocade
 │       ├── cl-project-init/           # Sanitized example: company project scaffolder
 │       ├── claude-md-optimizer/       # Rightsize CLAUDE.md/skills (Claude 5 context-engineering rules)
@@ -102,6 +103,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── disk-doctor/               # Disk cleanup + install hygiene (safe-trash, undo)
 │       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
 │       ├── feature-documenter/        # Feature documentation skill
+│       ├── getting-started/           # Interview-first concierge for people new to Claude Code
 │       ├── github-stacked-prs/        # Split a big feature into a chain of dependent PRs (gh-stack)
 │       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
 │       ├── html-doc/                  # Standalone HTML deliverables (reports, explainers)
@@ -383,7 +385,7 @@ A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) 
 
 The hatches are **human-only** by design: the guard matches on command text, so documentation *about* a blocked call trips the same wire as the call itself. That false positive is the intended trade — switch tools and move on; never let the model append its own hatch.
 
-`tools/test-config-secrets-guard.py` is the regression suite — 80 cases, and worth reading before you touch a pattern. Every case under its `BYPASSES` marker is a hole three rounds of cross-provider review found *after* the guard grew past config-file reads, and the rounds kept finding more because the first fixes were the wrong shape. Four lessons, in the order they were learned the hard way:
+`tools/test-config-secrets-guard.py` is the regression suite — 88 cases, and worth reading before you touch a pattern. Most cases under its `BYPASSES` marker are a hole that four rounds of cross-provider review found *after* the guard grew past config-file reads (the rest are the false positives and negative controls those fixes must not break), and the rounds kept finding more because the first fixes were the wrong shape. Four lessons, in the order they were learned the hard way:
 
 - **The seams between a command and its arguments are where bypasses live.** A global flag before the subcommand (`stripe --live charges create`), before the service (`aws --region … amplify get-app`), or a resource path that nests (`stripe --live checkout sessions create`) defeats any pattern assuming a fixed word order — in the one spelling that matters most.
 - **Judge each call, not the command line.** One safe-looking flag vouched for every call in a pipeline, so `aws … --query app.name; aws … get-branch` passed with one projection and two reads. Segments are now split and judged individually — *quote-aware*, because a regex split tore `--query 'app.name && app'` in half and the leading fragment then looked safe.
@@ -412,7 +414,7 @@ The same guard extends to the other agent CLIs:
 ## Design Philosophy
 
 ### Context Efficiency
-The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a compact (~7,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
+The always-loaded instruction files stay lean: `CLAUDE.md` is a ~100-line pointer file, and the shared `AGENTS.md` is a compact (~7,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
 
 ### Security First
 - Credentials are never stored in project directories

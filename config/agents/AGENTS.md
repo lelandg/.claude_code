@@ -267,9 +267,16 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
    are unsure where the rule is echoed, it is a PR. Grep before you commit;
    the reviewers will not do it for you.
 
-   A direct commit still runs the pre-commit hook, still carries attribution,
-   and needs no version bump. Never force-push `main`, never `--admin`, never
-   bypass a *status check* — the allowance skips the PR, not the scanning.
+   A direct commit still runs your pre-commit hook, still carries attribution,
+   and needs no version bump. Never force-push `main`, never `--admin`, and
+   never use a bypass to land something that **failed** a check — the allowance
+   skips the PR, not the obligation to be clean.
+
+   **If you have no pre-commit hook, this allowance is not for you.** It is
+   safe only because something preventive still runs on a direct commit. A
+   bypassed branch with no local gate has nothing checking it at all, and the
+   server-side scans then report the secret after it is already in history.
+   Install the hook first, or keep using PRs.
 
    **Know what your branch protection actually allows before relying on this.**
    Protect a `main` that deploys to production with a ruleset requiring a pull
@@ -288,10 +295,11 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
 gate below is green, merge it — do not stop to ask. A go-ahead to ship
 ("implement and publish", "ship it", "merge when green") is still welcome but
 is no longer what authorizes the merge; the work itself does. The whole path
-runs unprompted: branch → implement → gates → commit → version bump → Codex
-review → push → PR → automated review → fixes → **merge** → post-deploy check.
-A non-functional change under rule 4 skips this path entirely: commit on
-`main` and push.
+runs unprompted: branch → implement → gates → commit → Codex review → push →
+PR → automated review → fixes → version bump → **merge** → post-deploy check.
+The bump sits second-to-last on purpose; see "Versioning" for why. A
+non-functional change under rule 4 skips this path entirely: commit on `main`
+and push.
 
 Stop and ask only when something is genuinely blocking: a gate you cannot get
 green, a review finding that needs the user's decision, or a step that needs a
@@ -374,9 +382,10 @@ Gates before merge, by the riskiest thing the change touches:
 
 ### Versioning & changelog (every repo)
 
-Before opening a PR bump the version and add the changelog entry **in the same
-commit** — except a non-functional change, which needs no bump and may skip
-the PR altogether (rule 4) — via
+Every PR carries a version bump and a changelog entry **in the same commit** —
+except a non-functional change, which needs no bump and may skip the PR
+altogether (rule 4). Cut it immediately before merging, not when you open the
+PR (the next paragraph says why), via
 `python3 ~/.claude/skills/version-manager/version_tool.py --repo <abs-path>
 release <major|minor|patch>` (dry-run first; curate the generated notes into
 prose with `--notes FILE --apply`). **Never hand-edit a version number or a
@@ -424,7 +433,7 @@ and any autofix PR by the procedure in
 before push; it does not replace the wait for the automated review. On a repo
 with no automated reviewer configured, a local Claude review (`code-reviewer`
 agent) stands in for it: implement → tests green → commit → Codex + Claude
-review → reconcile/fix → version bump → push → PR.
+review → reconcile/fix → push → PR → version bump → merge.
 
 **Which reviewer that is varies by repo, so read the repo's own `AGENTS.md`
 rather than assuming.** Two properties decide which one you actually gate on,

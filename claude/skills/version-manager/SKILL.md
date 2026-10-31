@@ -32,7 +32,10 @@ write nothing until you add `--apply`. Always show the user the dry run first.
 
 ## Standard workflow
 
-**Before opening a PR** (this is the house rule in `~/.config/agents/AGENTS.md`):
+**Immediately before merging a PR, as its last commit** — not when you open it.
+With several PRs open at once each one claims the same next version and only the
+first to merge keeps it, so a bump cut early goes stale and has to be re-cut.
+(This is the house rule in `~/.config/agents/AGENTS.md`.)
 
 ```bash
 T=~/.claude/skills/version-manager/version_tool.py

@@ -46,13 +46,13 @@ cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 | MCP Servers | `mcp.json` | GitHub, chrome-devtools, and ACE Studio MCP server configs |
 | Status Line | `statusline-command.sh` | Two-line status bar: user@host, path, git branch/worktree; model, context %, rate-limit badges, PR badge, session name |
 | Agentic Template | `agentic_prompt_template.md` | Template for autonomous agent workflows |
-| 6 Agents | `agents/*.md` | code-reviewer, software-engineer, performance-optimizer, documentation-specialist, research-assistant, test-generator |
+| 1 Agent | `agents/*.md` | code-reviewer (the other five retired in August 2026 — see `claude/agents/README.md`) |
 | Agent Specs | `agents/specs/CLAUDE_CodeMap.md` | CodeMap spec copy for agent access |
-| 5 Instructions | `instructions/*.md` | credentials, file-dispositions, file-operations, model-delegation, plan-templates |
+| 10 Instructions | `instructions/*.md` | credentials, environment, file-dispositions, file-operations, github-issues, model-delegation, package-min-age, plan-templates, pr-review-automation, runbook-standards |
 | 3 Output Styles | `output-styles/*.md` | genui, html, technical-quality |
-| 21 Skills | `skills/*/` | See the [Skills](#skills) table below |
-| Guard Tools | `tools/*.py`, `tools/*.pi.ts` | config-secrets-guard hook (blocks printing secrets) + masked safe-config-reader; Pi port included |
-| Hookify Rules | `hookify-rules/` | Guard denying unpinned Codex rescue/exec runs, with an 8-case test harness |
+| 26 Skills | `skills/*/` | See the [Skills](#skills) table below |
+| Guard Tools | `tools/*.py`, `tools/*.pi.ts` | config-secrets-guard hook (blocks printing secrets) + its 88-case regression suite + masked safe-config-reader; Pi port included |
+| Hookify Rules | `hookify-rules/` | Guard denying unpinned Codex rescue/exec runs, with a 10-case test harness |
 | Repo Commands | `.claude/commands/*.md` | Slash commands available inside the cloned repo: `/install-claude-config`, `/sync-claude-config`, `/unify-agents-md`, `/feature-team`, `/rename-code`, `/update-hermes`, `/yt-transcript` |
 
 ## Required Environment Variables
@@ -213,16 +213,13 @@ Use `${VAR_NAME}` syntax for environment variable references (never hardcode tok
 
 ## Agents
 
-Six specialized agents are included, each optimized for specific tasks:
+One specialized agent is included:
 
 | Agent | Model | Best For |
 |-------|-------|----------|
 | **code-reviewer** | Fable | Reviewing code for bugs, quality, performance, and best practices |
-| **software-engineer** | Opus | Writing new code, fixing bugs, implementing features, refactoring |
-| **performance-optimizer** | Opus | Identifying bottlenecks, optimizing algorithms, database queries |
-| **documentation-specialist** | Sonnet | Creating user guides, API docs, README files, architecture docs |
-| **research-assistant** | Sonnet | Researching technologies, comparing approaches, best practices |
-| **test-generator** | Sonnet | Creating test suites with edge cases, mocks, fixtures |
+
+Five others (software-engineer, performance-optimizer, documentation-specialist, research-assistant, test-generator) were retired in August 2026 — Claude Code's own general-purpose agent had caught up with them, and a thin wrapper that only restates the default is worse than no wrapper, because it looks like it adds something. `claude/agents/README.md` has the reasoning.
 
 Agents are automatically selected by Claude Code based on your task. No manual invocation needed - just describe what you need.
 
@@ -295,22 +292,25 @@ After installation, verify everything works:
 ├── agents/                            # Custom agent definitions
 │   ├── CLAUDE.md                      # Agent-specific instructions
 │   ├── code-reviewer.md
-│   ├── documentation-specialist.md
-│   ├── performance-optimizer.md
-│   ├── research-assistant.md
-│   ├── software-engineer.md
-│   ├── test-generator.md
+│   ├── Claude-Code-Agents-Documentation.md
+│   ├── README.md                       # Why the other five agents were retired
 │   └── specs/
 │       └── CLAUDE_CodeMap.md          # CodeMap spec for agent access
 ├── instructions/                      # On-demand reference docs
 │   ├── credentials.md                 # Secrets management patterns
+│   ├── environment.md                 # IDEs, runtimes, version-support windows (template)
 │   ├── file-dispositions.md           # Standing approvals for working-tree files (template)
 │   ├── file-operations.md             # File operation guidelines
-│   ├── model-delegation.md            # Cross-provider routing (Claude + Codex/GPT-5.6)
-│   └── plan-templates.md              # Implementation plan format
+│   ├── github-issues.md               # Issue triage, labels, needs-info flow
+│   ├── model-delegation.md            # Cross-provider routing (Claude + Codex)
+│   ├── package-min-age.md             # Minimum-package-age floor, per manager
+│   ├── plan-templates.md              # Implementation plan format
+│   ├── pr-review-automation.md        # Claude Code GitHub App review + autofix inspection
+│   └── runbook-standards.md           # Zero-inference instructions for a human to run
 ├── tools/                             # Hook scripts wired in settings.json
 │   ├── config-secrets-guard.py        # PreToolUse hook: blocks printing secrets
 │   ├── config-secrets-guard.pi.ts     # Same guard as a Pi extension
+│   ├── test-config-secrets-guard.py   # 88-case regression suite for the guard
 │   └── safe-config-reader.py          # Masked config reader
 ├── hookify-rules/                     # Guard rules (symlink into a project's .claude/)
 │   ├── hookify.block-unpinned-codex-rescue.local.md

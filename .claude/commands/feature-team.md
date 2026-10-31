@@ -17,16 +17,17 @@ Invoke the **superpowers:subagent-driven-development** skill and run it task-by-
 - **Opus** — orchestration, design/brainstorming, architecture decisions only (i.e., you, the controller).
 
 ## Verification tiers (put this in every implementer dispatch)
-- Task gate = `npx eslint <files you touched>` + `npx tsc --noEmit` + this task's tests. Do **NOT** run `npm run build` or full `npm run lint` — the Finishing phase owns those. Do **NOT** push.
-- If the task touches `prisma/schema.prisma`, run `npm run db:generate` before the typecheck.
+- Task gate = scoped lint on the files you touched + the project typecheck + this task's tests. Do **NOT** run the full build or full lint — the Finishing phase owns those. Do **NOT** push. (On a Node/TypeScript project that is `npx eslint <files>` + `npx tsc --noEmit`; substitute your stack's equivalents.)
+- If the task touches a schema or codegen input (e.g. `prisma/schema.prisma`), regenerate the client before the typecheck.
 - Commit the task's work once the gate passes (per-task commits; push waits for the finish).
 - Run the branch in a worktree (sibling of the project dir, e.g. `~/code/GitHub/<name>`), per superpowers:using-git-worktrees.
 
 ## Finishing phase (after the last task)
-1. Controller runs `npm run build` + full `npm run lint` **once**. On failure, dispatch ONE Sonnet fix agent with the exact error output; loop until green. Substantive fixes get a scoped re-review.
+1. Controller runs the project's full build + full lint **once**. On failure, dispatch ONE Sonnet fix agent with the exact error output; loop until green. Substantive fixes get a scoped re-review.
 2. Final whole-branch review (part of subagent-driven-development).
-3. `/version-manager release <level>` — version bump + changelog in the same commit.
+3. `/codex:review --base origin/main` against the committed branch — the cross-provider review AGENTS.md requires on every PR, *before* it opens. Fix each finding or answer it in the PR body.
 4. Then **superpowers:finishing-a-development-branch** for the merge/PR menu. Push happens here, never earlier (review-before-push rule).
+5. `/version-manager release <level>` — version bump + changelog in the same commit, cut **last**, immediately before the merge. Cut earlier it goes stale the moment another PR merges first.
 
 ## Notes
 - If `$ARGUMENTS` is a plan file, extract the tasks from it; otherwise brainstorm → write a plan first (don't skip design for non-trivial work).

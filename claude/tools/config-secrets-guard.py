@@ -133,8 +133,14 @@ _GLOBAL_OPTS = r"(?:--[\w-]+(?:[=\s]+[^\s-][^\s]*)?\s+)*"
 _AWS = r"\baws\s+" + _GLOBAL_OPTS
 _AWS_SECRET_SVC = "secrets" + "manager"  # split so other guards don't match this file's text
 
+# The list forms leak strictly more than the get forms, which is easy to miss
+# because the guard's name is about *reading* a thing: per the ListApps API
+# reference, each element of `apps` is a full App object carrying
+# `environmentVariables` and `basicAuthCredentials`, so `list-apps` hands over
+# every app's secrets rather than one app's. Same for `list-branches`.
 AMPLIFY_READ_RE = re.compile(
-    _AWS + r"amplify\s+" + _GLOBAL_OPTS + r"(?:get-app|get-branch)\b"
+    _AWS + r"amplify\s+" + _GLOBAL_OPTS
+    + r"(?:get-app|get-branch|list-apps|list-branches)\b"
 )
 AWS_SECRET_RE = re.compile(
     _AWS + r"amplify\s+[^\n;&|]*(?i:environment-?variables)"
@@ -160,8 +166,36 @@ _SAFE_PROJECTIONS = frozenset({
 })
 
 
+def strip_comment(segment: str) -> str:
+    """The segment without its trailing shell comment.
+
+    A commented-out flag is not an argument: `aws amplify get-app --app-id X
+    # --query app.name` executes an unprojected read while reading as a safe
+    one. Quote-aware, so a `#` inside an argument stays.
+    """
+    quote = None
+    for index, char in enumerate(segment):
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+        elif char == "#" and (index == 0 or segment[index - 1].isspace()):
+            return segment[:index]
+    return segment
+
+
+# `--debug` prints the unfiltered HTTP response body to stderr *before* the
+# projection is applied, so a redacting `--query` proves nothing about what
+# reaches the transcript.
+_DEBUG_RE = re.compile(r"(?<![\w-])--debug\b")
+
+
 def query_redacts_values(segment: str) -> bool:
     """True when this one call's --query names only known-safe fields."""
+    segment = strip_comment(segment)
+    if _DEBUG_RE.search(segment):
+        return False
     args = _QUERY_ARG_RE.findall(segment)
     if not args:
         return False
@@ -279,11 +313,31 @@ _PROTECTED_PROBES = (
 )
 
 
+def expand_braces(pattern: str):
+    """Every alternative of a ripgrep brace pattern, e.g. `*.{yaml,yml}`.
+
+    Grep's glob syntax expands these and `fnmatch` does not, so `*.{yaml,yml}`
+    selected `config.yaml` while matching no probe and no YAML suffix.
+    """
+    match = re.search(r"\{([^{}]*)\}", pattern)
+    if not match:
+        return [pattern]
+    expanded = []
+    for alternative in match.group(1).split(","):
+        head, tail = pattern[: match.start()], pattern[match.end():]
+        expanded.extend(expand_braces(head + alternative.strip() + tail))
+    return expanded
+
+
 def glob_is_blocked(glob: str) -> bool:
     """True when the glob can select a file `path_is_blocked` would protect."""
     if not glob:
         return False
     basename = glob.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return any(_basename_glob_is_blocked(b) for b in expand_braces(basename))
+
+
+def _basename_glob_is_blocked(basename: str) -> bool:
     if not any(ch in basename for ch in "*?["):
         return bool(re.fullmatch(SECRET_FILE, basename))
     if any(fnmatch.fnmatchcase(probe, basename) for probe in _PROTECTED_PROBES):
@@ -292,7 +346,19 @@ def glob_is_blocked(glob: str) -> bool:
 
 
 def grep_is_blocked(tool_input: dict) -> bool:
-    """Grep aimed at a secret file by path or by glob prints its matching lines."""
+    """Grep aimed at a secret file by path or by glob prints its matching lines.
+
+    KNOWN AND ACCEPTED GAP, recorded rather than patched. An unrestricted
+    content search -- `{"path": ".", "pattern": "password"}`, with no glob, or
+    scoped only by `type: "yaml"` which this function does not read -- can match
+    inside a protected file and print the line. Closing it means blocking every
+    directory-wide content search, since nothing in the call proves the tree
+    holds no `.env`. That is most of what Grep is for, and a guard that blocks
+    ordinary work gets switched off, which protects nothing. So the scope checks
+    cover what a call *names* -- a path, a glob -- and the docstring's promise
+    holds: this is a guardrail against accidental exposure, not a sandbox.
+    Defence in depth for the rest is the secret never being in the tree.
+    """
     path = tool_input.get("path") or ""
     glob = tool_input.get("glob") or ""
     return (
