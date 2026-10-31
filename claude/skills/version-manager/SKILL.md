@@ -44,6 +44,9 @@ Pick the level from what actually shipped — `major` for a breaking change,
 `minor` for a feature, `patch` for fixes and docs. The dry run prints the level
 the commits suggest; it never picks silently.
 
+A change that is non-functional under rule 4 of `AGENTS.md` — every path one no
+build step consumes — skips the PR, and so needs no bump at all.
+
 **Curate the changelog body.** The generated draft is raw commit subjects. Rewrite
 it into prose in a file and pass `--notes FILE`. This is the deliberate manual
 step — generated draft, curated release.
