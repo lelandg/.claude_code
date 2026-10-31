@@ -3,6 +3,41 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.9.1] - 2026-10-31
+
+### Security
+- **An emptied `pip install` switch no longer falls through to the git setting.**
+  `tools/githooks/pre-commit` read the opt-in as
+  `${SNYK_HOOK_PIP_INSTALL:-$(git config --get hook.snykPipInstall)}`, and
+  `${VAR:-default}` substitutes when the variable is **empty** as well as
+  unset. So `SNYK_HOOK_PIP_INSTALL= git commit` in a repo with
+  `hook.snykPipInstall=1` fell through to the enabled setting and ran the
+  package build — the opposite of what an explicitly emptied switch means, and
+  the opposite of the precedence the README documents. `-` instead of `:-`
+  falls back only when the variable is unset. The switch exists because
+  `pip install -r` *builds* packages and a source distribution's build runs
+  arbitrary code as the developer, which is what makes a one-character
+  default-substitution slip a security fix rather than a style note. Shipped in
+  0.9.0 and found by a second reviewer on another copy of the same hook.
+
+- **The opt-in can no longer be turned on globally.** The hook read it with
+  plain `git config --get`, which consults local, then **global**, then system
+  config — so one global `hook.snykPipInstall=1` would have run package builds
+  in every repository on the machine, against the per-repository opt-in the
+  README promises. Now `--local --get`. Covered by `T30b`, which fakes a global
+  setting through `GIT_CONFIG_GLOBAL` so the case can prove the scoping without
+  touching the developer's real `~/.gitconfig`, and which was verified to fail
+  when the scope flag is removed.
+
+### Added
+- **Test coverage for the pip opt-in, which 0.9.0 shipped without any.** There
+  was no case for the default and none for the switch, which is how the bug
+  above reached a published hook unnoticed. `T30` asserts no install by
+  default; `T30a` asserts an emptied switch beats an enabled git setting. Both
+  were verified in both directions — the suite passes at 39 assertions, and
+  `T30a` fails when the `:-` form is restored. A regression test nobody has
+  watched fail is not known to test anything.
+
 ## [0.9.0] - 2026-10-31
 
 ### Security

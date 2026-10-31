@@ -287,5 +287,44 @@ for h in $EXPECTED; do
 done
 expect "T29 every client-side hook event is forwarded (missing:${missing:- none})" "${missing:-none}" none
 
+# --- the pip opt-in, which shipped with no coverage at all ----------------
+# `pip install -r` BUILDS packages, and a source distribution's build runs
+# arbitrary code as the developer, so the switch has to be off by default and an
+# emptied switch has to stay off. The second case is why these exist: the
+# original used `${VAR:-...}`, which substitutes on EMPTY as well as unset, so
+# an explicitly emptied switch fell through to an enabled git setting and ran
+# the build. A one-character bug in a hook nobody was testing.
+HK2=$(mktemp -d); STUB2=$(mktemp -d); LOG2="$STUB2/calls"
+cp "$HOOK" "$HERE/_lib.sh" "$HK2/"
+printf '#!/bin/sh
+echo "$*" >> "%s"
+exit 0
+' "$LOG2" > "$STUB2/snyk"; chmod +x "$STUB2/snyk"; : > "$LOG2"
+g config core.hooksPath "$HK2"
+printf 'requests==2.31.0
+' > "$T/requirements.txt"; g add requirements.txt
+
+g config hook.snykPipInstall 0
+out=$( unset SNYK_HOOK_PIP_INSTALL; PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+saw "T30 changed requirements -> no pip install by default" "$out" "not installing it to test it"
+
+g config hook.snykPipInstall 1
+out=$( SNYK_HOOK_PIP_INSTALL= PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+saw "T30a empty switch beats an enabled git setting -> still no pip install" "$out" "not installing it to test it"
+
+# A GLOBAL setting must not enable it either: the README promises a
+# PER-REPOSITORY opt-in, and plain `git config --get` reads local, then global,
+# then system. GIT_CONFIG_GLOBAL points git at a throwaway file, so this proves
+# the scoping without touching the developer's real ~/.gitconfig.
+g config --unset hook.snykPipInstall 2>/dev/null
+printf '[hook]
+	snykPipInstall = 1
+' > "$STUB2/fakeglobal"
+out=$( unset SNYK_HOOK_PIP_INSTALL; GIT_CONFIG_GLOBAL="$STUB2/fakeglobal" PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+saw "T30b a global setting does not enable it -> still no pip install" "$out" "not installing it to test it"
+
+g config --unset hook.snykPipInstall 2>/dev/null
+g config core.hooksPath "$HERE"; rm -rf "$HK2" "$STUB2"; reset_tree
+
 [ "$FAIL" -eq 0 ] && echo "all cases pass" || echo "FAILURES above"
 exit "$FAIL"
