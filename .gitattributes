@@ -1,0 +1,20 @@
+# Every path below is run by an interpreter named in a shebang, and a Windows
+# clone with core.autocrlf=true is otherwise checked out CRLF. `#!/bin/sh\r` is
+# a bad interpreter: under WSL and Linux the script exits 127 without running a
+# line. git then aborts with `fatal: cannot exec <hook>` and the commit does not
+# land, so the hooks fail CLOSED -- loudly unusable rather than quietly
+# bypassed. Every commit is blocked, install.sh cannot run at all, and none of
+# it is a secret-scanning hole: it over-blocks. That is still a hard break of
+# this repo's one job on the two-runtime (Windows + WSL) setup it documents.
+#
+# Verified, not assumed: a fresh clone of this repo on Windows produced
+# `#!/bin/sh\r\n` and exit 127 under WSL, while `sh <file>` and a CR-stripped
+# copy both reached the script's own exit 2. Removing the CR was the only
+# difference. Git Bash tolerates the stray CR, which is why this went unnoticed.
+#
+# Deliberately scoped to executed files: nine tracked .md files are stored CRLF
+# and are left alone, so this adds no renormalization churn.
+tools/githooks/**                   text eol=lf
+*.sh                                text eol=lf
+*.py                                text eol=lf
+claude/skills/disk-doctor/bin/*     text eol=lf
