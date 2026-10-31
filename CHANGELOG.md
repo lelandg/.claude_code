@@ -42,6 +42,16 @@ A plain-English history of what changed in this repository and why. Newest first
   the cap and skip the manifest before the opt-in was ever read, reporting ok
   without having tested its subject.
 
+- **The Python stubs read their log path at runtime, and fail loudly if they
+  cannot record.** The stubs were generated through an unquoted heredoc, which
+  bakes the log path in at generation time — so a temp directory containing a
+  dollar sign would have been re-expanded when the stub ran, sending the append
+  nowhere while the stub still exited 0. `no_py` would then have read an empty
+  log and reported ok: detection silently lost, which is the very defect class
+  these cases exist to close. The heredoc is now quoted, the path is exported
+  and resolved at runtime, and a stub that cannot write its log exits 97 and
+  says so, with `no_py` refusing to pass on a log it cannot trust.
+
 ## [0.9.1] - 2026-10-31
 
 ### Security
