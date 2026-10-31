@@ -312,6 +312,17 @@ g config hook.snykPipInstall 1
 out=$( SNYK_HOOK_PIP_INSTALL= PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
 saw "T30a empty switch beats an enabled git setting -> still no pip install" "$out" "not installing it to test it"
 
+# A GLOBAL setting must not enable it either: the README promises a
+# PER-REPOSITORY opt-in, and plain `git config --get` reads local, then global,
+# then system. GIT_CONFIG_GLOBAL points git at a throwaway file, so this proves
+# the scoping without touching the developer's real ~/.gitconfig.
+g config --unset hook.snykPipInstall 2>/dev/null
+printf '[hook]
+	snykPipInstall = 1
+' > "$STUB2/fakeglobal"
+out=$( unset SNYK_HOOK_PIP_INSTALL; GIT_CONFIG_GLOBAL="$STUB2/fakeglobal" PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+saw "T30b a global setting does not enable it -> still no pip install" "$out" "not installing it to test it"
+
 g config --unset hook.snykPipInstall 2>/dev/null
 g config core.hooksPath "$HERE"; rm -rf "$HK2" "$STUB2"; reset_tree
 

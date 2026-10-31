@@ -255,7 +255,11 @@ if [ -n "$MANIFESTS" ]; then
     # the git setting. With `:-`, `SNYK_HOOK_PIP_INSTALL= git commit` in a repo
     # with hook.snykPipInstall=1 ran the build anyway -- the opposite of what
     # the empty switch says, and of the documented precedence.
-    PIP_OK=${SNYK_HOOK_PIP_INSTALL-$(git config --get hook.snykPipInstall 2>/dev/null)}
+    # `--local`, so the setting cannot be turned on globally: a global
+    # hook.snykPipInstall=1 would otherwise run package builds in EVERY repo,
+    # while the docs promise a per-repository opt-in. Plain `--get` reads
+    # local, then global, then system.
+    PIP_OK=${SNYK_HOOK_PIP_INSTALL-$(git config --local --get hook.snykPipInstall 2>/dev/null)}
     case "$(basename "$m")" in
       requirements*.txt|Pipfile|pyproject.toml)
         EXTRA="--skip-unresolved=true"

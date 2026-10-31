@@ -20,6 +20,15 @@ A plain-English history of what changed in this repository and why. Newest first
   default-substitution slip a security fix rather than a style note. Shipped in
   0.9.0 and found by a second reviewer on another copy of the same hook.
 
+- **The opt-in can no longer be turned on globally.** The hook read it with
+  plain `git config --get`, which consults local, then **global**, then system
+  config — so one global `hook.snykPipInstall=1` would have run package builds
+  in every repository on the machine, against the per-repository opt-in the
+  README promises. Now `--local --get`. Covered by `T30b`, which fakes a global
+  setting through `GIT_CONFIG_GLOBAL` so the case can prove the scoping without
+  touching the developer's real `~/.gitconfig`, and which was verified to fail
+  when the scope flag is removed.
+
 ### Added
 - **Test coverage for the pip opt-in, which 0.9.0 shipped without any.** There
   was no case for the default and none for the switch, which is how the bug
