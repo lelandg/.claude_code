@@ -1,0 +1,47 @@
+#!/bin/sh
+# Shared helpers for the global git hooks.
+# Source lives in a repo; the installed copy is whatever core.hooksPath
+# points at (install.sh defaults to ~/.githooks). Re-run install.sh after editing.
+# Runs under POSIX sh: WSL /bin/sh and Git for Windows sh.exe.
+
+# Run the repo-local hook of the same name, if the repo has one.
+# Git ignores .git/hooks when core.hooksPath is set, so the global hook chains to it.
+chain_local_hook() {
+  _name=$1
+  shift
+  # Recursion guard: git rev-parse --git-path hooks returns core.hooksPath (this dir),
+  # so resolve the repo's own hooks dir from the common git dir instead.
+  [ "${SNYK_HOOK_CHAINED:-0}" = 0 ] || return 0
+  _common=$(git rev-parse --git-common-dir 2>/dev/null) || return 0
+  case "$_common" in /*|[A-Za-z]:/*) ;; *) _common="$(git rev-parse --show-toplevel)/$_common" ;; esac
+  _local="$_common/hooks"
+  [ "$_local" = "$HOOK_DIR" ] && return 0
+  if [ -f "$_local/$_name" ]; then
+    SNYK_HOOK_CHAINED=1 sh "$_local/$_name" "$@" || return $?
+  fi
+  return 0
+}
+
+log() { printf 'snyk-hook: %s\n' "$*" >&2; }
+
+# Monthly soft counter, one file per org per month, shared by WSL and Windows.
+usage_file() {
+  _dir="$HOOK_DIR/usage"
+  mkdir -p "$_dir"
+  printf '%s/%s-%s.txt' "$_dir" "$(date +%Y-%m)" "$1"
+}
+usage_get() { # usage_get <org> <key>
+  _f=$(usage_file "$1")
+  [ -f "$_f" ] || { echo 0; return; }
+  _v=$(grep "^$2=" "$_f" | tail -n1 | cut -d= -f2)
+  echo "${_v:-0}"
+}
+usage_inc() { # usage_inc <org> <key>
+  _f=$(usage_file "$1")
+  _n=$(( $(usage_get "$1" "$2") + 1 ))
+  if [ -f "$_f" ] && grep -q "^$2=" "$_f"; then
+    sed -i "s/^$2=.*/$2=$_n/" "$_f"
+  else
+    printf '%s=%s\n' "$2" "$_n" >> "$_f"
+  fi
+}

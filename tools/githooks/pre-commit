@@ -1,0 +1,307 @@
+#!/bin/sh
+# Global pre-commit hook: secret scan, then delta-aware dependency checks.
+# What this is for, and how to install it: tools/githooks/README.md.
+# Self-test (no Snyk quota spent): sh tools/githooks/test-pre-commit.sh
+#
+# Order:
+#   0. gitleaks on the staged diff. Always runs, ~1 s, free, and FAILS CLOSED:
+#      a secret blocks, and so does a scan that could not be trusted -- a
+#      missing gitleaks binary, or a scan that errored. An errored scan is not
+#      a clean scan. A secret never enters history.
+#      We pass --exit-code 3, so the exit code is unambiguous: 0 clean,
+#      3 secret found, anything else a scan error. 3 is NEVER overridable;
+#      only a scan error is, with GITLEAKS_DEGRADED_OK=1, which must be
+#      explained in the commit message; `git commit --no-verify`
+#      is the only other way past, and that is a smell.
+#      False positive? Add a `gitleaks:allow` comment on the line or a
+#      .gitleaksignore entry.
+#      Why fail closed: the moment your default branch grants anyone a
+#      ruleset bypass, a direct push skips the server-side checks as gates,
+#      and this hook is the only secret gate left. Server-side scanning is
+#      detective -- by the time it reports, the secret is in history.
+#   1. Snyk Open Source, only for a staged manifest whose RESOLVED DEPENDENCIES
+#      changed: its dependency fields, or its lockfile beyond the root version
+#      fields (npm update / npm audit fix are lockfile-only and still count).
+#      A release commit that bumps "version" is not a dependency change and is
+#      not tested. Fails only on findings that have a fix available
+#      (--fail-on=all = upgrade or patch exists): the same test as the
+#      remediation-wins rule in ~/.config/agents/AGENTS.md.
+#   2. Snyk Code, at most once per repo per day (stamp in .git/), and only
+#      when the commit stages a file Snyk Code analyzes. A docs-, config-, or
+#      data-only commit spends no Code test (same rule as AGENTS.md).
+#
+# SNYK_HOOK_MODE (default: warn):
+#   warn   run the Snyk tests and report; never block on Snyk findings.
+#   block  also exit 1 on Snyk findings at SNYK_HOOK_SEVERITY+ with a fix.
+#   off    skip Snyk entirely. gitleaks still runs. Debugging the hook only.
+#
+# Budget rules (Snyk Free plan, counted per org, per month):
+#   - Open Source: one test per manifest. Runs only for manifests whose deps changed.
+#   - Code: one test per run. Runs at most once per repo per day, and only
+#     when source is staged.
+#   - Soft caps stop testing before the plan limit: SNYK_HOOK_OS_CAP (180), SNYK_HOOK_CODE_CAP (90).
+# Every switch below is enabled ONLY by the exact value 1. Anything else --
+# including "false", "no" and "" -- leaves it off, so a value meant to disable
+# a switch can never enable it.
+# Skip the Snyk tests once:  SNYK_SKIP=1 git commit ...   (gitleaks still runs; say why in the message)
+# Pass a DEGRADED gitleaks scan once: GITLEAKS_DEGRADED_OK=1 git commit ...   (never passes a found secret; say why in the message)
+# Force a Code test now:     SNYK_CODE_FORCE=1 git commit ...   (even with no source staged)
+
+HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
+. "$HOOK_DIR/_lib.sh"
+
+chain_local_hook pre-commit "$@" || exit $?
+
+TOP=$(git rev-parse --show-toplevel)
+GIT_DIR_PATH=$(git rev-parse --git-dir)
+case "$GIT_DIR_PATH" in /*|[A-Za-z]:/*) ;; *) GIT_DIR_PATH="$TOP/$GIT_DIR_PATH" ;; esac
+
+# ---- 0. gitleaks: staged changes, always, fails closed -------------------
+# Fails closed: a secret blocks, and so does a scan we cannot trust (missing
+# binary, or an errored scan). GITLEAKS_DEGRADED_OK=1 passes a degraded scan
+# only -- never a found secret.
+gitleaks_degraded() {
+  if [ "${GITLEAKS_DEGRADED_OK:-0}" = 1 ]; then
+    log "$1; GITLEAKS_DEGRADED_OK set, committing UNSCANNED -- say why in the commit message"
+    return 0
+  fi
+  log "$1; commit blocked. $2, or set GITLEAKS_DEGRADED_OK=1 for this commit and explain it in the message"
+  exit 1
+}
+
+if command -v gitleaks >/dev/null 2>&1; then
+  # --exit-code 3 reserves 3 for findings, so any other non-zero is a scan
+  # error and can be told apart from a real secret.
+  ( cd "$TOP" && gitleaks git --pre-commit --staged --redact -v --no-banner --exit-code 3 )
+  rc=$?
+  case $rc in
+    0) ;;
+    3) log "gitleaks found a secret in the staged changes; commit blocked. Remove it, or mark a false positive with a 'gitleaks:allow' comment / .gitleaksignore. No environment variable passes a finding"
+       exit 1 ;;
+    *) gitleaks_degraded "gitleaks could not complete the scan (exit $rc), so the staged changes are unscanned" "Fix the scan (a bad .gitleaks.toml exits 1)" ;;
+  esac
+else
+  gitleaks_degraded "gitleaks not on PATH, so the staged changes are unscanned" "Install it: 'winget install --id Gitleaks.Gitleaks --scope user' on Windows, 'brew install gitleaks' on macOS, or put a release binary on PATH"
+fi
+
+if [ "${SNYK_SKIP:-0}" = 1 ]; then
+  log "SNYK_SKIP set: Snyk checks skipped for this commit (gitleaks already ran; explain the skip in the message)"
+  exit 0
+fi
+
+MODE=${SNYK_HOOK_MODE:-warn}
+if [ "$MODE" = off ]; then
+  exit 0
+fi
+if ! command -v snyk >/dev/null 2>&1; then
+  log "snyk CLI not on PATH, Snyk checks skipped"
+  exit 0
+fi
+
+# Snyk org. Free-plan test budgets are counted per org, so a repo that
+# belongs to a second org should name it and get its own budget:
+#   git config --local hook.snykOrg <org-slug>     (one repo)
+#   SNYK_HOOK_ORG=<org-slug> git commit ...        (one commit)
+# Unset, the Snyk CLI's own default org is used and the counter is shared.
+REMOTE=$(git remote get-url origin 2>/dev/null)
+ORG=${SNYK_HOOK_ORG:-$(git config --get hook.snykOrg 2>/dev/null)}
+if [ -n "$ORG" ]; then ORG_OPT="--org=$ORG"; else ORG=default; ORG_OPT=""; fi
+OS_CAP=${SNYK_HOOK_OS_CAP:-180}
+CODE_CAP=${SNYK_HOOK_CODE_CAP:-90}
+SEVERITY=${SNYK_HOOK_SEVERITY:-high}
+FAIL=0
+
+# Extract only the dependency maps of a package.json on stdin, as canonical JSON
+# with sorted keys, so reordering a map is not a dependency change.
+DEPS_JS='let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s);const k=["dependencies","devDependencies","optionalDependencies","peerDependencies","overrides","resolutions","bundledDependencies"];const sorted=o=>(o&&typeof o==="object"&&!Array.isArray(o))?Object.fromEntries(Object.keys(o).sort().map(x=>[x,sorted(o[x])])):o;const o={};for(const x of k)if(p[x]!==undefined)o[x]=sorted(p[x]);process.stdout.write(JSON.stringify(o))}catch(e){process.stdout.write("ERR")}})'
+# A package-lock.json minus its root version fields: any other difference means
+# the resolved dependency tree changed (npm update, npm audit fix, a transitive bump).
+LOCK_JS='let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s);delete p.version;if(p.packages&&p.packages[""])delete p.packages[""].version;process.stdout.write(JSON.stringify(p))}catch(e){process.stdout.write("ERR")}})'
+
+# Hash of a blob (HEAD:path, or :path for the index) after a node filter.
+filtered_hash() { # filtered_hash <rev:path> <js>
+  git show "$1" 2>/dev/null | node -e "$2" | git hash-object --stdin
+}
+
+# Did the staged version of a manifest, or its lockfile, change the resolved
+# dependencies vs HEAD? A new manifest or lockfile counts as changed.
+#   package.json      compare the dependency maps (keys sorted).
+#   package-lock.json compare everything except the root version fields.
+#   other lockfiles   any staged change.
+#   other manifests   any staged line that is not a bare version line
+#                     (a line starting with '-' such as `-r extra.txt` counts).
+deps_changed() { # deps_changed <manifest path relative to TOP>
+  _m=$1
+  _d=$(dirname "$_m")
+  git cat-file -e "HEAD:$_m" 2>/dev/null || return 0
+  # Lockfiles first: a lockfile-only commit (npm update, npm audit fix) is a
+  # dependency change even though the manifest constraints did not move.
+  for _l in package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml poetry.lock Pipfile.lock uv.lock Gemfile.lock composer.lock go.sum; do
+    _lp="$_d/$_l"; case "$_lp" in ./*) _lp=${_lp#./} ;; esac
+    git diff --cached --name-only -- "$_lp" | grep -q . || continue
+    git cat-file -e "HEAD:$_lp" 2>/dev/null || return 0
+    case "$_l" in
+      package-lock.json|npm-shrinkwrap.json)
+        command -v node >/dev/null 2>&1 || return 0
+        [ "$(filtered_hash "HEAD:$_lp" "$LOCK_JS")" != "$(filtered_hash ":$_lp" "$LOCK_JS")" ] && return 0 ;;
+      *) return 0 ;;
+    esac
+  done
+  case "$(basename "$_m")" in
+    package.json)
+      command -v node >/dev/null 2>&1 || return 0
+      _head=$(git show "HEAD:$_m" 2>/dev/null | node -e "$DEPS_JS")
+      _idx=$(git show ":$_m" 2>/dev/null | node -e "$DEPS_JS")
+      [ "$_head" = ERR ] && return 0
+      [ "$_head" != "$_idx" ] ;;
+    *)
+      git diff --cached -U0 -- "$_m" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -vE '^[+-][[:space:]]*"?version"?[[:space:]]*[:=]' | grep -q . ;;
+  esac
+}
+
+# Staged additions and modifications, one raw path per line. NUL-delimited
+# (-z) because git's default core.quotePath=true wraps any non-ASCII path in
+# double quotes ("caf\303\251/package.json"), and the trailing quote then
+# defeats every basename and extension match below.
+staged_files() {
+  git diff --cached --name-only --diff-filter=ACMR -z | tr '\0' '\n'
+}
+
+# Is a file Snyk Code analyzes among the staged additions and modifications?
+# Docs, data, and config (.md, .json, .yml, .toml, lockfiles) are not, so a
+# docs-only commit spends no metered Code test. Deletions do not count:
+# removing code cannot add an issue. Extensions are matched case-insensitively.
+# The hook is global, so the list covers the languages and server-side
+# templates Snyk Code analyzes, not only the ones these repos use. When in
+# doubt, add an extension: a spent test is cheaper than a missed scan.
+# Exit 0: source staged. Exit 1: definitely none. Anything else: unknown.
+code_staged() {
+  staged_files \
+    | tr '[:upper:]' '[:lower:]' \
+    | grep -qE '\.(js|jsx|mjs|cjs|ts|tsx|mts|cts|vue|ejs|html|htm|py|java|jsp|jspx|kt|kts|go|rb|erb|php|phtml|cs|cshtml|aspx|vb|c|cc|cpp|cxx|h|hh|hpp|hxx|m|swift|scala|groovy|rs|ex|exs|cls|trigger)$'
+}
+
+# ---- 1. Open Source: staged manifests whose dependencies changed ---------
+# Map each staged file to the manifest Snyk tests. Skip vendored and generated trees.
+MANIFESTS=$(staged_files | while IFS= read -r f; do
+  case "$f" in
+    */node_modules/*|node_modules/*|*/.venv/*|.venv/*|*/generated/*|*/dist/*|dist/*) continue ;;
+  esac
+  d=$(dirname "$f"); b=$(basename "$f")
+  case "$b" in
+    package.json|requirements.txt|requirements-*.txt|requirements_*.txt|Pipfile|go.mod|Gemfile|pom.xml|build.gradle|build.gradle.kts|composer.json)
+      echo "$f" ;;
+    package-lock.json|npm-shrinkwrap.json|yarn.lock|pnpm-lock.yaml) [ -f "$d/package.json" ] && echo "$d/package.json" ;;
+    Pipfile.lock) [ -f "$d/Pipfile" ] && echo "$d/Pipfile" ;;
+    poetry.lock) [ -f "$d/pyproject.toml" ] && echo "$d/pyproject.toml" ;;
+    # uv.lock is deliberately not mapped: Snyk has no uv support and would test
+    # pyproject.toml as Poetry (exit 3). osv-scanner in CI covers uv.lock.
+    pyproject.toml) [ -f "$d/poetry.lock" ] && echo "$f" ;;
+    Gemfile.lock) [ -f "$d/Gemfile" ] && echo "$d/Gemfile" ;;
+    composer.lock) [ -f "$d/composer.json" ] && echo "$d/composer.json" ;;
+    go.sum) [ -f "$d/go.mod" ] && echo "$d/go.mod" ;;
+  esac
+done | sed 's#^\./##' | sort -u)  # root lockfile maps to "./package.json"; dedupe with "package.json"
+
+if [ -n "$MANIFESTS" ]; then
+  printf '%s\n' "$MANIFESTS" | while IFS= read -r m; do
+    if ! deps_changed "$m"; then
+      log "$m staged but neither its dependency fields nor its lockfile's resolved tree changed; not tested"
+      continue
+    fi
+    used=$(usage_get "$ORG" os)
+    if [ "$used" -ge "$OS_CAP" ]; then
+      log "Open Source soft cap reached ($used/$OS_CAP this month, org $ORG); $m NOT tested"
+      continue
+    fi
+    # Skip a manifest that has no non-comment, non-blank lines (Snyk rejects it as empty).
+    if ! grep -Eq '^[[:space:]]*[^[:space:]#]' "$TOP/$m"; then
+      log "$m is empty, skipped"
+      continue
+    fi
+    # Python manifests: Snyk reads the versions installed in the Python it runs,
+    # not the pins in the manifest. Install requirements*.txt into a throwaway venv
+    # so the test sees what the manifest resolves to, not the host's global packages.
+    # Snyk shells out to `python`; WSL only has python3. Unresolved packages are skipped.
+    EXTRA=""
+    VENV=""
+    case "$(basename "$m")" in
+      requirements*.txt|Pipfile|pyproject.toml)
+        EXTRA="--skip-unresolved=true"
+        PYBIN=python
+        if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+          PYBIN=python3
+        fi
+        case "$(basename "$m")" in
+          requirements*.txt)
+            VENV=$(mktemp -d 2>/dev/null)
+            if [ -n "$VENV" ] && "$PYBIN" -m venv "$VENV" >/dev/null 2>&1; then
+              VPY="$VENV/bin/python"; [ -x "$VPY" ] || VPY="$VENV/Scripts/python.exe"
+              if ( cd "$TOP/$(dirname "$m")" && "$VPY" -m pip install -q --disable-pip-version-check -r "$(basename "$m")" >/dev/null 2>&1 ); then
+                PYBIN="$VPY"
+              else
+                log "$m: pip install into a temp venv failed; testing against host packages"
+              fi
+            else
+              log "$m: could not create a temp venv; testing against host packages"
+            fi ;;
+        esac
+        [ "$PYBIN" = python ] || EXTRA="$EXTRA --command=$PYBIN" ;;
+    esac
+    log "Open Source test: $m (org $ORG, $((used + 1))/$OS_CAP this month)"
+    ( cd "$TOP/$(dirname "$m")" && snyk test --file="$(basename "$m")" $ORG_OPT $EXTRA --severity-threshold="$SEVERITY" --fail-on=all )
+    rc=$?
+    [ -n "$VENV" ] && rm -rf "$VENV"
+    [ "$rc" = 3 ] || usage_inc "$ORG" os   # exit 3 = no supported project: no test ran, nothing to count
+    case $rc in
+      0) ;;
+      1) log "$m has $SEVERITY+ vulnerabilities WITH A FIX AVAILABLE"; echo "$m" >> "$GIT_DIR_PATH/snyk-hook-failed" ;;
+      3) log "$m: no supported project found, skipped" ;;
+      *) log "$m: snyk error (exit $rc), not blocking" ;;
+    esac
+  done
+  if [ -f "$GIT_DIR_PATH/snyk-hook-failed" ]; then
+    rm -f "$GIT_DIR_PATH/snyk-hook-failed"
+    FAIL=1
+  fi
+fi
+
+# ---- 2. Snyk Code: once per repo per day, only when source is staged -----
+STAMP="$GIT_DIR_PATH/snyk-code-stamp"
+TODAY=$(date +%Y-%m-%d)
+LAST=$(cat "$STAMP" 2>/dev/null)
+FORCE=${SNYK_CODE_FORCE:-0}
+code_staged; HAS_CODE=$?   # 0 source staged, 1 none, other: could not tell -> run
+if [ "$FORCE" != 1 ] && [ "$HAS_CODE" = 1 ]; then
+  # Nothing Snyk Code analyzes is staged. Do not stamp: a source commit later
+  # today must still get its test.
+  log "no source files staged; Snyk Code not run"
+elif [ "$FORCE" != 1 ] && [ "$LAST" = "$TODAY" ]; then
+  : # already ran today
+else
+  used=$(usage_get "$ORG" code)
+  if [ "$used" -ge "$CODE_CAP" ]; then
+    log "Code soft cap reached ($used/$CODE_CAP this month, org $ORG); Code test NOT run"
+  else
+    log "Snyk Code test (org $ORG, $((used + 1))/$CODE_CAP this month)"
+    REPO_URL_OPT=""; [ -n "$REMOTE" ] && REPO_URL_OPT="--remote-repo-url=$REMOTE"
+    ( cd "$TOP" && snyk code test $ORG_OPT $REPO_URL_OPT --severity-threshold="$SEVERITY" )
+    rc=$?
+    usage_inc "$ORG" code
+    case $rc in
+      0) echo "$TODAY" > "$STAMP" ;;
+      1) echo "$TODAY" > "$STAMP"; log "Snyk Code found $SEVERITY+ issues"; FAIL=1 ;;
+      3) echo "$TODAY" > "$STAMP"; log "Snyk Code: no supported files, skipped" ;;
+      *) log "Snyk Code error (exit $rc), not blocking" ;;
+    esac
+  fi
+fi
+
+if [ "$FAIL" -ne 0 ]; then
+  if [ "$MODE" = block ]; then
+    log "commit blocked. Apply the available fix, or add a .snyk ignore with a reason and an expiry"
+    exit 1
+  fi
+  log "findings above have fixes available; reported only (SNYK_HOOK_MODE=$MODE). Remediation-wins rule: open the fix PR the same day -- a warn is an obligation, not a grace period"
+fi
+exit 0

@@ -54,7 +54,8 @@ Apply every rule that matches. Load the referenced file only when its rule fires
 | Wants to code, no IDE | Recommend PyCharm Community Edition using the pitch in `references/other-tools.md`. |
 | Wants to code, has an IDE | One sentence only: PyCharm Community Edition is a free alternative whose AI-assistant plugins let you switch AI providers without switching IDEs. Then move on — respect their setup. |
 | Desktop app user | Read `references/claude-basics.md` and frame everything around the Code tab. Share the Chat vs Code vs Cowork guidance early — it prevents the most common newcomer mistake (doing agent work in Chat). |
-| Windows without WSL | Warn that this catalog's config repo is written for Linux/WSL; point them to the porting prompt in the README of `lelandg/.claude_code`. |
+| Windows without WSL | Warn that this catalog's config repo is written for Linux/WSL; point them to the porting prompt in the README of `lelandg/.claude_code`. The git hooks in Step 3b still work, since Git for Windows ships a POSIX `sh`. |
+| Uses git | Step 3b applies: offer the commit-time secret gate. |
 
 ## Step 3 — Config check (with consent)
 
@@ -68,6 +69,8 @@ ls -a ~/.claude 2>/dev/null            # does a config dir exist at all?
 test -f ~/.claude/CLAUDE.md && echo "global CLAUDE.md: yes" || echo "global CLAUDE.md: no"
 ls ~/.claude/skills 2>/dev/null        # any skills installed?
 ls ~/.claude/plugins/cache 2>/dev/null # any plugin marketplaces added?
+git config --global core.hooksPath     # global git hooks installed? (empty = no)
+command -v gitleaks                    # secret scanner present? (empty = no)
 ```
 
 Report findings in plain language ("You have Claude Code 2.x installed but no global
@@ -78,6 +81,44 @@ On native Windows without WSL, these POSIX probes may fail because the shell is
 different — that is NOT evidence the config is missing. `claude --version` works
 everywhere; for the rest use PowerShell equivalents (`Test-Path $env:USERPROFILE\.claude`,
 `dir $env:USERPROFILE\.claude`) and interpret with care.
+
+## Step 3b — Offer the secret gate (only if they use git)
+
+Skip this entirely unless they code *and* use git. For everyone else it is noise.
+
+What to say, in their terms: "There's a check I can add that runs every time you
+save work to git and stops you committing a password or API key by accident.
+Leaking one into a repository is the single most common way people get burned,
+and once it's in the history, deleting it isn't enough — you have to go change
+the password everywhere." Then: "Want me to set that up?"
+
+**Order matters, and getting it backwards breaks their git.** The check is
+deliberately strict: it blocks a commit it could not scan, not just one with a
+secret in it. So if the hooks go in without the scanner, *every commit they make
+fails* until it is installed — and a newcomer will not know why.
+
+1. **Install `gitleaks` first** (`winget install --id Gitleaks.Gitleaks --scope user`
+   on Windows, `brew install gitleaks` on macOS, a release binary otherwise).
+   Confirm `gitleaks version` prints something.
+2. **Only then** install the hooks: `sh tools/githooks/install.sh` from a clone of
+   `lelandg/.claude_code`.
+3. If step 1 fails or they decline it, **stop** — say the check needs the scanner
+   and put both in the HTML plan as one item. Never install the hooks alone.
+
+Also tell them two things they will otherwise discover the hard way:
+
+- It applies to **every repository on the machine**, not just this project. That is
+  the point (a gate you have to remember to switch on is not a gate), but it is a
+  machine-wide change and they should know before saying yes.
+- It does **not** disable hooks a project already has — each one chains through to
+  the project's own.
+
+If they are on a team whose repos already run checks on the server, add: those run
+*after* the push, so they tell you a secret leaked; this one stops it leaving the
+machine. Both, not either.
+
+Defer rather than push. This is the one step with a real cost of being wrong, so a
+"not now" is a fine answer and goes in the plan.
 
 ## Step 4 — Recommend
 
@@ -96,6 +137,11 @@ When the session's setup work is done, generate their personalized plan followin
 3. Remaining recommendations with install commands.
 4. Numbered "do this next" steps, including 2–3 example prompts they can paste to
    start real work toward their goal.
+
+If the secret gate from Step 3b was deferred, it goes in as **one** item covering
+both pieces in order — install `gitleaks`, then run `install.sh` — with a line
+saying why the order matters. Split across two bullets, someone will do the second
+one first and wonder why every commit now fails.
 
 Every command and every example prompt gets a copy button. Save as
 `getting-started-plan.html` in the current directory, then open or surface it for them.

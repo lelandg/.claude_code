@@ -121,6 +121,9 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── update-hermes/             # Backup-first Hermes Agent updater
 │       ├── version-manager/           # Standardized version bumps + changelog currency
 │       └── yt-transcript/             # Download YouTube transcripts
+├── tools/                             # Standalone tooling, installed separately
+│   ├── agent-config-sync/             # Report/reconcile agent-config drift between runtimes
+│   └── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
 ├── Docs/
 │   ├── SETUP_GUIDE.md                 # Full setup & configuration guide
 │   ├── install-guide.html             # Beginner-friendly visual install guide
@@ -410,6 +413,24 @@ The same guard extends to the other agent CLIs:
     "hooks": [{"type": "command", "command": "python3 /home/<USER>/.claude/tools/config-secrets-guard.py --agy", "timeout": 10}]}]}}
   ```
 - **Pi** — no external-command hooks; `tools/config-secrets-guard.pi.ts` is a TypeScript port of the same rules as a Pi extension. Copy it to `~/.pi/agent/extensions/` and it blocks `bash`/`read` tool calls globally.
+
+### Global Git Hooks — the commit-time secret gate
+
+A different mechanism from the guard above, guarding a different moment. The guard stops a secret reaching the *conversation*; these stop one reaching *git history*.
+
+```bash
+sh tools/githooks/install.sh   # -> ~/.githooks, sets core.hooksPath (needs gitleaks on PATH)
+```
+
+Three layers: `gitleaks` on the staged diff (free, ~1 s, **always blocks**), then Snyk Open Source for a manifest whose *resolved dependencies* changed, then Snyk Code at most once per repo per day. The dependency layers default to warn — and since they only report findings that already **have a fix available**, a warn is an obligation rather than a grace period.
+
+**The secret gate fails closed**, which is the design decision that matters: a secret blocks, and so does a scan that could not be trusted — `gitleaks` missing from PATH, or a scan that errored. An errored scan is not a clean scan. Only that case is overridable, for one commit, explained in the message; a finding never is.
+
+Why so strict: server-side scanning is only *detective*. By the time CI reports a secret it is already in history and the fix is rotation, not deletion. A local hook is the only *preventive* gate — and once your default branch grants anyone a ruleset bypass, that bypass belongs to a **role** (GitHub cannot scope one by path), so a direct push by that role skips the server-side checks as gates too. The hook is then the only gate left, on every machine holding a token with that role.
+
+**Rule 4 of `AGENTS.md` depends on this.** The rule that lets a non-functional commit skip the PR and land on `main` is safe only because something preventive still runs on a direct commit. No hook, no rule 4.
+
+Installing them does **not** disable hooks your projects already have. `core.hooksPath` makes git ignore each repo's `.git/hooks` entirely, so a naive global install would silently kill every Husky and lefthook setup on the machine — every hook here chains to the repo-local one of the same name instead, which is why the no-op passthroughs are installed at all. Full reference and every switch: [`tools/githooks/README.md`](tools/githooks/README.md).
 
 ## Design Philosophy
 

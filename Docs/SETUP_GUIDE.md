@@ -263,6 +263,88 @@ Select these in Claude Code's output style picker:
 
 `settings.json` wires `tools/config-secrets-guard.py` as a `PreToolUse` hook. It blocks any Bash command or Read call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript. The companion `tools/safe-config-reader.py` prints a config file's structure with string values masked. The same guard extends to Codex, Antigravity (`--agy` flag), and Pi (`config-secrets-guard.pi.ts`) — see the README's "Config Secrets Guard" section for the per-CLI wiring snippets.
 
+## Global Git Hooks (the secret gate)
+
+Separate from the Claude Code config above, and **not installed by
+`/install-claude-config`** — these are machine-wide git hooks, so installing
+them changes how `git commit` behaves in every repository on the machine. That
+is a deliberate opt-in step.
+
+### What they are for
+
+Three layers, cheapest first:
+
+| Layer | Cost | Blocks? | When it runs |
+|---|---|---|---|
+| `gitleaks` on the staged diff | free, ~1 s | **yes, always** | every commit |
+| Snyk Open Source | metered | no, by default | only a manifest whose *resolved dependencies* changed |
+| Snyk Code | metered | no, by default | at most once per repo per day, and only when source is staged |
+
+The secret gate **fails closed**: a secret blocks the commit, and so does a scan
+that could not be trusted — `gitleaks` missing from PATH, or a scan that
+errored. An errored scan is not a clean scan. Only that case is overridable
+(`GITLEAKS_DEGRADED_OK=1`, one commit, explained in the message); a finding
+never is.
+
+That matters because server-side scanning is only *detective*. By the time CI
+reports a secret it is already in history and the fix is rotation. A local hook
+is the only *preventive* gate — and the moment your default branch grants anyone
+a ruleset bypass, that bypass belongs to a **role** (GitHub cannot scope one by
+path), so a direct push by that role skips the server-side checks as gates too.
+This hook is then the only gate left.
+
+**Rule 4 in `AGENTS.md` depends on this.** That rule lets a non-functional
+commit skip the pull request and land straight on `main`. It is safe only
+because something preventive still runs on a direct commit. If you have not
+installed these hooks, do not use rule 4 — keep using pull requests.
+
+The dependency layers default to *warn*, and because they only report findings
+that already **have a fix available**, a warn is an obligation rather than a
+grace period. Open the fix the same day.
+
+### Install
+
+```bash
+sh tools/githooks/install.sh
+```
+
+Copies the hooks to `~/.githooks` (pass a path, or set `GIT_HOOKS_DEST`, to put
+them elsewhere) and sets `core.hooksPath` — in WSL's git *and* in Git for
+Windows if it is present, since those are separate installs with separate
+global configs and a WSL-only install leaves every commit made from Windows
+unguarded. Re-run it after editing a hook: git runs the installed copy.
+
+Then install `gitleaks`, because the gate fails closed and will otherwise block
+every commit:
+
+```bash
+winget install --id Gitleaks.Gitleaks --scope user
+```
+
+```bash
+brew install gitleaks
+```
+
+`snyk` and `node` are optional. Without them the dependency layers skip
+silently and the secret gate still runs.
+
+Verify, without spending any Snyk quota:
+
+```bash
+sh tools/githooks/test-pre-commit.sh
+```
+
+### It does not disable your existing hooks
+
+Setting `core.hooksPath` makes git ignore each repo's own `.git/hooks`
+entirely, so a naive global install would silently kill every Husky, lefthook
+or `pre-commit`-framework setup on the machine. Every hook here chains to the
+repo-local hook of the same name — which is also why the no-op passthroughs
+(`commit-msg`, `pre-push`, `post-merge`, …) are installed at all.
+
+Full reference, including every environment switch:
+[`tools/githooks/README.md`](../tools/githooks/README.md).
+
 ## Verification Checklist
 
 After installation, verify everything works:
@@ -275,6 +357,7 @@ After installation, verify everything works:
 - [ ] **Verify AGENTS.md** - Your personal info is filled in at `~/.config/agents/AGENTS.md` (not placeholders)
 - [ ] **Verify settings.json** - Read permission path has your actual username
 - [ ] **Test the secrets guard** - `cat .env` in a project should be blocked with a pointer to `safe-config-reader.py`
+- [ ] **Decide on the git hooks** - If you installed them, `git config --global core.hooksPath` has a path and `gitleaks version` works. If you did not, do not use rule 4 in `AGENTS.md` (direct commits to `main`)
 
 ## File Structure After Installation
 
