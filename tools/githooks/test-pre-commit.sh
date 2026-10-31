@@ -214,7 +214,44 @@ reran=$(grep -c '^code test' "$LOG" 2>/dev/null)
 expect "T27b same-day retry -> still blocked, and no metered re-scan" "$second$reran" 10
 reset_tree
 
+# A repo-local hook must run under its own shebang, not forced through `sh`.
+# Husky and the pre-commit framework both generate non-sh hooks, so forcing sh
+# broke exactly the hooks the chaining exists to preserve. A python3 hook is the
+# discriminator: run as `sh`, it is a syntax error and the commit fails.
+printf '#!/bin/sh\nexit 0\n' > "$STUB/snyk"; chmod +x "$STUB/snyk"
+# The interpreter is a stub we control, so the test needs no python/bash and
+# does not depend on how any real interpreter resolves paths. Executed directly,
+# the shebang runs the stub and the marker appears. Forced through `sh`, the
+# shebang is just a comment, the body runs under sh, and no marker appears.
+LOCALHOOKS="$(g rev-parse --absolute-git-dir)/hooks"; mkdir -p "$LOCALHOOKS"
+MARK="$STUB/local-hook-ran"
+printf '#!/bin/sh\nprintf ran > "%s"\nexit 0\n' "$MARK" > "$STUB/myterp"
+chmod +x "$STUB/myterp"
+printf '#!%s\nexit 0\n' "$STUB/myterp" > "$LOCALHOOKS/pre-commit"
+chmod +x "$LOCALHOOKS/pre-commit"
+rm -f "$MARK" "$STAMPF"
+printf '# docs\n' > "$T/README.md"; g add README.md
+PATH="$STUB:$PATH" SNYK_HOOK_MODE=off g hook run pre-commit >/dev/null 2>&1
+rc=$?
+[ -f "$MARK" ] && chained=1 || chained=0
+expect "T28 a project hook runs under its own shebang, not forced through sh" "$rc$chained" 01
+rm -f "$LOCALHOOKS/pre-commit" "$MARK"; reset_tree
+
 g config core.hooksPath "$HERE"; rm -rf "$HK" "$STUB"
+
+# core.hooksPath makes git ignore a repo's .git/hooks for EVERY event, so any
+# client-side event without a forwarding hook here silently stops working in
+# every repo on the machine. This guards the set rather than the behaviour: add
+# the forwarder when you add an event, or this fails.
+EXPECTED="applypatch-msg commit-msg post-applypatch post-checkout post-commit
+post-index-change post-merge post-rewrite pre-applypatch pre-auto-gc
+pre-commit pre-merge-commit pre-push pre-rebase prepare-commit-msg
+push-to-checkout sendemail-validate"
+missing=""
+for h in $EXPECTED; do
+  [ -f "$HERE/$h" ] || missing="$missing $h"
+done
+expect "T29 every client-side hook event is forwarded (missing:${missing:- none})" "${missing:-none}" none
 
 [ "$FAIL" -eq 0 ] && echo "all cases pass" || echo "FAILURES above"
 exit "$FAIL"
