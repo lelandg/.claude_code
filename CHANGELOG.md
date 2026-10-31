@@ -3,6 +3,45 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.9.2] - 2026-10-31
+
+### Fixed
+- **The `pip install` opt-in is per-repository, as the README promised.** The
+  hook read it with plain `git config --get hook.snykPipInstall`, which searches
+  local, then global, then system — so a single global setting would have run
+  package builds in *every* repository on the machine. It now reads `--local`,
+  and a new case proves a global setting does not enable it, using
+  `GIT_CONFIG_GLOBAL` against a throwaway file so the test never touches a real
+  `~/.gitconfig`.
+- **Executed scripts are pinned to LF, so a Windows clone can run them.** The
+  repository shipped without a `.gitattributes`, and with `core.autocrlf=true`
+  every shebang script was checked out CRLF. `#!/bin/sh\r` is a bad
+  interpreter: under WSL and Linux the script exits 127 without running a line,
+  git aborts with `fatal: cannot exec <hook>`, and the commit does not land. So
+  the hooks failed closed — every commit blocked and `install.sh` unable to run
+  at all, on the two-runtime setup the README documents. Not a scanning hole; it
+  over-blocked. Invisible from the machine that published it, because Git Bash
+  tolerates the stray CR and `sh -n` calls the CRLF file syntactically fine.
+  Scoped to executed paths, so nothing is renormalized.
+
+### Changed
+- **The pip tests no longer perform the build they forbid.** Those cases exist
+  to prove that a commit never triggers a package build, because `pip install -r`
+  builds source distributions and a build runs arbitrary code as the developer.
+  Only `snyk` was stubbed, so on the *failure* path the hook reached a real
+  `python -m venv` and a real `pip install` and built packages in order to
+  report that packages must not be built. `python` and `python3` are now
+  stubbed, `-m venv` fabricates a venv whose interpreter is a second stub so the
+  hook still takes its success path, and the install is recorded instead of run.
+  Each case asserts the call log is empty — which also retires an assertion that
+  checked the output merely *lacked* a failure string, and so would have passed
+  had the forbidden install actually succeeded.
+- **`SNYK_HOOK_OS_CAP` is pinned in the pip cases.** They share one hook copy
+  and one monthly usage counter that each run increments, so a low cap in the
+  surrounding shell — or enough accumulated runs — would make a later case reach
+  the cap and skip the manifest before the opt-in was ever read, reporting ok
+  without having tested its subject.
+
 ## [0.9.1] - 2026-10-31
 
 ### Security
