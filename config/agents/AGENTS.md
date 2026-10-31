@@ -276,7 +276,18 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
    safe only because something preventive still runs on a direct commit. A
    bypassed branch with no local gate has nothing checking it at all, and the
    server-side scans then report the secret after it is already in history.
-   Install the hook first, or keep using PRs.
+   Install the hook first, or keep using PRs. For the same reason, a commit
+   that used the hook's degraded-scan override has never been scanned: run
+   `gitleaks` over it yourself before pushing, because nothing downstream will
+   stop it and rule 2 above says local `main` may hold things on purpose.
+
+   **A direct push publishes everything `main` is holding, not just your
+   commit.** Rule 2 exists because local `main` accumulates commits kept back
+   deliberately, and `git push` takes them all. So start from the remote head
+   (`git fetch && git status` clean against `origin/main`, or commit in a
+   throwaway worktree cut from `origin/main`) and check
+   `git log --oneline origin/main..HEAD` before pushing — the same check rule 3
+   asks for, which until now applied only to branches.
 
    **Know what your branch protection actually allows before relying on this.**
    Protect a `main` that deploys to production with a ruleset requiring a pull
@@ -322,9 +333,12 @@ Gates before merge, by the riskiest thing the change touches:
   user can run — ask them, with the exact command.
 - **Merge** only when checks are green, the automated PR review has arrived
   and every finding is fixed or answered, the Codex findings are reconciled,
-  and no dependency advisory with an available fix is open against the code
-  the branch ships. Use the repo's merge style. Never bypass branch
-  protection (`--admin`), never force-push the default branch.
+  and no dependency advisory this PR introduced or touched is left open with a
+  fix available. (A *pre-existing* advisory still does not block an unrelated
+  PR — it gets its own same-day remediation PR instead, per the scanning
+  section. Scoping this gate to what the PR touches is what keeps those two
+  rules from contradicting each other.) Use the repo's merge style. Never
+  bypass branch protection (`--admin`), never force-push the default branch.
 - **After merging to a deploying branch,** watch the deploy, then smoke-test
   production as a user. If either fails, fix forward or revert the PR at once,
   then tell the user.
@@ -357,8 +371,8 @@ Gates before merge, by the riskiest thing the change touches:
   In multi-task / subagent plans, each task's gate is scoped lint (touched
   files) + project typecheck + that task's tests — never the full build. The
   full build runs exactly once, in the branch-finish pass (build → fix →
-  final review → version bump → push/PR). Solo small changes still build
-  before any push to a deploying branch.
+  final review → push/PR → version bump → merge). Solo small changes still
+  build before any push to a deploying branch.
 - One PR per finished **whole feature**, not per sub-project or phase. Commit
   along the way; open the PR when the feature is complete, and merge it once
   the gates are green (see "Shipping autonomy" — no go-ahead needed). On the
@@ -424,8 +438,9 @@ Codex stop-review gate **off**; invoke reviews at commit/PR boundaries.
 ### PR review through the repo's configured automated reviewer
 
 When the user asks to commit, push, or open a PR (or gives a shipping
-go-ahead), run the local checks, commit, apply the version bump, run the
-Codex review (see "Shipping autonomy"), push, and open the PR. That request
+go-ahead), run the local checks, commit, run the Codex review (see "Shipping
+autonomy"), push, and open the PR — the version bump comes later, as the last
+commit before the merge. That request
 authorizes whatever automated reviewer the repo has configured to review the
 PR. After opening, wait for that review (2-5 minutes) and inspect its results
 and any autofix PR by the procedure in

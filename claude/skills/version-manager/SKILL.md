@@ -1,6 +1,6 @@
 ---
 name: version-manager
-description: Use when bumping a version, cutting a release, or when a CHANGELOG is stale, missing versions, or disagrees with the code — and before opening any PR, per the versioning rule in AGENTS.md. Also on /version-manager [check|backfill|release], or when the user says "bump the version", "cut a release", "the changelog is old". Auto-detects version locations in any stack (pyproject, package.json, VERSION file, module constants, README display) — no per-repo config.
+description: Use when bumping a version, cutting a release, or when a CHANGELOG is stale, missing versions, or disagrees with the code — and on every PR, cut as the last commit before the merge, per the versioning rule in AGENTS.md. Also on /version-manager [check|backfill|release], or when the user says "bump the version", "cut a release", "the changelog is old". Auto-detects version locations in any stack (pyproject, package.json, VERSION file, module constants, README display) — no per-repo config.
 ---
 
 # Version Manager
@@ -48,7 +48,10 @@ Pick the level from what actually shipped — `major` for a breaking change,
 the commits suggest; it never picks silently.
 
 A change that is non-functional under rule 4 of `AGENTS.md` — every path one no
-build step consumes — skips the PR, and so needs no bump at all.
+build step consumes — *may* skip the PR, and then needs no bump at all. Only
+*may*: rule 4 has preconditions (an installed pre-commit hook, a push that
+carries nothing else), and a change that does not meet them is a PR like any
+other, bump included.
 
 **Curate the changelog body.** The generated draft is raw commit subjects. Rewrite
 it into prose in a file and pass `--notes FILE`. This is the deliberate manual

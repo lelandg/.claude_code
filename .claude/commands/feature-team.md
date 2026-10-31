@@ -26,8 +26,8 @@ Invoke the **superpowers:subagent-driven-development** skill and run it task-by-
 1. Controller runs the project's full build + full lint **once**. On failure, dispatch ONE Sonnet fix agent with the exact error output; loop until green. Substantive fixes get a scoped re-review.
 2. Final whole-branch review (part of subagent-driven-development).
 3. `/codex:review --base origin/main` against the committed branch — the cross-provider review AGENTS.md requires on every PR, *before* it opens. Fix each finding or answer it in the PR body.
-4. Then **superpowers:finishing-a-development-branch** for the merge/PR menu. Push happens here, never earlier (review-before-push rule).
-5. `/version-manager release <level>` — version bump + changelog in the same commit, cut **last**, immediately before the merge. Cut earlier it goes stale the moment another PR merges first.
+4. `/version-manager release <level>` — version bump + changelog in the same commit. This is the **last commit on the feature branch**, which is what "cut the bump immediately before the merge" means in practice: run it *before* step 5, because the finishing skill can merge locally, and a release cut after that lands the release commit on the base branch instead. If the PR then sits while something else merges first, re-cut it.
+5. Then **superpowers:finishing-a-development-branch** for the merge/PR menu. Push happens here, never earlier (review-before-push rule).
 
 ## Notes
 - If `$ARGUMENTS` is a plan file, extract the tasks from it; otherwise brainstorm → write a plan first (don't skip design for non-trivial work).

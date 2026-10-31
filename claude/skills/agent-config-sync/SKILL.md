@@ -47,7 +47,7 @@ Read the exit code first:
 - Apply refuses (exit `20`) when one home is missing every core file, or
   when more than 2 files would be deleted on one side. Both usually mean a
   wrong or wiped home. Check the home path with the user. Add
-  `--allow-deletes` only when he confirms the deletions.
+  `--allow-deletes` only when they confirm the deletions.
 - Backups go to `baseline/backups/<timestamp>/<side>/` in the repo (gitignored).
   To restore, copy a file back from there.
 - Re-run `check` afterwards. Expect exit `0`.

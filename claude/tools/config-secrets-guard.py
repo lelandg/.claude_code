@@ -66,7 +66,11 @@ SECRET_FILE = (
     r"(?:config(?!\.example)[\w.-]*\.ya?ml"
     r"|(?<!process)(?<!import\.meta)\.env(?!\.example|ironment)(?:\.(?!example)[\w.-]+)?)"
 )
-SECRET_FILE_RE = re.compile(SECRET_FILE + r"\b")
+# Case-insensitive, because Windows filenames are: `Get-Content .ENV` reads the
+# same bytes as `Get-Content .env`, and `CONFIG.YAML` the same as `config.yaml`.
+# The cost is that `PROCESS.ENV.FOO` shouted in prose can false-positive, which
+# is the right direction to be wrong in.
+SECRET_FILE_RE = re.compile(SECRET_FILE + r"\b", re.IGNORECASE)
 PRINT_TOOLS_RE = re.compile(PRINT_TOOLS)
 
 # A command segment is the text between shell separators; a bare dump is a
@@ -105,6 +109,15 @@ def segments(command: str):
     found, buf, quote, i = [], [], None, 0
     while i < len(command):
         char = command[i]
+        # A backslash escapes the next character outside single quotes, so a
+        # `\'` is a literal quote and must not open a quoted run -- otherwise
+        # the rest of the line hides inside a quote that the shell never saw,
+        # and every separator in it disappears.
+        if char == "\\" and quote != "'" and i + 1 < len(command):
+            buf.append(char)
+            buf.append(command[i + 1])
+            i += 2
+            continue
         if quote is not None:
             buf.append(char)
             if char == quote:
@@ -203,11 +216,20 @@ def query_redacts_values(segment: str) -> bool:
 
 
 def amplify_read_is_blocked(command: str) -> bool:
-    """A protected read blocks unless *its own* call carries a safe projection."""
-    return any(
-        AMPLIFY_READ_RE.search(seg) and not query_redacts_values(seg)
-        for seg in segments(command)
-    )
+    """A protected read blocks unless *its own* call carries a safe projection.
+
+    Two reads in one segment are denied outright rather than analysed. A
+    projection cannot be tied to a particular call by pattern matching, so one
+    safe `--query` would otherwise vouch for an unprojected read beside it --
+    whether they share a segment because they are genuinely one quoted remote
+    script, or because a quote this function mis-parsed swallowed the separator
+    between them. Ambiguity denies; `# aws-ok` is how a human says otherwise.
+    """
+    for segment in segments(command):
+        reads = len(AMPLIFY_READ_RE.findall(segment))
+        if reads > 1 or (reads == 1 and not query_redacts_values(segment)):
+            return True
+    return False
 
 
 # Resource paths nest, and the verb sits at the end of the path rather than
@@ -291,7 +313,7 @@ def command_is_blocked(command: str) -> bool:
 
 def path_is_blocked(path: str) -> bool:
     basename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    return bool(re.fullmatch(SECRET_FILE, basename))
+    return bool(re.fullmatch(SECRET_FILE, basename, re.IGNORECASE))
 
 
 # A glob is blocked when it *can select* a protected file, which is not the
@@ -305,11 +327,23 @@ def path_is_blocked(path: str) -> bool:
 # `.example` carve-out. `*.example.yaml` is blocked despite selecting nothing
 # protected — that false positive is the price of not having to enumerate what a
 # wildcard can reach, and naming the file lifts it.
-_PROTECTED_PROBES = (
-    "config.yaml", "config.yml",
-    "config.local.yaml", "config.local.yml",
-    "configx.yaml", "configx.yml",
-    ".env", ".envx", ".env.local", ".env.production",
+# Generated across the grammar rather than hand-listed, because hand-listed
+# probes kept missing a shape: `*.production.yaml` was absent until a review
+# found it, and then `*.production.y*ml` and `.[e]nv.f??` slipped past a
+# literal-suffix fallback. `fnmatch` already handles `*`, `?` and `[...]`
+# correctly, so the only question is whether the probe set samples the family
+# densely enough. This is sampling, not proof -- the structural fallback below
+# is the backstop, and a pattern neither catches gets the human's `# config-ok`.
+_PROTECTED_PROBES = tuple(
+    "config" + middle + extension
+    for middle in (
+        "", ".a", ".ab", ".local", ".production", ".dev", ".test", ".foo",
+        "a", "x", "-x", "1",
+    )
+    for extension in (".yaml", ".yml")
+) + tuple(
+    ".env" + suffix
+    for suffix in ("", ".a", ".ab", ".local", ".production", ".dev", ".test", ".foo", "x")
 )
 
 
@@ -330,16 +364,23 @@ def expand_braces(pattern: str):
 
 
 def glob_is_blocked(glob: str) -> bool:
-    """True when the glob can select a file `path_is_blocked` would protect."""
+    """True when the glob can select a file `path_is_blocked` would protect.
+
+    Braces expand *before* the basename is taken: an alternative may carry its
+    own directory part, and `{src/*.ts,config/*.yaml}` basenamed first yields
+    the nonsense `*.yaml}` while ripgrep happily selects `config/config.yaml`.
+    """
     if not glob:
         return False
-    basename = glob.replace("\\", "/").rsplit("/", 1)[-1].lower()
-    return any(_basename_glob_is_blocked(b) for b in expand_braces(basename))
+    for alternative in expand_braces(glob.replace("\\", "/")):
+        if _basename_glob_is_blocked(alternative.rsplit("/", 1)[-1].lower()):
+            return True
+    return False
 
 
 def _basename_glob_is_blocked(basename: str) -> bool:
     if not any(ch in basename for ch in "*?["):
-        return bool(re.fullmatch(SECRET_FILE, basename))
+        return bool(re.fullmatch(SECRET_FILE, basename, re.IGNORECASE))
     if any(fnmatch.fnmatchcase(probe, basename) for probe in _PROTECTED_PROBES):
         return True
     return bool(re.fullmatch(r"[^/]*\.ya?ml", basename)) or ".env" in basename

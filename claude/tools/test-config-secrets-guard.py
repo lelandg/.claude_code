@@ -150,6 +150,21 @@ COMMANDS = [
     # 16. A commented-out flag is not an argument.
     (A + "get-app --app-id X # --query app.name", "aws"),
     (A + "get-app --app-id X --query 'a#b'", "aws"),
+
+    # 18. Two reads in one segment: a projection cannot be tied to a call by
+    #     pattern matching, so one safe --query vouched for the unprojected
+    #     read beside it. Reached two ways - a genuine quoted remote script,
+    #     and a `\\'` escape that made segments() swallow the real separator.
+    ("ssh host '" + A + "get-app --app-id X; " + A
+     + "get-app --app-id Y --query app.name'", "aws"),
+    (A + "get-app --app-id X --query app.name \\' ; " + A
+     + "get-branch --app-id X --branch-name main ; echo \\'", "aws"),
+
+    # 19. Windows filenames are case-insensitive, so these read the same bytes
+    #     as the lowercase spellings the guard already blocked.
+    ("Get-Content .ENV", "config"),
+    ("Get-Content CONFIG.YAML", "config"),
+    ("type Config.Yaml", "config"),
 ]
 
 GREPS = [
@@ -193,6 +208,21 @@ GREPS = [
     ({"glob": "*.{yaml,yml}"}, True),
     ({"glob": "{.env,.env.*}"}, True),
     ({"glob": "**/*.{js,ts}"}, False),
+
+    # 20. A literal-suffix fallback cannot see a wildcard *inside* the
+    #     extension, and a hand-listed probe set kept missing a shape.
+    ({"glob": "*.production.y*ml"}, True),
+    ({"glob": ".[e]nv.f??"}, True),
+    ({"glob": "config.?????"}, True),
+
+    # 21. Braces must expand before the basename is taken: an alternative can
+    #     carry its own directory part, and basenaming first yields `*.yaml}`.
+    ({"glob": "{src/*.ts,config/*.yaml}"}, True),
+    ({"glob": "{src/*.ts,lib/*.js}"}, False),
+
+    # 22. Windows filename casing, as above.
+    ({"glob": "*.YAML"}, True),
+    ({"path": "/srv/app/.ENV"}, True),
 ]
 
 
