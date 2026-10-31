@@ -383,13 +383,16 @@ A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) 
 
 The hatches are **human-only** by design: the guard matches on command text, so documentation *about* a blocked call trips the same wire as the call itself. That false positive is the intended trade — switch tools and move on; never let the model append its own hatch.
 
-`tools/test-config-secrets-guard.py` is the regression suite, and worth reading before changing a pattern: every case under its `BYPASSES` marker is a hole a cross-provider review found *after* the guard grew past config-file reads. They cluster into three lessons, and each cost two review rounds to learn:
+`tools/test-config-secrets-guard.py` is the regression suite — 80 cases, and worth reading before you touch a pattern. Every case under its `BYPASSES` marker is a hole three rounds of cross-provider review found *after* the guard grew past config-file reads, and the rounds kept finding more because the first fixes were the wrong shape. Four lessons, in the order they were learned the hard way:
 
-- **The seams between a command and its arguments are where bypasses live.** A global flag before the subcommand (`stripe --live charges create`) or before the service (`aws --region … amplify get-app`) defeated patterns that assumed a fixed word order — in the one spelling that mattered most.
-- **A prefix test is not validation.** `--query app.name` looks like redaction; `--query 'app.name && app'` starts the same way and returns the whole object. Validate the complete argument.
-- **Blocking "names a protected file" is not blocking "can read one."** A glob like `*.yaml` reaches `config.yaml` without naming it, so the guard matches patterns *against* protected names rather than pattern-matching the pattern. That blocks innocent YAML too — the deliberate trade.
+- **The seams between a command and its arguments are where bypasses live.** A global flag before the subcommand (`stripe --live charges create`), before the service (`aws --region … amplify get-app`), or a resource path that nests (`stripe --live checkout sessions create`) defeats any pattern assuming a fixed word order — in the one spelling that matters most.
+- **Judge each call, not the command line.** One safe-looking flag vouched for every call in a pipeline, so `aws … --query app.name; aws … get-branch` passed with one projection and two reads. Segments are now split and judged individually — *quote-aware*, because a regex split tore `--query 'app.name && app'` in half and the leading fragment then looked safe.
+- **A denylist of bad shapes cannot establish that a value is safe.** This one cost two rounds. "A dotted path with no `environment` in it" accepted `app.basicAuthCredentials` — base64 basic-auth credentials, perfectly dotted. Projections are now an **allowlist** of named fields, and anything else needs the hatch.
+- **"Names a protected file" is not "can read one."** A glob like `*.yaml` reaches `config.yaml` without naming it; a finite probe list then missed `*.production.yaml` for the same reason. The rule is now structural and default-deny: any wildcard over the YAML or dotenv families blocks, and only a literal name keeps the `.example` carve-out.
 
-A guard that grows new categories grows new holes at the seams, and the test is where that knowledge lives. It also pins the false positives worth protecting: `Env:PATH` is the named single-variable read the deny message *recommends*, so blocking it would contradict the guard's own advice.
+The accepted false positives are pinned by tests too, because they are decisions and not accidents: `*.example.yaml` blocks although it selects nothing protected (naming the file lifts it), and `Env:PATH` is *allowed* because it is the named single-variable read the deny message recommends — a guard that contradicts its own advice teaches people to reach for the override.
+
+The honest summary: a pattern-matching guard over free-form shell text is a sieve, and every new category adds seams. It is a guardrail against accidental exposure, not a sandbox, and it earns its keep at that job. Where a check cannot prove a thing is safe, it denies and lets a human say otherwise.
 
 The same guard extends to the other agent CLIs:
 

@@ -76,14 +76,55 @@ PRINT_TOOLS_RE = re.compile(PRINT_TOOLS)
 # `pwd\n  env  # note` is a dump, not a pass.
 _SEG = r"(?:^\s*|[\n;&|]\s*|\$\(\s*|`\s*)"
 _END = r"\s*(?:$|[\n;&|)>`]|#)"
-# The PowerShell form enumerates the provider only when the path is bare or
-# wildcarded: `Env:PATH` is the named single-variable read this guard tells you
-# to use instead, so it must not be mistaken for a dump.
+# The PowerShell form enumerates the provider only when the path is bare, the
+# provider root, or wildcarded — quoting and a trailing separator are ordinary
+# spellings of all three (`'Env:'`, `Env:\`). `Env:PATH` is the named
+# single-variable read this guard tells you to use instead, so it must not be
+# mistaken for a dump: a guard that contradicts its own advice teaches people to
+# reach for the override.
 ENV_DUMP_RE = re.compile(
     _SEG + r"(?:env|printenv|export\s+-p|set)" + _END
-    + r"|\b(?:Get-ChildItem|gci|ls|dir)\s+(?:-Path\s+)?Env:(?:\*|$|[\s;&|)>`])",
+    + r"|\b(?:Get-ChildItem|gci|ls|dir)\s+(?:-Path\s+)?[\"']?Env:[\\/]?"
+    + r"(?:\*|[\"']|$|[\s;&|)>`])",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# Shell separators split one command line into independently-executed calls.
+# Every category below is judged per segment, because a safe-looking flag on one
+# call says nothing about the next: `aws amplify get-app --query app.name;
+# aws amplify get-branch ...` has one safe projection and two reads.
+#
+# Splitting has to respect quoting. A regex split on the separators tore
+# `--query 'app.name && app'` in half and handed the first fragment a
+# `--query 'app.name` that then looked allowlisted — the separators were inside
+# an argument, not between calls. This is a guardrail, not a shell parser:
+# backslash escapes are not handled, and an unbalanced quote simply runs to the
+# end of the string, which keeps the segment larger and so blocks more.
+def segments(command: str):
+    """The command's separator-delimited calls, each judged on its own."""
+    found, buf, quote, i = [], [], None, 0
+    while i < len(command):
+        char = command[i]
+        if quote is not None:
+            buf.append(char)
+            if char == quote:
+                quote = None
+        elif char in "\"'":
+            quote = char
+            buf.append(char)
+        elif char in ";\n":
+            found.append("".join(buf))
+            buf = []
+        elif char in "&|":
+            found.append("".join(buf))
+            buf = []
+            if i + 1 < len(command) and command[i + 1] == char:
+                i += 1  # `&&` and `||` are one separator, not two
+        else:
+            buf.append(char)
+        i += 1
+    found.append("".join(buf))
+    return [segment for segment in found if segment.strip()]
 
 # Global options may sit between a CLI and its subcommand, and they are exactly
 # where a bypass hides: `aws --region us-east-1 amplify get-app` and
@@ -102,31 +143,44 @@ AWS_SECRET_RE = re.compile(
     r"|" + _AWS + _AWS_SECRET_SVC + r"\s+" + _GLOBAL_OPTS + r"get-secret-value\b",
 )
 
-# A `--query` projection redacts only when the *whole* argument names scalar
-# fields. A prefix test is not enough: `--query 'app.name && app'` starts with a
-# safe-looking path and still returns the entire object, environment-variable
-# values and all. `app`, `app.*` and anything naming `environment` are not
-# redaction either.
+# A projection is an *allowlist*, not a pattern test. Two earlier attempts here
+# were denylist-shaped and both leaked: a prefix test let `app.name && app`
+# through, and "any dotted path without the word environment" let
+# `app.basicAuthCredentials` through — base64 basic-auth credentials, no
+# `environment` anywhere in the name. The shape of a projection cannot establish
+# that its value is safe; only knowing the field can. So name the safe fields and
+# deny the rest, and reach for `# aws-ok` when a read needs a field not listed.
 _QUERY_ARG_RE = re.compile(r"--query(?:=|\s+)(\"[^\"]*\"|'[^']*'|\S+)")
-_SAFE_PROJECTION_RE = re.compile(r"[\w\[\]-]+(?:\.[\w\[\]-]+)+")
+_SAFE_PROJECTIONS = frozenset({
+    "app.name", "app.appid", "app.apparn", "app.platform", "app.description",
+    "app.defaultdomain", "app.repository", "app.createtime", "app.updatetime",
+    "app.productionbranch.branchname", "app.productionbranch.status",
+    "branch.branchname", "branch.displayname", "branch.stage", "branch.active",
+    "branch.createtime", "branch.updatetime", "branch.framework",
+})
 
 
-def query_redacts_values(command: str) -> bool:
-    """True when every --query argument in the command names scalar fields only."""
-    args = _QUERY_ARG_RE.findall(command)
+def query_redacts_values(segment: str) -> bool:
+    """True when this one call's --query names only known-safe fields."""
+    args = _QUERY_ARG_RE.findall(segment)
     if not args:
         return False
-    for arg in args:
-        projection = arg.strip("\"'")
-        if not _SAFE_PROJECTION_RE.fullmatch(projection):
-            return False
-        if "environment" in projection.lower():
-            return False
-    return True
+    return all(arg.strip("\"'").strip().lower() in _SAFE_PROJECTIONS for arg in args)
 
 
+def amplify_read_is_blocked(command: str) -> bool:
+    """A protected read blocks unless *its own* call carries a safe projection."""
+    return any(
+        AMPLIFY_READ_RE.search(seg) and not query_redacts_values(seg)
+        for seg in segments(command)
+    )
+
+
+# Resource paths nest, and the verb sits at the end of the path rather than
+# after a single token: `stripe --live checkout sessions create` is a live
+# mutation in the same way `stripe charges create` is.
 STRIPE_MUTATION_RE = re.compile(
-    r"\bstripe\s+" + _GLOBAL_OPTS + r"(?!--)[\w-]+\s+"
+    r"\bstripe\s+" + _GLOBAL_OPTS + r"(?:(?!--)[\w-]+\s+){1,3}"
     r"(?:create|update|delete|del|cancel|refund|capture|confirm|pay|void)\b"
 )
 
@@ -165,9 +219,12 @@ DENY_MSGS = {
     "aws": (
         "Blocked: this AWS call returns or carries secret values (Amplify env "
         "vars, decrypted SSM parameters, or a Secrets Manager secret). Use a "
-        "`--query` projection that omits values, admin tooling that keeps "
-        "values out of the transcript by design, or have the human approve "
-        "appending `# aws-ok`. Rule: AGENTS.md → Cloud / infrastructure safety."
+        "`--query` projection drawn from the guard's allowlist of known-safe "
+        "fields (the shape of a projection cannot prove its value is safe — "
+        "`app.basicAuthCredentials` is a dotted path too), admin tooling that "
+        "keeps values out of the transcript by design, or have the human "
+        "approve appending `# aws-ok`. Each call in a pipeline is judged on "
+        "its own. Rule: AGENTS.md → Cloud / infrastructure safety."
     ),
     "stripe": (
         "Blocked: treat Stripe as live; a CLI mutation moves real money or "
@@ -187,9 +244,7 @@ def classify_command(command: str):
     if ENV_DUMP_RE.search(command) and OVERRIDES["env"] not in command:
         return "env"
     if OVERRIDES["aws"] not in command:
-        if AWS_SECRET_RE.search(command):
-            return "aws"
-        if AMPLIFY_READ_RE.search(command) and not query_redacts_values(command):
+        if AWS_SECRET_RE.search(command) or amplify_read_is_blocked(command):
             return "aws"
     if STRIPE_MUTATION_RE.search(command) and OVERRIDES["stripe"] not in command:
         return "stripe"
@@ -207,10 +262,15 @@ def path_is_blocked(path: str) -> bool:
 
 # A glob is blocked when it *can select* a protected file, which is not the
 # same as spelling one out: `*.yaml` and `*` reach `config.yaml` without ever
-# naming it. So instead of pattern-matching the pattern, match the pattern
-# against names a protected file actually has. The probes cover both families
-# and both the literal and the `[\w.-]*` middle of SECRET_FILE, so a pattern
-# pinned to `.example` still selects nothing protected and passes.
+# naming it. Matching the pattern against names a protected file actually has
+# was the obvious test, and it leaked too — `*.production.yaml` matches no probe
+# and still selects `config.production.yaml`, because the protected families are
+# infinite and a probe list is not. So the probes stay as a fast path and the
+# rule behind them is structural and default-deny: any wildcard selector over
+# the YAML or dotenv families blocks, and only a *literal* name keeps the
+# `.example` carve-out. `*.example.yaml` is blocked despite selecting nothing
+# protected — that false positive is the price of not having to enumerate what a
+# wildcard can reach, and naming the file lifts it.
 _PROTECTED_PROBES = (
     "config.yaml", "config.yml",
     "config.local.yaml", "config.local.yml",
@@ -226,7 +286,9 @@ def glob_is_blocked(glob: str) -> bool:
     basename = glob.replace("\\", "/").rsplit("/", 1)[-1].lower()
     if not any(ch in basename for ch in "*?["):
         return bool(re.fullmatch(SECRET_FILE, basename))
-    return any(fnmatch.fnmatchcase(probe, basename) for probe in _PROTECTED_PROBES)
+    if any(fnmatch.fnmatchcase(probe, basename) for probe in _PROTECTED_PROBES):
+        return True
+    return bool(re.fullmatch(r"[^/]*\.ya?ml", basename)) or ".env" in basename
 
 
 def grep_is_blocked(tool_input: dict) -> bool:

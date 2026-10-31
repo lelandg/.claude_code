@@ -83,6 +83,9 @@ COMMANDS = [
     #    whole object when the projection goes on past the safe-looking part.
     (A + "get-app --app-id XYZ --query 'app.name && app'", "aws"),
     (A + "get-app --app-id XYZ --query \"app.name || app\"", "aws"),
+    # These two also pin the quote-aware segment splitter: a regex split on
+    # the separators tore the quoted projection in half and the leading
+    # fragment then looked allowlisted.
 
     # 6. Global options sit before the *service* too, not only before the
     #    subcommand — the same hole as #2, one provider over.
@@ -98,6 +101,35 @@ COMMANDS = [
     ("Get-ChildItem Env:", "env"),
     ("Get-ChildItem Env:*", "env"),
     ("Get-ChildItem -Path Env: | Out-String", "env"),
+
+    # 9. One safe flag does not vouch for the next call. Each separator-
+    #    delimited segment is judged on its own.
+    (A + "get-app --app-id X --query app.name; " + A + "get-branch --app-id X",
+     "aws"),
+    (A + "get-app --app-id X --query app.name && " + A + "get-app --app-id Y",
+     "aws"),
+    (A + "get-app --app-id X --query app.name", None),
+
+    # 10. The *shape* of a projection cannot prove its value is safe: these are
+    #     dotted paths with no "environment" in them, and they return
+    #     base64-encoded basic-auth credentials. Hence an allowlist.
+    (A + "get-app --app-id X --query app.basicAuthCredentials", "aws"),
+    (A + "get-branch --app-id X --branch-name m --query branch.basicAuthCredentials",
+     "aws"),
+    (A + "get-app --app-id X --query app.tags", "aws"),
+
+    # 11. Resource paths nest; the verb sits at the end of the path.
+    (S + "--live checkout sessions create --mode payment", "stripe"),
+    (S + "checkout sessions create", "stripe"),
+    (S + "checkout sessions list", None),
+    ("stripe trigger payment_intent.created", None),
+
+    # 12. Quoting and the provider root are ordinary spellings of a bare
+    #     enumeration.
+    ("Get-ChildItem 'Env:'", "env"),
+    ("Get-ChildItem \"Env:\"", "env"),
+    ("Get-ChildItem Env:\\", "env"),
+    ("Get-ChildItem Env:\\PATH", None),
 ]
 
 GREPS = [
@@ -112,7 +144,6 @@ GREPS = [
     ({"glob": ".env*"}, True),
     ({"glob": "**/.env.*"}, True),
     ({"glob": "config?.yml"}, True),
-    ({"glob": "*.example.yaml"}, False),
     ({"glob": ".env.example"}, False),
 
     # 8. A broader glob selects protected files without naming one: `*.yaml`
@@ -125,6 +156,17 @@ GREPS = [
     ({"glob": "config.*"}, True),
     ({"glob": "*.json"}, False),
     ({"glob": "src/**/*.py"}, False),
+
+    # 13. A probe list cannot enumerate an infinite family: `*.production.yaml`
+    #     matched no probe and still selected `config.production.yaml`. The rule
+    #     behind the probes is structural, so a wildcard over either family
+    #     blocks — `*.example.yaml` included, which selects nothing protected.
+    #     That false positive is deliberate; naming the file literally lifts it.
+    ({"glob": "*.production.yaml"}, True),
+    ({"glob": "*.local.yml"}, True),
+    ({"glob": "*.example.yaml"}, True),
+    ({"glob": "**/.env.*.local"}, True),
+    ({"glob": "*.yaml.tmpl"}, False),
 ]
 
 
