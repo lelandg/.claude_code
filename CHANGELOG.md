@@ -3,6 +3,144 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.9.0] - 2026-10-31
+
+### Security
+- **Two identity leaks removed from files this repo was already publishing.**
+  The author's private Windows account name appeared 19 times across two
+  `Docs/plans/` design docs, always in a home path — and always on lines that
+  had already tokenized the Linux side as `/home/user`. That asymmetry is the
+  tell: the publish sweep tokenizes one home and not the other, and its pattern
+  list carries the author's email and his teammates' handles but neither his
+  Windows account name nor their real names. A teammate's real full name was in
+  a third doc's `Origin:` line, in a repo whose contact table deliberately
+  replaces that row with a placeholder. Both are now placeholders.
+- **The config secrets guard had thirteen bypass classes.** Four rounds of
+  cross-provider review found them, all present in the config this mirror was
+  published from. The ones worth knowing about: an arbitrary `--query` treated
+  as proof of redaction when a whole-object projection returns the values
+  anyway; a projection accepted on its *shape*, which let
+  `app.basicAuthCredentials` through — base64 basic-auth credentials, perfectly
+  dotted, no `environment` in the name; the Amplify *list* forms, which carry
+  every app's `environmentVariables` and `basicAuthCredentials` and so leak
+  strictly more than the `get` forms the guard was named for; a global flag
+  before the subcommand or the service (`stripe --live charges create`,
+  `aws --region … amplify get-app`); one safe flag vouching for every call in a
+  pipeline; `--debug`, which prints the unfiltered response body before the
+  projection applies; a glob that selects protected files without naming one; a
+  newline not counting as a shell separator; and case-sensitive matching on
+  case-insensitive PowerShell command names.
+- **Two of those checks were the wrong shape, not merely incomplete**, which is
+  why the rounds kept finding more. Both are now default-deny: projections are
+  an **allowlist** of named fields rather than a denylist of bad-looking ones,
+  and glob selectors are **structural** — any wildcard over the YAML or dotenv
+  families blocks, because the protected families are infinite and a probe list
+  is not.
+- **`claude/tools/test-config-secrets-guard.py`** — 88 cases, one per bypass
+  class, with the forbidden strings assembled from fragments so the file does
+  not trip the guard that reads it. One case had asserted that the Amplify list
+  form was *fine*: a bypass written down as correct behaviour, which is worse
+  than no test because it looks like coverage.
+
+### Changed
+- **Rule 4 reverses direction.** Code still reaches `main` through a pull
+  request, but a commit whose *every* path is non-functional may be committed
+  straight to `main` — prose and images under `Docs/`, `Plans/`, `Notes/`,
+  `README*`, `CHANGELOG*`, `LICENSE*`, comment-only source edits, and the
+  agent-instruction files themselves. A mixed commit is still a PR, and so is
+  anything a machine executes, schedules, or serves even when it reads like
+  prose. This replaces the blanket "everything reaches `main` through a PR"
+  rule v0.8.0 introduced, so the v0.8.0 entry below is history, not policy.
+- **Including the rule files in that allowance carries an obligation.** A
+  contradiction *between* two instruction files is the one defect class a
+  diff-scoped reviewer cannot see, so when a rule changes on `main`, every copy
+  of it moves in the same commit. If you cannot find all the copies, it is a
+  PR. Grep before you commit.
+- **Rule 4 now states its own precondition.** It is safe only because something
+  preventive still runs on a direct commit, and this repo ships no pre-commit
+  hook and no CI — so a stranger adopting the rule got the PR bypass with no
+  gate at all while the prose told them one existed. No hook, no allowance.
+- **Branch protection, honestly described.** v0.8.0 said to protect `main` with
+  no bypass actors. If you grant one, know what you bought: a bypass is granted
+  to a *role*, and GitHub cannot scope one by path, so the same grant also stops
+  your security checks from gating any push by that role. They still run and
+  fail visibly afterwards — detection, not prevention. Check
+  `gh api repos/<owner>/<repo>/rulesets` instead of assuming.
+- **Secret scanning fails closed.** A finding blocks with nothing to pass it,
+  and a scan you cannot trust — missing binary, errored run — blocks too; only
+  *that* case gets a one-commit override. Run `gitleaks` with `--exit-code 3`
+  so 0 / 3 / anything-else are unambiguous, and make every switch in the hook
+  enable on the exact value `1`, so a `=false` cannot turn one on by
+  truthiness. The reasoning is written down now: a local hook is the only
+  *preventive* gate, server-side scanning is *detective*, and once a bypass
+  exists on the default branch the hook is the only gate left.
+- **Remediation has a deadline, and it is today.** A dependency advisory with an
+  available fix is remediated in the session that found it — the same branch
+  when the PR already touches that manifest, otherwise its own PR, opened and
+  merged the same day. This retires the 7-day window v0.8.0 set.
+- **Dependency findings and SAST findings are different work.** A dependency
+  advisory has a deterministic fix — a version — so it is applied, not debated.
+  A code-scanning finding's "fix" is a design decision with a real
+  false-positive rate, so it is *triaged* the same day instead: fixed now when
+  contained, otherwise a recorded verdict with its reasoning. This release
+  takes its own advice — `grep_is_blocked` now carries a docstring explaining
+  why an unrestricted content search is a known, accepted gap rather than a
+  patch, since closing it would block most of what Grep is for, and a guard
+  that blocks ordinary work gets switched off.
+- **The PR reviewer is per-repo, not assumed.** Two properties decide which one
+  you gate on, and they differ by vendor: whether it re-reviews a push (some
+  review on open only, so added commits go unreviewed with the check simply
+  *missing*), and whether a passing check means "no findings" (usually not —
+  findings arrive as inline comments while the summary stays empty, and a green
+  check can also mean the review was rate-limited or skipped). The gate is the
+  check reporting **on the head you are merging** *and* the comments read. If
+  the ruleset does not require those checks, waiting on them is your rule
+  rather than enforcement — which is why it has to be written down.
+  `claude/instructions/pr-review-automation.md` is now explicitly scoped to the
+  Claude Code GitHub App, since its autofix procedure does not transfer.
+- **The merge gate** adds one condition: no dependency advisory with an
+  available fix left open against the code the branch ships.
+
+### Fixed
+- **The version bump was ordered three different ways** across `AGENTS.md`'s two
+  workflow paths, its versioning section, `pr-review-automation.md`, the
+  `version-manager` skill and the `feature-team` command. v0.8.0 introduced
+  bump-last and fixed one of them, so an agent following the skill the rule
+  names as authoritative produced exactly the stale bump the rule exists to
+  prevent. All of them now cut it immediately before the merge.
+- **`feature-team.md`** — the one command that encodes the end-to-end finishing
+  sequence — skipped the pre-PR cross-provider review `AGENTS.md` makes
+  unconditional, and hardcoded `npx eslint` / `npx tsc` / Prisma as *the* task
+  gate in a config whose own contribution guide asks for stack-neutral agents.
+  Its two copies had also diverged in content; they are identical again.
+- **`Docs/SETUP_GUIDE.md`** advertised 6 agents (1 ships), 5 instructions (10),
+  21 skills (26) and an 8-case test harness (10 cases), and still tabled the
+  five agents retired in August 2026 along with their files.
+- **`README.md`** called `CLAUDE.md` a ~50-line pointer file; it is ~100. Its
+  tree omitted two shipped skills (`getting-started`, `agent-config-sync`), and
+  it claimed every case under the guard suite's `BYPASSES` marker was a hole,
+  when some are the false positives and negative controls the fixes must not
+  break.
+- **The operative instruction files a stranger installs** still named a person
+  they will never meet (`feature-team`, `agent-config-sync`,
+  `github-stacked-prs`, `agent-sync.toml`). Deliberate attribution is
+  untouched: the marketplace author, the README credit, the install-guide
+  byline, the catalog title, and the `Docs/plans/` design docs, which are
+  authored historical artifacts with an author line.
+
+### Added
+- **The config secrets guard covers four categories, not one.** Beyond
+  config-file reads it blocks bare environment dumps, cloud calls that return
+  secret values, and live-money CLI mutations — each with its own
+  human-approved escape hatch appended to the command. It also speaks the Codex
+  `exec_command`/argv shapes and Claude Code's PowerShell tool, and
+  `process.env.X` no longer false-matches as a dotenv file. The hatches are
+  human-only by design, and that matters more than it sounds: the guard matches
+  on command text, so documentation *about* a blocked call trips the same wire
+  as the call itself.
+- **No Qt, except PySide** joins the misc rules — a stack preference that had
+  been in the live config since 2026-09-12 and was never ported.
+
 ## [0.8.1] - 2026-10-26
 
 ### Removed
