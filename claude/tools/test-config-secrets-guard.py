@@ -48,6 +48,7 @@ COMMANDS = [
     (A + "list-apps", None),
     ("aws ssm get-parameter --name /x --with-decryption", "aws"),
     ("aws ssm get-parameter --name /x", None),
+    ("printenv HOME", None),
     (S + "prices create --unit-amount 500", "stripe"),
     (S + "prices list", None),
 
@@ -77,6 +78,26 @@ COMMANDS = [
     # 4. PowerShell command names are case-insensitive.
     ("get-content .env", "config"),
     ("GET-CONTENT config.yaml", "config"),
+
+    # 5. A prefix test is not whole-argument validation: JMESPath returns the
+    #    whole object when the projection goes on past the safe-looking part.
+    (A + "get-app --app-id XYZ --query 'app.name && app'", "aws"),
+    (A + "get-app --app-id XYZ --query \"app.name || app\"", "aws"),
+
+    # 6. Global options sit before the *service* too, not only before the
+    #    subcommand — the same hole as #2, one provider over.
+    (A.replace("aws ", "aws --region us-east-1 ") + "get-app --app-id XYZ", "aws"),
+    ("aws --profile admin ssm get-parameter --name /x --with-decryption", "aws"),
+    ("aws --region us-east-1 " + "secrets" + "manager get-secret-value --secret-id s", "aws"),
+    (A + "--debug get-app --app-id XYZ", "aws"),
+
+    # 7. `Env:PATH` is the named single-variable read the deny message
+    #    recommends; blocking it would contradict the guard's own advice.
+    ("Get-ChildItem Env:PATH", None),
+    ("gci Env:HOME", None),
+    ("Get-ChildItem Env:", "env"),
+    ("Get-ChildItem Env:*", "env"),
+    ("Get-ChildItem -Path Env: | Out-String", "env"),
 ]
 
 GREPS = [
@@ -93,6 +114,17 @@ GREPS = [
     ({"glob": "config?.yml"}, True),
     ({"glob": "*.example.yaml"}, False),
     ({"glob": ".env.example"}, False),
+
+    # 8. A broader glob selects protected files without naming one: `*.yaml`
+    #    and `*` both reach config.yaml. Blocking them costs false positives
+    #    on innocent YAML, which is the trade a guard is for.
+    ({"glob": "*.yaml"}, True),
+    ({"glob": "*.yml"}, True),
+    ({"glob": "*"}, True),
+    ({"glob": "**/*"}, True),
+    ({"glob": "config.*"}, True),
+    ({"glob": "*.json"}, False),
+    ({"glob": "src/**/*.py"}, False),
 ]
 
 

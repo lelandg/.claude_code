@@ -47,6 +47,7 @@ Safe alternative for config files: python3 ~/.claude/tools/safe-config-reader.py
 
 This is a guardrail against accidental exposure, not a sandbox.
 """
+import fnmatch
 import json
 import re
 import sys
@@ -75,32 +76,57 @@ PRINT_TOOLS_RE = re.compile(PRINT_TOOLS)
 # `pwd\n  env  # note` is a dump, not a pass.
 _SEG = r"(?:^\s*|[\n;&|]\s*|\$\(\s*|`\s*)"
 _END = r"\s*(?:$|[\n;&|)>`]|#)"
+# The PowerShell form enumerates the provider only when the path is bare or
+# wildcarded: `Env:PATH` is the named single-variable read this guard tells you
+# to use instead, so it must not be mistaken for a dump.
 ENV_DUMP_RE = re.compile(
     _SEG + r"(?:env|printenv|export\s+-p|set)" + _END
-    + r"|\b(?:Get-ChildItem|gci|ls|dir)\s+(?:-Path\s+)?Env:",
+    + r"|\b(?:Get-ChildItem|gci|ls|dir)\s+(?:-Path\s+)?Env:(?:\*|$|[\s;&|)>`])",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# Global options may sit between a CLI and its subcommand, and they are exactly
+# where a bypass hides: `aws --region us-east-1 amplify get-app` and
+# `stripe --live charges create` are ordinary spellings of the calls below.
+_GLOBAL_OPTS = r"(?:--[\w-]+(?:[=\s]+[^\s-][^\s]*)?\s+)*"
+_AWS = r"\baws\s+" + _GLOBAL_OPTS
 _AWS_SECRET_SVC = "secrets" + "manager"  # split so other guards don't match this file's text
-# A `--query` projection redacts only when it names scalar fields: it must
-# contain a dot, no `*`, and no `environment...` segment. `--query app` and
-# `--query app.*` return the whole object, environment-variable values and all,
-# so the mere presence of `--query` is not evidence of redaction.
-_SAFE_QUERY = (
-    r"--query[=\s]+[\"']?"
-    r"(?![\w.\[\]-]*(?i:environment))"
-    r"[\w\[\]-]+(?:\.[\w\[\]-]+)+"
+
+AMPLIFY_READ_RE = re.compile(
+    _AWS + r"amplify\s+" + _GLOBAL_OPTS + r"(?:get-app|get-branch)\b"
 )
 AWS_SECRET_RE = re.compile(
-    r"\baws\s+amplify\s+(?:get-app|get-branch)\b(?![^\n;&|]*" + _SAFE_QUERY + r")"
-    r"|\baws\s+amplify\s+[^\n;&|]*(?i:environment-?variables)"
-    r"|\baws\s+ssm\s+get-parameters?(?:-by-path)?\b[^\n;&|]*--with-decryption"
-    r"|\baws\s+" + _AWS_SECRET_SVC + r"\s+get-secret-value\b",
+    _AWS + r"amplify\s+[^\n;&|]*(?i:environment-?variables)"
+    r"|" + _AWS + r"ssm\s+" + _GLOBAL_OPTS
+    + r"get-parameters?(?:-by-path)?\b[^\n;&|]*--with-decryption"
+    r"|" + _AWS + _AWS_SECRET_SVC + r"\s+" + _GLOBAL_OPTS + r"get-secret-value\b",
 )
-# Global options may sit between the command and the resource, and `--live` is
-# exactly the one that makes a mutation matter.
+
+# A `--query` projection redacts only when the *whole* argument names scalar
+# fields. A prefix test is not enough: `--query 'app.name && app'` starts with a
+# safe-looking path and still returns the entire object, environment-variable
+# values and all. `app`, `app.*` and anything naming `environment` are not
+# redaction either.
+_QUERY_ARG_RE = re.compile(r"--query(?:=|\s+)(\"[^\"]*\"|'[^']*'|\S+)")
+_SAFE_PROJECTION_RE = re.compile(r"[\w\[\]-]+(?:\.[\w\[\]-]+)+")
+
+
+def query_redacts_values(command: str) -> bool:
+    """True when every --query argument in the command names scalar fields only."""
+    args = _QUERY_ARG_RE.findall(command)
+    if not args:
+        return False
+    for arg in args:
+        projection = arg.strip("\"'")
+        if not _SAFE_PROJECTION_RE.fullmatch(projection):
+            return False
+        if "environment" in projection.lower():
+            return False
+    return True
+
+
 STRIPE_MUTATION_RE = re.compile(
-    r"\bstripe\s+(?:--[\w-]+(?:[=\s]+[^\s-][^\s]*)?\s+)*"
-    r"(?!--)[\w-]+\s+"
+    r"\bstripe\s+" + _GLOBAL_OPTS + r"(?!--)[\w-]+\s+"
     r"(?:create|update|delete|del|cancel|refund|capture|confirm|pay|void)\b"
 )
 
@@ -160,8 +186,11 @@ def classify_command(command: str):
             return "config"
     if ENV_DUMP_RE.search(command) and OVERRIDES["env"] not in command:
         return "env"
-    if AWS_SECRET_RE.search(command) and OVERRIDES["aws"] not in command:
-        return "aws"
+    if OVERRIDES["aws"] not in command:
+        if AWS_SECRET_RE.search(command):
+            return "aws"
+        if AMPLIFY_READ_RE.search(command) and not query_redacts_values(command):
+            return "aws"
     if STRIPE_MUTATION_RE.search(command) and OVERRIDES["stripe"] not in command:
         return "stripe"
     return None
@@ -176,24 +205,28 @@ def path_is_blocked(path: str) -> bool:
     return bool(re.fullmatch(SECRET_FILE, basename))
 
 
-def glob_is_blocked(glob: str) -> bool:
-    """A glob selects protected files without naming one literally.
+# A glob is blocked when it *can select* a protected file, which is not the
+# same as spelling one out: `*.yaml` and `*` reach `config.yaml` without ever
+# naming it. So instead of pattern-matching the pattern, match the pattern
+# against names a protected file actually has. The probes cover both families
+# and both the literal and the `[\w.-]*` middle of SECRET_FILE, so a pattern
+# pinned to `.example` still selects nothing protected and passes.
+_PROTECTED_PROBES = (
+    "config.yaml", "config.yml",
+    "config.local.yaml", "config.local.yml",
+    "configx.yaml", "configx.yml",
+    ".env", ".envx", ".env.local", ".env.production",
+)
 
-    `config*.yaml` and `.env*` reach the same files as a literal path, so a
-    wildcard pattern over either family blocks — the `.example` carve-out only
-    survives when the pattern is pinned to it (`.env.example`, `*.example.yaml`).
-    """
+
+def glob_is_blocked(glob: str) -> bool:
+    """True when the glob can select a file `path_is_blocked` would protect."""
     if not glob:
         return False
     basename = glob.replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if any(ch in basename for ch in "*?["):
-        if "example" in basename:
-            return False
-        return bool(
-            re.fullmatch(r"config[\w.*?\[\]-]*\.ya?ml", basename)
-            or re.fullmatch(r"\.env[\w.*?\[\]-]*", basename)
-        )
-    return bool(re.fullmatch(SECRET_FILE, basename))
+    if not any(ch in basename for ch in "*?["):
+        return bool(re.fullmatch(SECRET_FILE, basename))
+    return any(fnmatch.fnmatchcase(probe, basename) for probe in _PROTECTED_PROBES)
 
 
 def grep_is_blocked(tool_input: dict) -> bool:

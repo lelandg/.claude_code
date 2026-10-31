@@ -383,7 +383,13 @@ A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) 
 
 The hatches are **human-only** by design: the guard matches on command text, so documentation *about* a blocked call trips the same wire as the call itself. That false positive is the intended trade — switch tools and move on; never let the model append its own hatch.
 
-`tools/test-config-secrets-guard.py` is the regression suite, and worth reading before changing a pattern: each case under its `BYPASSES` marker is a hole a cross-provider review found *after* the guard grew past config-file reads — an arbitrary `--query` taken as proof of redaction, a global flag before the resource (`stripe --live charges create`), a newline as a non-separator, a glob that selects protected files without naming one, a case-sensitive match on case-insensitive PowerShell names. A guard that grows new categories grows new holes at the seams; the test is where that knowledge lives.
+`tools/test-config-secrets-guard.py` is the regression suite, and worth reading before changing a pattern: every case under its `BYPASSES` marker is a hole a cross-provider review found *after* the guard grew past config-file reads. They cluster into three lessons, and each cost two review rounds to learn:
+
+- **The seams between a command and its arguments are where bypasses live.** A global flag before the subcommand (`stripe --live charges create`) or before the service (`aws --region … amplify get-app`) defeated patterns that assumed a fixed word order — in the one spelling that mattered most.
+- **A prefix test is not validation.** `--query app.name` looks like redaction; `--query 'app.name && app'` starts the same way and returns the whole object. Validate the complete argument.
+- **Blocking "names a protected file" is not blocking "can read one."** A glob like `*.yaml` reaches `config.yaml` without naming it, so the guard matches patterns *against* protected names rather than pattern-matching the pattern. That blocks innocent YAML too — the deliberate trade.
+
+A guard that grows new categories grows new holes at the seams, and the test is where that knowledge lives. It also pins the false positives worth protecting: `Env:PATH` is the named single-variable read the deny message *recommends*, so blocking it would contradict the guard's own advice.
 
 The same guard extends to the other agent CLIs:
 
