@@ -223,6 +223,14 @@ GREPS = [
     # 22. Windows filename casing, as above.
     ({"glob": "*.YAML"}, True),
     ({"path": "/srv/app/.ENV"}, True),
+
+    # 23. A brace bomb is a cross-product: 25 two-way groups is 33.5M
+    #     alternatives. Expanding it blows the hook's timeout, and a
+    #     PreToolUse hook that times out is NON-blocking -- so the one input
+    #     shaped to break the guard would make it fail open. Deny past the cap.
+    ({"glob": "{a,b}" * 25 + "*.ts"}, True),
+    ({"glob": "{a,{b,c}}" * 12 + "*.ts"}, True),
+    ({"glob": "{a,b}{c,d}*.ts"}, False),
 ]
 
 

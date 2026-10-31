@@ -26,8 +26,12 @@ Invoke the **superpowers:subagent-driven-development** skill and run it task-by-
 1. Controller runs the project's full build + full lint **once**. On failure, dispatch ONE Sonnet fix agent with the exact error output; loop until green. Substantive fixes get a scoped re-review.
 2. Final whole-branch review (part of subagent-driven-development).
 3. `/codex:review --base origin/main` against the committed branch — the cross-provider review AGENTS.md requires on every PR, *before* it opens. Fix each finding or answer it in the PR body.
-4. `/version-manager release <level>` — version bump + changelog in the same commit. This is the **last commit on the feature branch**, which is what "cut the bump immediately before the merge" means in practice: run it *before* step 5, because the finishing skill can merge locally, and a release cut after that lands the release commit on the base branch instead. If the PR then sits while something else merges first, re-cut it.
-5. Then **superpowers:finishing-a-development-branch** for the merge/PR menu. Push happens here, never earlier (review-before-push rule).
+4. **superpowers:finishing-a-development-branch**, used only to push and open the PR. Push happens here, never earlier (review-before-push rule). Stop there — do **not** take its local-merge option yet.
+5. Wait for the repo's automated reviewers on the pushed head, and fix what they find (AGENTS.md → "PR review through the repo's configured automated reviewer"). Each push re-opens that window: the head you finally merge has to be one they actually reviewed.
+6. `/version-manager release <level>` — version bump + changelog in the same commit, cut **once the review fixes have landed**, as the last commit on the feature branch. Re-cut it if another PR merges first and takes the version.
+7. Merge. If you are using the finishing skill's local-merge option, invoke it again *here* — never before step 6, because a release cut after a local merge lands the release commit on the base branch instead of the feature branch.
+
+Steps 4–7 are one flow split in two on purpose. Collapsing them either cuts the bump before automated review (stale bump, and review fixes land after the release commit) or cuts it after a local merge (release commit on the wrong branch). Both have happened.
 
 ## Notes
 - If `$ARGUMENTS` is a plan file, extract the tasks from it; otherwise brainstorm → write a plan first (don't skip design for non-trivial work).

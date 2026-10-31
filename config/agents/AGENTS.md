@@ -270,7 +270,9 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
    A direct commit still runs your pre-commit hook, still carries attribution,
    and needs no version bump. Never force-push `main`, never `--admin`, and
    never use a bypass to land something that **failed** a check — the allowance
-   skips the PR, not the obligation to be clean.
+   skips the PR, not the obligation to be clean. (It cannot also mean "never
+   bypass a status check": the direct push this rule authorizes necessarily
+   skips those checks *as gates*, for the reason the next paragraph gives.)
 
    **If you have no pre-commit hook, this allowance is not for you.** It is
    safe only because something preventive still runs on a direct commit. A

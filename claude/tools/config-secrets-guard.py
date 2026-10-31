@@ -347,11 +347,40 @@ _PROTECTED_PROBES = tuple(
 )
 
 
+# A brace pattern's expansion is a cross-product, so it grows exponentially:
+# 25 two-way groups is 33.5 million alternatives. Materializing that exhausts
+# memory or blows the hook's 10-second timeout -- and a PreToolUse hook that
+# times out is treated as NON-blocking, so the guard would fail *open* on the
+# one input shaped to break it. Count first, bounded, and deny past the cap:
+# "ambiguity denies" has to hold for ambiguity about the pattern itself.
+_MAX_GLOB_FANOUT = 256
+
+
+def brace_fanout(pattern: str, cap: int = _MAX_GLOB_FANOUT) -> int:
+    """How many alternatives `expand_braces` would yield, short-circuited at cap.
+
+    Mirrors `expand_braces` exactly, including nesting, so the count is right
+    rather than an estimate -- but it abandons counting once past `cap`, so the
+    work it does is bounded no matter how the pattern is shaped.
+    """
+    match = re.search(r"\{([^{}]*)\}", pattern)
+    if not match:
+        return 1
+    total = 0
+    head, tail = pattern[: match.start()], pattern[match.end():]
+    for alternative in match.group(1).split(","):
+        total += brace_fanout(head + alternative.strip() + tail, cap)
+        if total > cap:
+            return total
+    return total
+
+
 def expand_braces(pattern: str):
     """Every alternative of a ripgrep brace pattern, e.g. `*.{yaml,yml}`.
 
     Grep's glob syntax expands these and `fnmatch` does not, so `*.{yaml,yml}`
-    selected `config.yaml` while matching no probe and no YAML suffix.
+    selected `config.yaml` while matching no probe and no YAML suffix. Callers
+    must bound the fan-out with `brace_fanout` first.
     """
     match = re.search(r"\{([^{}]*)\}", pattern)
     if not match:
@@ -372,7 +401,10 @@ def glob_is_blocked(glob: str) -> bool:
     """
     if not glob:
         return False
-    for alternative in expand_braces(glob.replace("\\", "/")):
+    normalized = glob.replace("\\", "/")
+    if brace_fanout(normalized) > _MAX_GLOB_FANOUT:
+        return True  # too many alternatives to check: deny rather than time out
+    for alternative in expand_braces(normalized):
         if _basename_glob_is_blocked(alternative.rsplit("/", 1)[-1].lower()):
             return True
     return False
