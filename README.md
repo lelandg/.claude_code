@@ -87,6 +87,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── config-secrets-guard.py    # PreToolUse hook: blocks printing config*.yaml / .env* secrets
 │   │   │                              #   (also speaks Codex hooks + Antigravity --agy protocols)
 │   │   ├── config-secrets-guard.pi.ts # Same guard as a Pi extension (~/.pi/agent/extensions/)
+│   │   ├── test-config-secrets-guard.py # Regression tests — one case per known bypass class
 │   │   └── safe-config-reader.py      # Masked config reader (structure only, strings hidden)
 │   ├── output-styles/                 # Output formatting styles
 │   │   ├── genui.md                   # Generative UI (HTML output)
@@ -94,6 +95,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   └── technical-quality.md       # Comprehensive technical analysis
 │   └── skills/                        # Custom skills (slash commands)
 │       ├── time.md                    # Execution time tracking
+│       ├── agent-config-sync/         # Report/reconcile drift between two runtimes' agent config
 │       ├── astrocade-game-creation/   # Design, prompt-plan, playtest & ship games on Astrocade
 │       ├── cl-project-init/           # Sanitized example: company project scaffolder
 │       ├── claude-md-optimizer/       # Rightsize CLAUDE.md/skills (Claude 5 context-engineering rules)
@@ -101,6 +103,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── disk-doctor/               # Disk cleanup + install hygiene (safe-trash, undo)
 │       ├── doc-all-projects/          # Sweep-and-regenerate docs across projects
 │       ├── feature-documenter/        # Feature documentation skill
+│       ├── getting-started/           # Interview-first concierge for people new to Claude Code
 │       ├── github-stacked-prs/        # Split a big feature into a chain of dependent PRs (gh-stack)
 │       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
 │       ├── html-doc/                  # Standalone HTML deliverables (reports, explainers)
@@ -118,6 +121,9 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── update-hermes/             # Backup-first Hermes Agent updater
 │       ├── version-manager/           # Standardized version bumps + changelog currency
 │       └── yt-transcript/             # Download YouTube transcripts
+├── tools/                             # Standalone tooling, installed separately
+│   ├── agent-config-sync/             # Report/reconcile agent-config drift between runtimes
+│   └── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
 ├── Docs/
 │   ├── SETUP_GUIDE.md                 # Full setup & configuration guide
 │   ├── install-guide.html             # Beginner-friendly visual install guide
@@ -378,7 +384,20 @@ Three output styles for different contexts:
 `statusline-command.sh` renders a two-line status bar: user@host, working directory, git branch, and worktree badge on line 1; model, context usage (color-coded: green <50%, yellow 50–79%, red ≥80%), rate-limit badges (5h/7d, for Claude.ai subscribers), PR badge (color-coded by review state), session name, and vim mode on line 2.
 
 ### Config Secrets Guard
-A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) blocks any Bash command or Read call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript — where it could be logged or shared. The companion `tools/safe-config-reader.py` prints a config file's structure with every string value masked, so agents can debug configuration without ever seeing the secrets. A human-approved `# config-ok` suffix is the escape hatch for write-only commands (e.g. `sed -i`).
+A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) blocks any tool call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript — where it could be logged or shared. It covers four categories, each with its own human-approved escape hatch appended to the command: config-file reads (`# config-ok`), bare environment dumps (`# env-ok`), cloud calls that return secret values (`# aws-ok`), and live-money CLI mutations (`# stripe-ok`). The companion `tools/safe-config-reader.py` prints a config file's structure with every string value masked, so agents can debug configuration without ever seeing the secrets.
+
+The hatches are **human-only** by design: the guard matches on command text, so documentation *about* a blocked call trips the same wire as the call itself. That false positive is the intended trade — switch tools and move on; never let the model append its own hatch.
+
+`tools/test-config-secrets-guard.py` is the regression suite — 100 cases, and worth reading before you touch a pattern. Most cases under its `BYPASSES` marker are a hole that four rounds of cross-provider review found *after* the guard grew past config-file reads (the rest are the false positives and negative controls those fixes must not break), and the rounds kept finding more because the first fixes were the wrong shape. Four lessons, in the order they were learned the hard way:
+
+- **The seams between a command and its arguments are where bypasses live.** A global flag before the subcommand (`stripe --live charges create`), before the service (`aws --region … amplify get-app`), or a resource path that nests (`stripe --live checkout sessions create`) defeats any pattern assuming a fixed word order — in the one spelling that matters most.
+- **Judge each call, not the command line.** One safe-looking flag vouched for every call in a pipeline, so `aws … --query app.name; aws … get-branch` passed with one projection and two reads. Segments are now split and judged individually — *quote-aware*, because a regex split tore `--query 'app.name && app'` in half and the leading fragment then looked safe.
+- **A denylist of bad shapes cannot establish that a value is safe.** This one cost two rounds. "A dotted path with no `environment` in it" accepted `app.basicAuthCredentials` — base64 basic-auth credentials, perfectly dotted. Projections are now an **allowlist** of named fields, and anything else needs the hatch.
+- **"Names a protected file" is not "can read one."** A glob like `*.yaml` reaches `config.yaml` without naming it; a finite probe list then missed `*.production.yaml` for the same reason. The rule is now structural and default-deny: any wildcard over the YAML or dotenv families blocks, and only a literal name keeps the `.example` carve-out.
+
+The accepted false positives are pinned by tests too, because they are decisions and not accidents: `*.example.yaml` blocks although it selects nothing protected (naming the file lifts it), and `Env:PATH` is *allowed* because it is the named single-variable read the deny message recommends — a guard that contradicts its own advice teaches people to reach for the override.
+
+The honest summary: a pattern-matching guard over free-form shell text is a sieve, and every new category adds seams. It is a guardrail against accidental exposure, not a sandbox, and it earns its keep at that job. Where a check cannot prove a thing is safe, it denies and lets a human say otherwise.
 
 The same guard extends to the other agent CLIs:
 
@@ -395,10 +414,28 @@ The same guard extends to the other agent CLIs:
   ```
 - **Pi** — no external-command hooks; `tools/config-secrets-guard.pi.ts` is a TypeScript port of the same rules as a Pi extension. Copy it to `~/.pi/agent/extensions/` and it blocks `bash`/`read` tool calls globally.
 
+### Global Git Hooks — the commit-time secret gate
+
+A different mechanism from the guard above, guarding a different moment. The guard stops a secret reaching the *conversation*; these stop one reaching *git history*.
+
+```bash
+sh tools/githooks/install.sh   # -> ~/.githooks, sets core.hooksPath (needs gitleaks on PATH)
+```
+
+Three layers: `gitleaks` on the staged diff (free, ~1 s, **always blocks**), then Snyk Open Source for a manifest whose *resolved dependencies* changed, then Snyk Code at most once per repo per day. The dependency layers default to warn — and since they only report findings that already **have a fix available**, a warn is an obligation rather than a grace period.
+
+**The secret gate fails closed**, which is the design decision that matters: a secret blocks, and so does a scan that could not be trusted — `gitleaks` missing from PATH, or a scan that errored. An errored scan is not a clean scan. Only that case is overridable, for one commit, explained in the message; a finding never is.
+
+Why so strict: server-side scanning is only *detective*. By the time CI reports a secret it is already in history and the fix is rotation, not deletion. A local hook is the only *preventive* gate — and once your default branch grants anyone a ruleset bypass, that bypass belongs to a **role** (GitHub cannot scope one by path), so a direct push by that role skips the server-side checks as gates too. The hook is then the only gate left, on every machine holding a token with that role.
+
+**Rule 4 of `AGENTS.md` depends on this.** The rule that lets a non-functional commit skip the PR and land on `main` is safe only because something preventive still runs on a direct commit. No hook, no rule 4.
+
+Installing them does **not** disable hooks your projects already have. `core.hooksPath` makes git ignore each repo's `.git/hooks` entirely, so a naive global install would silently kill every Husky and lefthook setup on the machine — every hook here chains to the repo-local one of the same name instead, which is why the no-op passthroughs are installed at all. Full reference and every switch: [`tools/githooks/README.md`](tools/githooks/README.md).
+
 ## Design Philosophy
 
 ### Context Efficiency
-The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer file, and the shared `AGENTS.md` is a compact (~6,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
+The always-loaded instruction files stay lean: `CLAUDE.md` is a ~100-line pointer file, and the shared `AGENTS.md` is a compact (~7,000-token) rulebook — hard security/money/data-loss rules verbatim, everything procedural compressed to one-liners, and situational detail extracted to `instructions/` files that any CLI's model reads on demand via plain-path pointers. This halves always-loaded context versus a monolithic AGENTS.md while keeping critical rules always in force.
 
 ### Security First
 - Credentials are never stored in project directories
@@ -406,6 +443,8 @@ The always-loaded instruction files stay lean: `CLAUDE.md` is a ~50-line pointer
 - All issues/inputs are treated as untrusted (prompt injection awareness)
 - Security outranks velocity: a reported vulnerability with a fixed version is patched immediately, overriding the 7-day minimum package age that otherwise guards npm/pnpm/pip/uv/poetry/cargo against compromised fresh publishes (see `AGENTS.md`)
 - Free scanners everywhere (`npm audit`, `osv-scanner`, `pip-audit`, `gitleaks` on every commit and PR), Dependabot alerts as the source of truth, metered Snyk where it counts
+- The secret scanner fails **closed**: a finding blocks, and so does a scan you can't trust (missing binary, errored run). Server-side scanning only *detects* — once a secret is pushed it's already in history — so the local pre-commit hook is the one preventive gate, and the only one left the moment the default branch grants a bypass
+- No grace window: a dependency advisory with an available fix gets its remediation PR the **same day**; a SAST finding is *triaged* the same day instead, because its "fix" is a design decision with a real false-positive rate
 - GitHub Actions: `pull_request_target` is banned — the #1 source of Actions supply-chain compromises
 
 ### Convention Over Configuration

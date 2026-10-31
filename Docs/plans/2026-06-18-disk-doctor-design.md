@@ -3,7 +3,7 @@
 **Status:** Approved (brainstorming complete) — ready for implementation planning
 **Last updated:** 2026-06-18 08:01
 **Author:** Leland Green (with Claude)
-**Origin:** Idea from Nick Paletta — a skill for non-technical users that scans a PC, cleans up disk space, and fixes "things installed in the wrong place." Scoped down here to a safe, shippable v1.
+**Origin:** Idea from a teammate — a skill for non-technical users that scans a PC, cleans up disk space, and fixes "things installed in the wrong place." Scoped down here to a safe, shippable v1.
 
 ---
 

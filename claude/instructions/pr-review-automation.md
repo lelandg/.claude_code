@@ -1,13 +1,20 @@
-# PR review through the GitHub Claude Code automation
+# PR review automation — the Claude Code GitHub App
 
-Referenced from `~/.config/agents/AGENTS.md` → "PR review through the
-configured GitHub Claude Code automation". Standing rule since 2026-09-13.
+Referenced from `~/.config/agents/AGENTS.md` → "PR review through the repo's
+configured automated reviewer". Standing rule since 2026-09-13.
 
 ## When it applies
 
-The user asks to commit, push, or open a PR on one of their repos, and the Claude
-Code GitHub App is installed on that repo. If the App is not installed, use the
-older sequence in AGENTS.md instead (local review before push).
+The user asks to commit, push, or open a PR on one of their repos, and the
+Claude Code GitHub App is the reviewer configured on that repo. The autofix
+behaviour below is specific to that App.
+
+- **No automated reviewer configured:** use the local-review sequence in
+  AGENTS.md instead (`code-reviewer` before push).
+- **A different automated reviewer:** the procedure below does not transfer.
+  Establish the two things AGENTS.md calls out before you gate on it — whether
+  it re-reviews a push, and whether a passing check means "no findings" — and
+  record the answers in that repo's own `AGENTS.md`.
 
 ## Procedure
 

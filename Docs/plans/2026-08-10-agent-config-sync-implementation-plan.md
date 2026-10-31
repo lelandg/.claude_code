@@ -22,7 +22,7 @@ These apply to **every** task. They are not repeated per task.
 - **Never `cd`.** Absolute paths always; `git -C <abs-path> …` for git.
 - **Tests never read or write the live user profile.** Every test builds a fixture tree under pytest's `tmp_path`. A test that references `/home/user`, `~`, `Path.home()`, or `/mnt/c/Users` outside of a *string literal being normalized* is a plan violation.
 - **Secret boundary (design §Secret and state boundary):** the tools use allowlist extraction, never ingest-then-redact. No secret value may appear in a drift document, prompt, report, log line, test snapshot, exception message, or commit. Values that are excluded are represented by *path, type, and hash* only.
-- **Report-only by default.** Nothing in Tasks 1–10 may write to `/home/user` or `/mnt/c/Users/aboog`. Only Task 11's merge tool writes to targets, and only with an explicit `--apply` flag plus selected item IDs.
+- **Report-only by default.** Nothing in Tasks 1–10 may write to `/home/user` or `/mnt/c/Users/user`. Only Task 11's merge tool writes to targets, and only with an explicit `--apply` flag plus selected item IDs.
 - **Atomic writes only.** Every output file is written to a temporary file in the same directory, `fsync`ed, then `os.replace`d into position.
 - **Exit codes (fixed contract, used by the cron wrapper):** `0` = success/no drift, `10` = drift reported, `20` = scan failure, `21` = lock held by another run, `30` = model/analysis failure. Never conflate ordinary drift with an infrastructure error.
 - **Versions:** `SCANNER_VERSION = "1.0.0"`, `DRIFT_SCHEMA_VERSION = 1`, `RESPONSE_SCHEMA_VERSION = 1`, `REPORT_TEMPLATE_VERSION = 1`, `MANIFEST_SCHEMA_VERSION = 1`. Bump only when the shape changes.
@@ -648,7 +648,7 @@ schema_version = 1
 [roots]
 wsl_home = "/home/user"
 repo = "/mnt/d/Documents/Code/GitHub/.claude_code"
-windows_home = "/mnt/c/Users/aboog"
+windows_home = "/mnt/c/Users/user"
 
 [state]
 dir = "~/.local/state/agent-config-sync"
@@ -1044,7 +1044,7 @@ git -C /mnt/d/Documents/Code/GitHub/.claude_code commit -m "feat(agent-config-sy
 
 ## Task 2: Normalization, path tokenization, and fingerprints
 
-Two layers can hold the *same intent* in different bytes: CRLF vs LF, key order in JSON, `/home/user/...` vs `C:\Users\aboog\...`. Comparing raw bytes would report drift that isn't there. This task makes "same intent" mechanically decidable.
+Two layers can hold the *same intent* in different bytes: CRLF vs LF, key order in JSON, `/home/user/...` vs `C:\Users\user\...`. Comparing raw bytes would report drift that isn't there. This task makes "same intent" mechanically decidable.
 
 **Files:**
 - Create: `tools/agent-config-sync/normalize.py`
@@ -1090,7 +1090,7 @@ import normalize as nz  # noqa: E402
 ROOTS = mf.Roots(
     wsl_home=Path("/home/user"),
     repo=Path("/mnt/d/Documents/Code/GitHub/.claude_code"),
-    windows_home=Path("/mnt/c/Users/aboog"),
+    windows_home=Path("/mnt/c/Users/user"),
 )
 
 
@@ -1168,7 +1168,7 @@ def test_tokenize_replaces_wsl_home_with_home_token():
 
 
 def test_tokenize_replaces_windows_home_in_all_three_spellings():
-    for spelling in ("/mnt/c/Users/aboog", "C:\\Users\\aboog", "C:/Users/aboog"):
+    for spelling in ("/mnt/c/Users/user", "C:\\Users\\user", "C:/Users/user"):
         out = nz.tokenize_paths(f"path {spelling}/.claude/CLAUDE.md", ROOTS)
         assert out == "path {HOME}/.claude/CLAUDE.md", spelling
 
@@ -1180,7 +1180,7 @@ def test_tokenize_replaces_repo_before_its_parent_mount():
 
 
 def test_tokenize_normalizes_backslashes_inside_a_matched_path():
-    out = nz.tokenize_paths("C:\\Users\\aboog\\.claude\\settings.json", ROOTS)
+    out = nz.tokenize_paths("C:\\Users\\user\\.claude\\settings.json", ROOTS)
     assert out == "{HOME}/.claude/settings.json"
 
 
@@ -1211,7 +1211,7 @@ def test_render_paths_falls_back_when_a_root_is_not_a_mount(tmp_path: Path):
 
 def test_render_paths_to_windows_layer_uses_drive_and_backslashes():
     out = nz.render_paths("{HOME}/.claude/x.md", "windows", ROOTS)
-    assert out == "C:\\Users\\aboog\\.claude\\x.md"
+    assert out == "C:\\Users\\user\\.claude\\x.md"
 
 
 def test_render_repo_token_for_windows_layer():
@@ -1223,11 +1223,11 @@ def test_tokenize_then_render_round_trips_wsl_to_windows():
     wsl_text = "hook: /home/user/.claude/tools/guard.py --strict\n"
     tokenized = nz.tokenize_paths(wsl_text, ROOTS)
     assert nz.render_paths(tokenized, "windows", ROOTS) == (
-        "hook: C:\\Users\\aboog\\.claude\\tools\\guard.py --strict\n")
+        "hook: C:\\Users\\user\\.claude\\tools\\guard.py --strict\n")
 
 
 def test_wsl_mount_to_windows_converts_drive_letters():
-    assert nz.wsl_mount_to_windows(Path("/mnt/c/Users/aboog")) == "C:\\Users\\aboog"
+    assert nz.wsl_mount_to_windows(Path("/mnt/c/Users/user")) == "C:\\Users\\user"
     assert nz.wsl_mount_to_windows(Path("/mnt/d/x/y")) == "D:\\x\\y"
 
 
@@ -1280,7 +1280,7 @@ Create `tools/agent-config-sync/normalize.py`:
 """Normalization, path tokenization, and fingerprints.
 
 Two layers can express the same intent with different bytes (CRLF vs LF, JSON
-key order, /home/user vs C:\\Users\\aboog). Everything here exists so that
+key order, /home/user vs C:\\Users\\user). Everything here exists so that
 "same intent" is mechanically decidable before anything is called drift.
 
 Design: "Deterministic scan" steps 5-6.
@@ -1380,7 +1380,7 @@ def normalize_for_kind(raw: str, kind: str) -> str:
 # --------------------------------------------------------------------------
 
 def wsl_mount_to_windows(path: Path) -> str | None:
-    """/mnt/c/Users/aboog -> C:\\Users\\aboog. None if not a /mnt/<drive> path."""
+    """/mnt/c/Users/user -> C:\\Users\\user. None if not a /mnt/<drive> path."""
     parts = Path(path).parts
     if len(parts) >= 3 and parts[0] == "/" and parts[1] == "mnt" and len(parts[2]) == 1:
         drive = parts[2].upper()
@@ -1525,7 +1525,7 @@ import extract as ex  # noqa: E402
 import manifest as mf  # noqa: E402
 
 ROOTS = mf.Roots(wsl_home=Path("/home/user"), repo=Path("/repo"),
-                 windows_home=Path("/mnt/c/Users/aboog"))
+                 windows_home=Path("/mnt/c/Users/user"))
 
 SECRETS = mf.SecretPolicy(
     deny_key_patterns=("(?i)token", "(?i)api[_-]?key", "(?i)password"),
@@ -3708,7 +3708,7 @@ DOC = {
     "generated_at": "2026-08-10T14:03:22+00:00",
     "scanner_version": "1.0.0",
     "manifest_version": 1,
-    "roots": {"wsl": "/home/user", "repo": "/repo", "windows": "/mnt/c/Users/aboog"},
+    "roots": {"wsl": "/home/user", "repo": "/repo", "windows": "/mnt/c/Users/user"},
     "layer_fingerprints": {"wsl": "a" * 64, "repo": "b" * 64, "windows": "c" * 64},
     "counts": {"publish_to_repo": 1, "conflict": 1, "protected_overlay": 1,
                "plugin_version_differs": 1},

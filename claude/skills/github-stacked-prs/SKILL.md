@@ -1,6 +1,6 @@
 ---
 name: github-stacked-prs
-description: Use when a feature is too large for one reviewable PR and splits into layers that build on each other; when Leland mentions stacked PRs, "gh stack", stacking, or splitting a big branch into a chain of dependent PRs; or when planning multi-part work where each part depends on the previous. GitHub-native feature (public preview since 2026-07-30) via the official gh-stack CLI extension.
+description: Use when a feature is too large for one reviewable PR and splits into layers that build on each other; when the user mentions stacked PRs, "gh stack", stacking, or splitting a big branch into a chain of dependent PRs; or when planning multi-part work where each part depends on the previous. GitHub-native feature (public preview since 2026-07-30) via the official gh-stack CLI extension.
 ---
 
 # GitHub Stacked PRs (`gh stack`)
@@ -17,11 +17,11 @@ This feature is in **public preview** and this skill was written 2026-08-08 agai
 
 1. `gh extension list | grep gh-stack` — install with `gh extension install github/gh-stack` if missing.
 2. Run `gh stack view --json` in the target repo. Exit code 9 means stacked PRs are **not enabled for that repository** — fall back to ordinary sequential PRs and say so.
-3. If commands here have changed, the extension is archived/deprecated, or stacking has moved into gh core (e.g. a native `gh pr stack`), **stop, report the discrepancy to Leland, and recommend switching methods** — then update or retire this skill with his approval.
+3. If commands here have changed, the extension is archived/deprecated, or stacking has moved into gh core (e.g. a native `gh pr stack`), **stop, report the discrepancy to the user, and recommend switching methods** — then update or retire this skill with their approval.
 
 ## When to use / when not
 
-**Use for:** a single feature whose diff would be large (roughly >400 lines) AND separates into dependent layers (schema → API → UI; refactor → behavior change; migration → code using it). The stack still merges as one unit, so Leland's "one PR per finished whole feature" rule holds — the stack IS the feature's PR, in reviewable slices.
+**Use for:** a single feature whose diff would be large (roughly >400 lines) AND separates into dependent layers (schema → API → UI; refactor → behavior change; migration → code using it). The stack still merges as one unit, so the "one PR per finished whole feature" rule holds — the stack IS the feature's PR, in reviewable slices.
 
 **Do not use for:** small changes (house rules: a small change is one small PR); independent changes (open separate ordinary PRs); repos where exit 9 says the preview isn't enabled; or splitting for its own sake — if one PR reviews fine, ship one PR.
 

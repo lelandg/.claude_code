@@ -65,8 +65,15 @@ the version is the real upstream release and not a lookalike, then state in one
 line what moved and which advisory it closes. If no fixed version exists, say so
 and name the mitigation — that is the only acceptable "still vulnerable" answer.
 
-A pre-existing finding still does not block an unrelated PR, but it is now its
-own work item with an owner, not something to name and leave indefinitely.
+**"Immediately" has a deadline: before you stop working.** A dependency
+advisory with an available fix is remediated in the session that found it — on
+the current branch when the PR already touches that manifest, otherwise as its
+own PR, opened and merged the same day. Not "within 7 days", not "next
+release", not a TODO. A pre-existing finding still does not block an
+*unrelated* PR from merging, but it does not get to outlive the session that
+saw it: open its fix PR before you report the other work done. If the fix
+genuinely cannot land today, say in one line why and what the interim
+mitigation is — an unexplained carry-forward is not an option.
 
 **Otherwise the floor holds (supply-chain defense):** never install or upgrade to
 a package version published **<7 days ago** without explicit approval — if the
@@ -84,15 +91,37 @@ metered one runs where it adds something.
 | Free, GitHub-side | Dependabot alerts + grouped security-update PRs | always on, per repo |
 | Metered (Snyk Free) | `snyk test`, `snyk code test` | before a PR that changes dependencies or app source |
 
-**A global pre-commit hook should default to warn, and be delta-aware:** test a
-manifest only when the commit changes its dependency fields (a release commit
-that bumps `version` is not a dependency change), and fail only on findings
-that have a fix available (Snyk `--fail-on=all`: an upgrade or a patch exists)
-— the same test as the precedence rule. `gitleaks` always runs on the staged
-changes and always blocks: a secret never enters history, and no environment
-variable skips it — `--no-verify` is the only way past it and is itself a
-smell. Keep a documented emergency skip for the metered scanner only, and
-record its use in the commit message.
+**A global pre-commit hook should default to warn for the metered scanner, and
+be delta-aware:** test a manifest only when the commit changes its dependency
+fields (a release commit that bumps `version` is not a dependency change), and
+fail only on findings that have a fix available (Snyk `--fail-on=all`: an
+upgrade or a patch exists) — the same test as the precedence rule. Because of
+that filter, **everything the hook reports already has a fix**: a warn is an
+obligation, not a grace period. The `warn` default exists so a mid-work commit
+is not held hostage to a transitive CVE you have not read yet; it never
+licenses pushing or merging with the finding still open. Keep a documented
+emergency skip for the metered scanner only (e.g. `SNYK_SKIP=1`) and record
+its use in the commit message. Set the hook to block in a clone that wants
+every finding to block, and off only while debugging the hook itself.
+
+**`gitleaks` is the one gate that fails closed.** It always runs on the staged
+changes, and a finding blocks with nothing to pass it. Run it with
+`--exit-code 3` so the exit code is unambiguous — 0 clean, 3 secret found,
+anything else a scan error — and treat a scan you cannot trust as a block too:
+the binary missing from `PATH`, or an errored run. Only *that* case gets an
+override (one commit, explained in the message); a found secret never does.
+Make every switch in the hook enable on the exact value `1` alone, so a
+`=false` cannot turn one on by truthiness. `--no-verify` is then the only other
+way past a finding, and is itself a smell.
+
+**A local hook is preventive; server-side scanning is detective.** Once a
+secret is pushed it is already in history, so a CI scan can only tell you.
+That asymmetry is why the local hook fails closed — and it becomes the *only*
+preventive gate the moment the default branch grants a bypass (rule 4 below).
+A bypass is granted to a *role*, and GitHub cannot scope one by path, so the
+same grant also skips those server-side checks as gates on any push by that
+role. Every machine holding a token with that role therefore needs the hook
+installed; track which ones do.
 
 Before a PR: `snyk test` when the PR adds, removes, or upgrades a dependency;
 `snyk code test` when it changes application source in a language Snyk Code
@@ -131,11 +160,20 @@ Then:
   artifact in the same PR, or hold it and say why.
 
 Pre-existing findings the PR does not touch do not block that PR — name them.
-But they are not free to ignore: a critical or high finding with a fix
-available gets its own remediation PR **within 7 days** of being reported,
-owned by whoever saw it first. Never silence a finding the PR itself
+But they are not free to ignore, and there is no grace window: a dependency
+finding with a fix available gets its remediation PR the **same day** it is
+reported, owned by whoever saw it first. Never silence a finding the PR itself
 introduces. Any finding with a fixed version gets that fix, regardless of how
 new the fix is — see the precedence rule above.
+
+**Dependency findings and SAST findings are not the same work.** A dependency
+advisory has a deterministic fix — a version — so it is applied, not debated.
+A code-scanning (SAST) finding's "fix" is a code change with design
+consequences and a real false-positive rate, so it gets **triaged** the same
+day instead: fix it now when the change is contained, otherwise record the
+verdict — exploitable path or not, with the reasoning — in the PR body, or in
+an ignore-file entry carrying a reason and an expiry. Triage is not optional,
+and an untriaged SAST finding counts as real.
 
 ### System dependencies
 
@@ -155,8 +193,10 @@ Customize this section for your own infra tooling. Non-negotiables:
 
 - **Never run commands that print secret values or PII into the conversation**
   (e.g. `aws amplify get-app … environmentVariables`, or inline `psql` that
-  prints rows). Use admin tooling that keeps values out of the transcript by
-  design, or ask the user to run the command themselves.
+  prints rows). Do the admin work without seeing the secrets: key-only
+  listings, `--query` projections that omit values, results written to a file
+  and summarized. If a tool cannot guarantee that, don't run it — hand the
+  step to the user.
 - **Destructive / breaking infrastructure changes need explicit approval
   first** (`DROP`/`TRUNCATE`/`RENAME`, `DROP COLUMN`, un-defaulted `NOT NULL`,
   narrowing types, long locks on busy tables). Describe the change and wait
@@ -206,12 +246,72 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
 3. **Before pushing any branch**, check `git log --oneline origin/main..HEAD`
    for commits that aren't yours; drop or rebase them out rather than
    publishing them.
-4. **Everything reaches `main` through a PR.** When `main` deploys to
-   production, protect it with a ruleset requiring a pull request with your
-   security checks green (e.g. `gitleaks`, `npm audit signatures`) and no
-   bypass actors — so `--admin` is not an option and a hotfix is a PR with
-   green checks. Small changes are small PRs; the automation makes them cheap.
-   A docs-only PR still needs no version bump.
+4. **Code reaches `main` through a PR; non-functional changes may be committed
+   straight to `main`.**
+
+   "Non-functional" means **every** path in the commit is one no build step
+   consumes: Markdown, text, and images under `Docs/`, `Plans/`, `Notes/`,
+   plus `README*`, `CHANGELOG*`, `LICENSE*`, comment- or docstring-only edits
+   inside source files, **and the agent-instruction files** — `AGENTS.md`,
+   `CLAUDE.md`, `GEMINI.md`, `~/.claude/instructions/**`, and skill bodies. A
+   mixed commit is a PR, and so is anything a machine executes, schedules, or
+   serves even when it reads like prose: `.github/**`, any reviewer or CI
+   config, `.snyk`, `dependabot.yml`, any config or `.sql` file, agent *code*,
+   and anything the build copies, serves, or RAG-indexes. When unsure, PR.
+
+   **The allowance for the agent-instruction files carries an obligation**,
+   because a contradiction *between* two rule files is the one defect class
+   diff-scoped reviewers cannot see: when you change a rule on `main` that
+   another file repeats — a project `AGENTS.md`, a `CLAUDE.md`, a skill body,
+   a runbook — update every copy in the **same commit**. If you cannot, or you
+   are unsure where the rule is echoed, it is a PR. Grep before you commit;
+   the reviewers will not do it for you.
+
+   A direct commit still runs your pre-commit hook, still carries attribution,
+   and needs no version bump. Never force-push `main`, never `--admin`, and
+   never use a bypass to land something that **failed** a check — the allowance
+   skips the PR, not the obligation to be clean. (It cannot also mean "never
+   bypass a status check": the direct push this rule authorizes necessarily
+   skips those checks *as gates*, for the reason the next paragraph gives.)
+
+   **If you have no pre-commit hook, this allowance is not for you.** It is
+   safe only because something preventive still runs on a direct commit. A
+   bypassed branch with no local gate has nothing checking it at all, and the
+   server-side scans then report the secret after it is already in history.
+   Install one first (`tools/githooks/install.sh` in the config repo ships the
+   hook this rule assumes), or keep using PRs.
+
+   **Then check it actually runs in *this* repo.** A repo-local
+   `core.hooksPath` — Husky, lefthook, the `pre-commit` framework — takes
+   precedence over the global one, so git never starts the global hook and the
+   gate is silently absent exactly where you assumed it was present.
+   `git config --local core.hooksPath` must come back empty, or that local hook
+   must invoke the global `pre-commit` itself. Until one of those is true, this
+   repo is a PR-only repo whatever the paths say.
+
+   For the same reason, a commit
+   that used the hook's degraded-scan override has never been scanned: run
+   `gitleaks` over it yourself before pushing, because nothing downstream will
+   stop it and rule 2 above says local `main` may hold things on purpose.
+
+   **A direct push publishes everything `main` is holding, not just your
+   commit.** Rule 2 exists because local `main` accumulates commits kept back
+   deliberately, and `git push` takes them all. So start from the remote head
+   (`git fetch && git status` clean against `origin/main`, or commit in a
+   throwaway worktree cut from `origin/main`) and check
+   `git log --oneline origin/main..HEAD` before pushing — the same check rule 3
+   asks for, which until now applied only to branches.
+
+   **Know what your branch protection actually allows before relying on this.**
+   Protect a `main` that deploys to production with a ruleset requiring a pull
+   request and your security checks green (e.g. `gitleaks`,
+   `npm audit signatures`). A direct push then needs a bypass actor on that
+   ruleset — and a bypass is granted to a *role*, which GitHub cannot scope by
+   path, so the same grant also skips those checks as gates on any push by
+   that role. They still run and fail visibly afterwards, which is detection,
+   not prevention. So this rule, not the platform, is what keeps code off that
+   path: run `gh api repos/<owner>/<repo>/rulesets` before assuming a direct
+   push lands, and keep a code hotfix a PR with green checks.
 
 ### Shipping autonomy
 
@@ -219,8 +319,11 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
 gate below is green, merge it — do not stop to ask. A go-ahead to ship
 ("implement and publish", "ship it", "merge when green") is still welcome but
 is no longer what authorizes the merge; the work itself does. The whole path
-runs unprompted: branch → implement → gates → commit → version bump → Codex
-review → push → PR → automated review → fixes → **merge** → post-deploy check.
+runs unprompted: branch → implement → gates → commit → Codex review → push →
+PR → automated review → fixes → version bump → **merge** → post-deploy check.
+The bump sits second-to-last on purpose; see "Versioning" for why. A
+non-functional change under rule 4 skips this path entirely: commit on `main`
+and push.
 
 Stop and ask only when something is genuinely blocking: a gate you cannot get
 green, a review finding that needs the user's decision, or a step that needs a
@@ -242,9 +345,13 @@ Gates before merge, by the riskiest thing the change touches:
   data-migration PRs also need `/codex:adversarial-review`, which only the
   user can run — ask them, with the exact command.
 - **Merge** only when checks are green, the automated PR review has arrived
-  and every finding is fixed or answered, and the Codex findings are
-  reconciled. Use the repo's merge style. Never bypass branch protection
-  (`--admin`), never force-push the default branch.
+  and every finding is fixed or answered, the Codex findings are reconciled,
+  and no dependency advisory this PR introduced or touched is left open with a
+  fix available. (A *pre-existing* advisory still does not block an unrelated
+  PR — it gets its own same-day remediation PR instead, per the scanning
+  section. Scoping this gate to what the PR touches is what keeps those two
+  rules from contradicting each other.) Use the repo's merge style. Never
+  bypass branch protection (`--admin`), never force-push the default branch.
 - **After merging to a deploying branch,** watch the deploy, then smoke-test
   production as a user. If either fails, fix forward or revert the PR at once,
   then tell the user.
@@ -277,8 +384,8 @@ Gates before merge, by the riskiest thing the change touches:
   In multi-task / subagent plans, each task's gate is scoped lint (touched
   files) + project typecheck + that task's tests — never the full build. The
   full build runs exactly once, in the branch-finish pass (build → fix →
-  final review → version bump → push/PR). Solo small changes still build
-  before any push to a deploying branch.
+  final review → push/PR → version bump → merge). Solo small changes still
+  build before any push to a deploying branch.
 - One PR per finished **whole feature**, not per sub-project or phase. Commit
   along the way; open the PR when the feature is complete, and merge it once
   the gates are green (see "Shipping autonomy" — no go-ahead needed). On the
@@ -302,9 +409,10 @@ Gates before merge, by the riskiest thing the change touches:
 
 ### Versioning & changelog (every repo)
 
-Before opening a PR (there is no other path to `main`) bump the version and
-add the changelog entry **in the same commit** — except a docs-only PR, which
-needs no bump (rule 4) — via
+Every PR carries a version bump and a changelog entry **in the same commit** —
+except a non-functional change, which needs no bump and may skip the PR
+altogether (rule 4). Cut it immediately before merging, not when you open the
+PR (the next paragraph says why), via
 `python3 ~/.claude/skills/version-manager/version_tool.py --repo <abs-path>
 release <major|minor|patch>` (dry-run first; curate the generated notes into
 prose with `--notes FILE --apply`). **Never hand-edit a version number or a
@@ -340,19 +448,43 @@ data-migration work gets a Claude review **plus** an independent
 `/codex:adversarial-review`; reconcile disagreements explicitly. Keep the
 Codex stop-review gate **off**; invoke reviews at commit/PR boundaries.
 
-### PR review through the configured GitHub Claude Code automation
+### PR review through the repo's configured automated reviewer
 
 When the user asks to commit, push, or open a PR (or gives a shipping
-go-ahead), run the local checks, commit, apply the version bump, run the
-Codex review (see "Shipping autonomy"), push, and open the PR. That request
-authorizes the GitHub Claude Code automation (the Claude Code GitHub App) to
-review the PR. After opening, wait for the automated review (2-5 minutes)
-and inspect its results and any autofix PR by the procedure in
+go-ahead), run the local checks, commit, run the Codex review (see "Shipping
+autonomy"), push, and open the PR — the version bump comes later, as the last
+commit before the merge. That request
+authorizes whatever automated reviewer the repo has configured to review the
+PR. After opening, wait for that review (2-5 minutes) and inspect its results
+and any autofix PR by the procedure in
 `~/.claude/instructions/pr-review-automation.md`. The Codex review runs
 before push; it does not replace the wait for the automated review. On a repo
-where the GitHub App is not installed, a local Claude review (`code-reviewer`
+with no automated reviewer configured, a local Claude review (`code-reviewer`
 agent) stands in for it: implement → tests green → commit → Codex + Claude
-review → reconcile/fix → version bump → push → PR.
+review → reconcile/fix → push → PR → version bump → merge.
+
+**Which reviewer that is varies by repo, so read the repo's own `AGENTS.md`
+rather than assuming.** Two properties decide which one you actually gate on,
+and they differ by vendor:
+
+- **Does it re-review a push?** Some reviewers review on PR *open* only, so
+  after you add commits their check goes missing and a fresh review has to be
+  triggered by hand — otherwise the commits you actually merge are unreviewed.
+  Others re-review every push, but only while the settings that control that
+  are right: watch for one that pauses automatic review after N reviewed
+  commits, because it goes quiet *later*, on a long PR, with a green check.
+- **Does its check passing mean "no findings"?** Usually not — it means the
+  review ran. Findings arrive as inline comments while the summary body stays
+  empty, so the check is green and the conversation tab looks clear with a
+  real finding sitting in a thread. A passing check can also mean the review
+  was rate-limited or skipped rather than performed, so read the check run's
+  output title, not just its conclusion.
+
+The gate is therefore the check reporting **on the head you are merging** *and*
+the inline comments read — never the check alone. Know, too, whether these
+reviewers are required status checks at all: if the ruleset does not require
+them, waiting on them is your rule rather than enforcement, which is exactly
+why it has to be written down.
 
 ---
 
@@ -389,7 +521,8 @@ explicitly asks.
 - **Missing referenced script:** check the project first, then the native
   Windows location and the matching WSL location
   (`\\wsl.localhost\<Distro>\home\<user>\...`). On Windows prefer native
-  Python with an absolute Windows repo path.
+  Python with an absolute Windows repo path. Never copy a script from one
+  runtime's config home into the other's — the sync tool owns that tree.
 - **Version picks = longest remaining security-support window** that the
   project's dependencies allow — never an even/odd heuristic. Node.js: pin a
   line that is in LTS (`.nvmrc`) and bound `engines` at each supported major's
@@ -412,3 +545,7 @@ explicitly asks.
 - Images: always **scaled proportional, not cropped or distorted**.
 - **All errors must be logged** — including every error shown to users — per
   user, in a platform-independent way.
+- **No Qt, except PySide.** Do not use PyQt, C++ Qt, or any other Qt-based
+  library or tool. PySide is the one allowed exception (it works where the
+  others do not). For everything else pick a different GUI stack (Tk,
+  wxPython, web UI, .NET) and say so if a dependency would pull Qt in.

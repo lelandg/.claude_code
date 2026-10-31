@@ -46,13 +46,13 @@ cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 | MCP Servers | `mcp.json` | GitHub, chrome-devtools, and ACE Studio MCP server configs |
 | Status Line | `statusline-command.sh` | Two-line status bar: user@host, path, git branch/worktree; model, context %, rate-limit badges, PR badge, session name |
 | Agentic Template | `agentic_prompt_template.md` | Template for autonomous agent workflows |
-| 6 Agents | `agents/*.md` | code-reviewer, software-engineer, performance-optimizer, documentation-specialist, research-assistant, test-generator |
+| 1 Agent | `agents/*.md` | code-reviewer (the other five retired in August 2026 — see `claude/agents/README.md`) |
 | Agent Specs | `agents/specs/CLAUDE_CodeMap.md` | CodeMap spec copy for agent access |
-| 5 Instructions | `instructions/*.md` | credentials, file-dispositions, file-operations, model-delegation, plan-templates |
+| 10 Instructions | `instructions/*.md` | credentials, environment, file-dispositions, file-operations, github-issues, model-delegation, package-min-age, plan-templates, pr-review-automation, runbook-standards |
 | 3 Output Styles | `output-styles/*.md` | genui, html, technical-quality |
-| 21 Skills | `skills/*/` | See the [Skills](#skills) table below |
-| Guard Tools | `tools/*.py`, `tools/*.pi.ts` | config-secrets-guard hook (blocks printing secrets) + masked safe-config-reader; Pi port included |
-| Hookify Rules | `hookify-rules/` | Guard denying unpinned Codex rescue/exec runs, with an 8-case test harness |
+| 26 Skills | `skills/*/` | See the [Skills](#skills) table below |
+| Guard Tools | `tools/*.py`, `tools/*.pi.ts` | config-secrets-guard hook (blocks printing secrets) + its 88-case regression suite + masked safe-config-reader; Pi port included |
+| Hookify Rules | `hookify-rules/` | Guard denying unpinned Codex rescue/exec runs, with a 10-case test harness |
 | Repo Commands | `.claude/commands/*.md` | Slash commands available inside the cloned repo: `/install-claude-config`, `/sync-claude-config`, `/unify-agents-md`, `/feature-team`, `/rename-code`, `/update-hermes`, `/yt-transcript` |
 
 ## Required Environment Variables
@@ -213,16 +213,13 @@ Use `${VAR_NAME}` syntax for environment variable references (never hardcode tok
 
 ## Agents
 
-Six specialized agents are included, each optimized for specific tasks:
+One specialized agent is included:
 
 | Agent | Model | Best For |
 |-------|-------|----------|
 | **code-reviewer** | Fable | Reviewing code for bugs, quality, performance, and best practices |
-| **software-engineer** | Opus | Writing new code, fixing bugs, implementing features, refactoring |
-| **performance-optimizer** | Opus | Identifying bottlenecks, optimizing algorithms, database queries |
-| **documentation-specialist** | Sonnet | Creating user guides, API docs, README files, architecture docs |
-| **research-assistant** | Sonnet | Researching technologies, comparing approaches, best practices |
-| **test-generator** | Sonnet | Creating test suites with edge cases, mocks, fixtures |
+
+Five others (software-engineer, performance-optimizer, documentation-specialist, research-assistant, test-generator) were retired in August 2026 — Claude Code's own general-purpose agent had caught up with them, and a thin wrapper that only restates the default is worse than no wrapper, because it looks like it adds something. `claude/agents/README.md` has the reasoning.
 
 Agents are automatically selected by Claude Code based on your task. No manual invocation needed - just describe what you need.
 
@@ -266,6 +263,98 @@ Select these in Claude Code's output style picker:
 
 `settings.json` wires `tools/config-secrets-guard.py` as a `PreToolUse` hook. It blocks any Bash command or Read call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript. The companion `tools/safe-config-reader.py` prints a config file's structure with string values masked. The same guard extends to Codex, Antigravity (`--agy` flag), and Pi (`config-secrets-guard.pi.ts`) — see the README's "Config Secrets Guard" section for the per-CLI wiring snippets.
 
+## Global Git Hooks (the secret gate)
+
+Separate from the Claude Code config above, and **not installed by
+`/install-claude-config`** — these are machine-wide git hooks, so installing
+them changes how `git commit` behaves in every repository on the machine. That
+is a deliberate opt-in step.
+
+### What they are for
+
+Three layers, cheapest first:
+
+| Layer | Cost | Blocks? | When it runs |
+|---|---|---|---|
+| `gitleaks` on the staged diff | free, ~1 s | **yes, always** | every commit |
+| Snyk Open Source | metered | no, by default | only a manifest whose *resolved dependencies* changed |
+| Snyk Code | metered | no, by default | at most once per repo per day, and only when source is staged |
+
+The secret gate **fails closed**: a secret blocks the commit, and so does a scan
+that could not be trusted — `gitleaks` missing from PATH, or a scan that
+errored. An errored scan is not a clean scan. Only that case is overridable
+(`GITLEAKS_DEGRADED_OK=1`, one commit, explained in the message); a finding
+never is.
+
+That matters because server-side scanning is only *detective*. By the time CI
+reports a secret it is already in history and the fix is rotation. A local hook
+is the only *preventive* gate — and the moment your default branch grants anyone
+a ruleset bypass, that bypass belongs to a **role** (GitHub cannot scope one by
+path), so a direct push by that role skips the server-side checks as gates too.
+This hook is then the only gate left.
+
+**Rule 4 in `AGENTS.md` depends on this.** That rule lets a non-functional
+commit skip the pull request and land straight on `main`. It is safe only
+because something preventive still runs on a direct commit. If you have not
+installed these hooks, do not use rule 4 — keep using pull requests.
+
+The dependency layers default to *warn*, and because they only report findings
+that already **have a fix available**, a warn is an obligation rather than a
+grace period. Open the fix the same day.
+
+### Install
+
+```bash
+sh tools/githooks/install.sh
+```
+
+Copies the hooks to `~/.githooks` (pass a path, or set `GIT_HOOKS_DEST`, to put
+them elsewhere) and sets `core.hooksPath`. Re-run it after editing a hook: git
+runs the installed copy.
+
+**On WSL, if you also commit from Windows, install to a Windows-visible path:**
+
+```bash
+sh tools/githooks/install.sh /mnt/c/Users/$USER/.githooks
+```
+
+Git for Windows is a separate install with its own global config, and it cannot
+reach the WSL filesystem by path — `/home/you/.githooks` has no drive-letter
+spelling. So the default destination guards WSL only. The installer warns
+instead of pointing Windows git at an unreachable path, because that would find
+no hooks and skip the scan with nothing to tell you.
+
+Then install `gitleaks`, because the gate fails closed and will otherwise block
+every commit:
+
+```bash
+winget install --id Gitleaks.Gitleaks --scope user
+```
+
+```bash
+brew install gitleaks
+```
+
+`snyk` and `node` are optional. Without them the dependency layers skip
+silently and the secret gate still runs.
+
+Verify, without spending any Snyk quota:
+
+```bash
+sh tools/githooks/test-pre-commit.sh
+```
+
+### It does not disable your existing hooks
+
+Setting `core.hooksPath` makes git ignore each repo's own `.git/hooks`
+entirely, so a naive global install would silently kill every Husky, lefthook
+or `pre-commit`-framework setup on the machine. Every hook here chains to the
+repo-local hook of the same name — which is also why the no-op passthroughs
+(`commit-msg`, `pre-push`, `post-merge`, …) are installed at all.
+
+Full reference, including every environment switch:
+[`tools/githooks/README.md`](../tools/githooks/README.md).
+
 ## Verification Checklist
 
 After installation, verify everything works:
@@ -278,6 +367,7 @@ After installation, verify everything works:
 - [ ] **Verify AGENTS.md** - Your personal info is filled in at `~/.config/agents/AGENTS.md` (not placeholders)
 - [ ] **Verify settings.json** - Read permission path has your actual username
 - [ ] **Test the secrets guard** - `cat .env` in a project should be blocked with a pointer to `safe-config-reader.py`
+- [ ] **Decide on the git hooks** - If you installed them, `git config --global core.hooksPath` has a path and `gitleaks version` works. If you did not, do not use rule 4 in `AGENTS.md` (direct commits to `main`)
 
 ## File Structure After Installation
 
@@ -295,22 +385,25 @@ After installation, verify everything works:
 ├── agents/                            # Custom agent definitions
 │   ├── CLAUDE.md                      # Agent-specific instructions
 │   ├── code-reviewer.md
-│   ├── documentation-specialist.md
-│   ├── performance-optimizer.md
-│   ├── research-assistant.md
-│   ├── software-engineer.md
-│   ├── test-generator.md
+│   ├── Claude-Code-Agents-Documentation.md
+│   ├── README.md                       # Why the other five agents were retired
 │   └── specs/
 │       └── CLAUDE_CodeMap.md          # CodeMap spec for agent access
 ├── instructions/                      # On-demand reference docs
 │   ├── credentials.md                 # Secrets management patterns
+│   ├── environment.md                 # IDEs, runtimes, version-support windows (template)
 │   ├── file-dispositions.md           # Standing approvals for working-tree files (template)
 │   ├── file-operations.md             # File operation guidelines
-│   ├── model-delegation.md            # Cross-provider routing (Claude + Codex/GPT-5.6)
-│   └── plan-templates.md              # Implementation plan format
+│   ├── github-issues.md               # Issue triage, labels, needs-info flow
+│   ├── model-delegation.md            # Cross-provider routing (Claude + Codex)
+│   ├── package-min-age.md             # Minimum-package-age floor, per manager
+│   ├── plan-templates.md              # Implementation plan format
+│   ├── pr-review-automation.md        # Claude Code GitHub App review + autofix inspection
+│   └── runbook-standards.md           # Zero-inference instructions for a human to run
 ├── tools/                             # Hook scripts wired in settings.json
 │   ├── config-secrets-guard.py        # PreToolUse hook: blocks printing secrets
 │   ├── config-secrets-guard.pi.ts     # Same guard as a Pi extension
+│   ├── test-config-secrets-guard.py   # 88-case regression suite for the guard
 │   └── safe-config-reader.py          # Masked config reader
 ├── hookify-rules/                     # Guard rules (symlink into a project's .claude/)
 │   ├── hookify.block-unpinned-codex-rescue.local.md

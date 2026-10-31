@@ -1,6 +1,6 @@
 ---
 name: version-manager
-description: Use when bumping a version, cutting a release, or when a CHANGELOG is stale, missing versions, or disagrees with the code — and before opening any PR, per the versioning rule in AGENTS.md. Also on /version-manager [check|backfill|release], or when the user says "bump the version", "cut a release", "the changelog is old". Auto-detects version locations in any stack (pyproject, package.json, VERSION file, module constants, README display) — no per-repo config.
+description: Use when bumping a version, cutting a release, or when a CHANGELOG is stale, missing versions, or disagrees with the code — and on every PR, cut as the last commit before the merge, per the versioning rule in AGENTS.md. Also on /version-manager [check|backfill|release], or when the user says "bump the version", "cut a release", "the changelog is old". Auto-detects version locations in any stack (pyproject, package.json, VERSION file, module constants, README display) — no per-repo config.
 ---
 
 # Version Manager
@@ -32,7 +32,10 @@ write nothing until you add `--apply`. Always show the user the dry run first.
 
 ## Standard workflow
 
-**Before opening a PR** (this is the house rule in `~/.config/agents/AGENTS.md`):
+**Immediately before merging a PR, as its last commit** — not when you open it.
+With several PRs open at once each one claims the same next version and only the
+first to merge keeps it, so a bump cut early goes stale and has to be re-cut.
+(This is the house rule in `~/.config/agents/AGENTS.md`.)
 
 ```bash
 T=~/.claude/skills/version-manager/version_tool.py
@@ -43,6 +46,12 @@ python3 $T --repo /abs/path/to/repo release minor --notes /tmp/notes.md --apply
 Pick the level from what actually shipped — `major` for a breaking change,
 `minor` for a feature, `patch` for fixes and docs. The dry run prints the level
 the commits suggest; it never picks silently.
+
+A change that is non-functional under rule 4 of `AGENTS.md` — every path one no
+build step consumes — *may* skip the PR, and then needs no bump at all. Only
+*may*: rule 4 has preconditions (an installed pre-commit hook, a push that
+carries nothing else), and a change that does not meet them is a PR like any
+other, bump included.
 
 **Curate the changelog body.** The generated draft is raw commit subjects. Rewrite
 it into prose in a file and pass `--notes FILE`. This is the deliberate manual

@@ -1,6 +1,6 @@
 ---
 name: agent-config-sync
-description: Check and sync agent instruction files between WSL and Windows — the canonical AGENTS.md, CLAUDE.md, ~/.claude/instructions, the per-CLI AGENTS.md copies (Codex, Copilot, Gemini), and the config-secrets guard — and flag settings/hooks drift. Use when Leland asks "are my agent rules in sync", "sync my agent instructions", "check config drift", "is Windows out of date", or why an agent behaves differently on WSL and Windows. Not for skills, plugins, or agents (Claude Code syncs those), and not for the public mirror (/publish-claude-config).
+description: Check and sync agent instruction files between WSL and Windows — the canonical AGENTS.md, CLAUDE.md, ~/.claude/instructions, the per-CLI AGENTS.md copies (Codex, Copilot, Gemini), and the config-secrets guard — and flag settings/hooks drift. Use when the user asks "are my agent rules in sync", "sync my agent instructions", "check config drift", "is Windows out of date", or why an agent behaves differently on WSL and Windows. Not for skills, plugins, or agents (Claude Code syncs those), and not for the public mirror (/publish-claude-config).
 ---
 
 # Agent instruction sync
@@ -8,7 +8,7 @@ description: Check and sync agent instruction files between WSL and Windows — 
 Tool: `tools/agent-config-sync/sync.py` in the `.claude_code` repo. Scope:
 `config/agent-sync.toml`. Each run takes a few seconds. Neither machine is
 the authority: a change on one side is copied to the other, and a change
-on both sides is a conflict for Leland.
+on both sides is a conflict for the user to resolve.
 
 ## 1. Check (read-only)
 
@@ -37,23 +37,23 @@ Read the exit code first:
 | `regen ...` | A per-CLI copy of AGENTS.md is stale. Apply regenerates it |
 | `conflict` | Both sides changed. Run `sync.py diff <path>` and say what each side changed. Never pick a winner |
 | `blocked` | A derived copy is waiting for a conflict on its source |
-| `orphan` | A derived copy whose source is gone. Remove it by hand after Leland agrees |
+| `orphan` | A derived copy whose source is gone. Remove it by hand after the user agrees |
 | `differs` | Report only: `settings.json` / Codex config keys differ (key names, never values). Platform paths make this normal. A secrets-guard hook missing on either side is a security gap. Say so |
 
-## 3. Apply (only after Leland approves)
+## 3. Apply (only after the user approves)
 
 - `sync.py apply` applies every non-conflict item.
-- `sync.py apply --take wsl|windows <path>...` resolves the conflicts Leland chose.
+- `sync.py apply --take wsl|windows <path>...` resolves the conflicts the user chose.
 - Apply refuses (exit `20`) when one home is missing every core file, or
   when more than 2 files would be deleted on one side. Both usually mean a
-  wrong or wiped home. Check the home path with Leland. Add
-  `--allow-deletes` only when he confirms the deletions.
+  wrong or wiped home. Check the home path with the user. Add
+  `--allow-deletes` only when they confirm the deletions.
 - Backups go to `baseline/backups/<timestamp>/<side>/` in the repo (gitignored).
   To restore, copy a file back from there.
 - Re-run `check` afterwards. Expect exit `0`.
 
 Auto mode can block the write because it edits agent configuration. If it
-does, give Leland the exact command with the `!` prefix. Do not look for
+does, give the user the exact command with the `!` prefix. Do not look for
 another way to write the files.
 
 ## Rules
