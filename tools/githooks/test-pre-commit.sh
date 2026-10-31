@@ -22,7 +22,41 @@ trap 'rm -rf "$T" "$F"' EXIT INT TERM
 FAIL=0
 pass() { printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; FAIL=1; }
-g() { git -C "$T" "$@"; }
+# `git hook run` arrived in Git 2.36. On anything older it is an unknown
+# subcommand, and that is far worse than it sounds: git fails before any hook
+# runs, so every case asserting a BLOCKED commit passes for the wrong reason --
+# the non-zero exit came from git, not from the gate. A suite that reports a
+# working secret gate on a machine where it never ran is worse than no suite.
+# Ubuntu 22.04 LTS still ships 2.34, so this is not hypothetical.
+#
+# Rather than refuse to run, fall back to invoking the hook the way git would:
+# these cases call pre-commit with no arguments. The interception lives in `g`
+# so the call sites, with their inline env prefixes, stay untouched.
+# TEST_NO_HOOK_RUN=1 forces the fallback on a modern git, so the old-git path is
+# exercisable rather than taken on trust. Run the suite both ways after touching
+# either branch.
+GIT_MM=$(git --version | sed -E 's/^[^0-9]*([0-9]+)\.([0-9]+).*/\1 \2/')
+# shellcheck disable=SC2086
+set -- $GIT_MM
+if [ "${TEST_NO_HOOK_RUN:-0}" = 1 ]; then
+  HAVE_HOOK_RUN=0
+  printf 'note  TEST_NO_HOOK_RUN=1: exercising the pre-2.36 fallback\n'
+elif [ "$1" -gt 2 ] 2>/dev/null || { [ "$1" -eq 2 ] && [ "$2" -ge 36 ]; } 2>/dev/null; then
+  HAVE_HOOK_RUN=1
+else
+  HAVE_HOOK_RUN=0
+  printf 'note  git %s.%s has no `git hook run`; invoking hooks directly\n' "$1" "$2"
+fi
+g() {
+  if [ "$HAVE_HOOK_RUN" = 0 ] && [ "$1" = hook ] && [ "$2" = run ]; then
+    _hp=$(git -C "$T" config core.hooksPath 2>/dev/null)
+    [ -n "$_hp" ] || _hp="$(git -C "$T" rev-parse --absolute-git-dir)/hooks"
+    _hn=$3; shift 3
+    ( cd "$T" && sh "$_hp/$_hn" "$@" )
+    return $?
+  fi
+  git -C "$T" "$@"
+}
 # Run deps_changed from the hook against the temp repo; echoes its exit code.
 deps() { ( cd "$T" && . "$F" && deps_changed "$1" >/dev/null 2>&1; echo $? ); }
 # Run code_staged from the hook against the temp repo; echoes its exit code.

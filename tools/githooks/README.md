@@ -121,16 +121,49 @@ carry no logic, and are there purely so the repo-local ones keep firing.
 rather than `--git-path hooks`, because with `core.hooksPath` set the latter
 returns the global directory and the hook would recurse into itself.
 
+### But a repo that sets `core.hooksPath` itself wins, and the gate goes quiet
+
+This is the dangerous direction, and the opposite of the paragraph above.
+`core.hooksPath` is ordinary config, so a **repo-local** value overrides the
+global one. Husky and lefthook both set one (`git config core.hooksPath .husky/_`
+and similar), and in those repos git never starts the global `pre-commit` at all.
+The chaining above cannot help: it lives inside a hook that is not running.
+
+So the secret gate is **silently absent** in exactly the repos most likely to
+have a hook framework, with nothing to tell you. Check before trusting it:
+
+```sh
+git config --local --get core.hooksPath   # empty = the global hooks run
+```
+
+If it is set, you have two options: drop the local value and let the local hook
+chain from the global one (the normal case, since `chain_local_hook` runs
+`.git/hooks/pre-commit`), or have the framework's hook invoke the global
+`pre-commit` itself. Until one of those is true, treat that repo as
+pull-request-only no matter what the install reported — rule 4 in
+[`AGENTS.md`](../../config/agents/AGENTS.md) says the same thing, because this
+falsifies the rule's premise rather than the hook's behaviour.
+
 ## Changing a hook
 
 1. Edit the copy in this repo.
 2. Add a case to `test-pre-commit.sh` *before* changing `deps_changed()`,
    `staged_files()` or `code_staged()`.
 3. Run `sh tools/githooks/test-pre-commit.sh` — it runs the hook in a throwaway
-   repo against a stub `snyk`, so it spends no quota.
+   repo against a stub `snyk`, so it spends no quota. Then run it again as
+   `TEST_NO_HOOK_RUN=1 sh tools/githooks/test-pre-commit.sh` if you touched the
+   runner, to exercise the pre-2.36 path too.
 4. Re-run `install.sh`. Git runs the installed copy; editing this one changes
    nothing until you do.
 
 The self-test extracts the hook's helper functions from the text between
 `DEPS_JS=` and `# ---- 1. Open Source`, so a new helper has to be defined inside
 that window to be testable.
+
+**`git hook run` needs Git ≥ 2.36**, and Ubuntu 22.04 LTS still ships 2.34.
+That matters more than a portability note usually would: on older git the
+subcommand does not exist, git exits non-zero before any hook runs, and every
+case asserting a *blocked* commit then passes for the wrong reason. A suite
+reporting a working secret gate on a machine where it never ran is worse than no
+suite, so the runner detects the version and invokes the hook directly instead.
+`TEST_NO_HOOK_RUN=1` forces that path on a modern git; both give 37 assertions.
