@@ -335,9 +335,21 @@ PYSTUB
 done
 no_py() { # no_py <label> <output> -- assert Python was not invoked at all
   n=$(wc -c < "$PYLOG" 2>/dev/null | tr -d ' ')
+  # The call log is the primary detector, but an empty log is NOT sufficient on
+  # its own, because it cannot tell "nothing ran" from "something ran that we
+  # could not see". The hook invokes both `python -m venv` and `pip install`
+  # with >/dev/null 2>&1, so the stub's PYSTUB-ERROR on stderr never reaches
+  # this output; what surfaces instead is the hook's OWN fallback message,
+  # because the stub's exit 97 makes the venv step fail. Those messages are
+  # therefore positive evidence that Python was invoked. The old T31a assertion
+  # already detected them and I dropped that signal when I replaced it -- the
+  # replacement was right about the backwards shape and wrong to discard the
+  # coverage. Caught by CodeRabbit on #432. (Note the hook logs NOTHING on the
+  # success path, so for a successful install the log is the only detector,
+  # which is why both checks have to stay.)
   case "$2" in
-    *PYSTUB-ERROR*)
-      fail "$1 (the python stub could not record, so an empty log proves nothing)"
+    *PYSTUB-ERROR*|*"could not create a temp venv"*|*"pip install into a temp venv failed"*)
+      fail "$1 (the hook reached its venv/pip fallback, so Python ran; an empty log proves nothing)"
       : > "$PYLOG"; return ;;
   esac
   if [ "${n:-0}" = 0 ]; then pass "$1"; else fail "$1 (ran: $(tr '\n' ';' < "$PYLOG"))"; fi
