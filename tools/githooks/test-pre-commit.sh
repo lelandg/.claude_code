@@ -300,17 +300,80 @@ printf '#!/bin/sh
 echo "$*" >> "%s"
 exit 0
 ' "$LOG2" > "$STUB2/snyk"; chmod +x "$STUB2/snyk"; : > "$LOG2"
+
+# Stub the Python side as well, because these cases exist to prove that no
+# package build happens -- so when one FAILS it must not perform the build in
+# order to report it. With the `:-` bug restored, T30a reached a real
+# `python -m venv` and a real `pip install`, downloading and building packages
+# on the developer's machine before printing its failure: the regression test
+# doing the exact thing it forbids. `-m venv` here fabricates a venv whose
+# interpreter is another stub, so the hook still takes its success path and the
+# pip call is recorded instead of run.
+# PYLOG is exported, and the stubs reference it at RUNTIME through a QUOTED
+# heredoc. An unquoted heredoc bakes the path in at generation time, so a temp
+# path containing a dollar sign would be re-expanded when the stub ran: the
+# append would go nowhere, the stub would still exit 0, and no_py would read an
+# empty log and report ok. Verified -- /tmp/has$dollar/pycalls bakes down to
+# /tmp/has/pycalls. Quoting the heredoc removes the escaping problem outright
+# rather than managing it.
+export PYLOG="$STUB2/pycalls"; : > "$PYLOG"
+for _py in python python3; do
+  cat > "$STUB2/$_py" <<'PYSTUB'
+#!/bin/sh
+# A stub that cannot record is worse than no stub: the log reads empty and the
+# assertion reports ok. Fail loudly rather than silently.
+[ -n "$PYLOG" ] || { echo "PYSTUB-ERROR: PYLOG unset" >&2; exit 97; }
+echo "$*" >> "$PYLOG" || { echo "PYSTUB-ERROR: cannot write PYLOG" >&2; exit 97; }
+if [ "$1" = -m ] && [ "$2" = venv ] && [ -n "$3" ]; then
+  mkdir -p "$3/bin" || exit 1
+  printf '#!/bin/sh\n[ -n "$PYLOG" ] || { echo "PYSTUB-ERROR: PYLOG unset" >&2; exit 97; }\necho "venv-python $*" >> "$PYLOG" || { echo "PYSTUB-ERROR: cannot write PYLOG" >&2; exit 97; }\nexit 0\n' > "$3/bin/python"
+  chmod +x "$3/bin/python"
+fi
+exit 0
+PYSTUB
+  chmod +x "$STUB2/$_py"
+done
+no_py() { # no_py <label> <output> -- assert Python was not invoked at all
+  n=$(wc -c < "$PYLOG" 2>/dev/null | tr -d ' ')
+  # The call log is the primary detector, but an empty log is NOT sufficient on
+  # its own, because it cannot tell "nothing ran" from "something ran that we
+  # could not see". The hook invokes both `python -m venv` and `pip install`
+  # with >/dev/null 2>&1, so the stub's PYSTUB-ERROR on stderr never reaches
+  # this output; what surfaces instead is the hook's OWN fallback message,
+  # because the stub's exit 97 makes the venv step fail. Those messages are
+  # therefore positive evidence that Python was invoked. The old T31a assertion
+  # already detected them and I dropped that signal when I replaced it -- the
+  # replacement was right about the backwards shape and wrong to discard the
+  # coverage. Caught by CodeRabbit on #432. (Note the hook logs NOTHING on the
+  # success path, so for a successful install the log is the only detector,
+  # which is why both checks have to stay.)
+  case "$2" in
+    *PYSTUB-ERROR*|*"could not create a temp venv"*|*"pip install into a temp venv failed"*)
+      fail "$1 (the hook reached its venv/pip fallback, so Python ran; an empty log proves nothing)"
+      : > "$PYLOG"; return ;;
+  esac
+  if [ "${n:-0}" = 0 ]; then pass "$1"; else fail "$1 (ran: $(tr '\n' ';' < "$PYLOG"))"; fi
+  : > "$PYLOG"
+}
 g config core.hooksPath "$HK2"
 printf 'requests==2.31.0
 ' > "$T/requirements.txt"; g add requirements.txt
 
+# SNYK_HOOK_OS_CAP is pinned in every case below. All three share one hook copy
+# and therefore one monthly Open Source usage counter, which each run
+# increments, and the hook reads `${SNYK_HOOK_OS_CAP:-180}`. So a low cap
+# exported in the caller's environment -- or simply enough accumulated runs --
+# would make a later case reach the cap and SKIP the manifest before the opt-in
+# is ever read. It would then report ok without having tested its subject.
 g config hook.snykPipInstall 0
-out=$( unset SNYK_HOOK_PIP_INSTALL; PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+out=$( unset SNYK_HOOK_PIP_INSTALL; PATH="$STUB2:$PATH" SNYK_HOOK_OS_CAP=999 SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
 saw "T30 changed requirements -> no pip install by default" "$out" "not installing it to test it"
+no_py "T30 ... and Python was never invoked" "$out"
 
 g config hook.snykPipInstall 1
-out=$( SNYK_HOOK_PIP_INSTALL= PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+out=$( SNYK_HOOK_PIP_INSTALL= PATH="$STUB2:$PATH" SNYK_HOOK_OS_CAP=999 SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
 saw "T30a empty switch beats an enabled git setting -> still no pip install" "$out" "not installing it to test it"
+no_py "T30a ... and Python was never invoked" "$out"
 
 # A GLOBAL setting must not enable it either: the README promises a
 # PER-REPOSITORY opt-in, and plain `git config --get` reads local, then global,
@@ -320,8 +383,9 @@ g config --unset hook.snykPipInstall 2>/dev/null
 printf '[hook]
 	snykPipInstall = 1
 ' > "$STUB2/fakeglobal"
-out=$( unset SNYK_HOOK_PIP_INSTALL; GIT_CONFIG_GLOBAL="$STUB2/fakeglobal" PATH="$STUB2:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
+out=$( unset SNYK_HOOK_PIP_INSTALL; GIT_CONFIG_GLOBAL="$STUB2/fakeglobal" PATH="$STUB2:$PATH" SNYK_HOOK_OS_CAP=999 SNYK_HOOK_MODE=warn g hook run pre-commit 2>&1 )
 saw "T30b a global setting does not enable it -> still no pip install" "$out" "not installing it to test it"
+no_py "T30b ... and Python was never invoked" "$out"
 
 g config --unset hook.snykPipInstall 2>/dev/null
 g config core.hooksPath "$HERE"; rm -rf "$HK2" "$STUB2"; reset_tree
