@@ -182,6 +182,18 @@ code_staged() {
 }
 
 # ---- 1. Open Source: staged manifests whose dependencies changed ---------
+#
+# KNOWN AND ACCEPTED GAP, recorded rather than patched: the *decision* to test
+# reads the index, but the test itself reads the working tree. Stage a safe
+# manifest, leave a vulnerable one on disk, and the hook scans the version you
+# are not committing. Closing it means materialising the staged manifest and
+# every lockfile it resolves against into a temp tree and running Snyk there --
+# which is a real build-graph problem (relative paths, workspaces, local path
+# dependencies, monorepo roots) for a narrow win: the partial-staging case is
+# rare, and `git stash -k` or committing the tree you tested avoids it. CI scans
+# the merge commit, which is the authoritative check. This is a guardrail
+# against accidental exposure, not a sandbox.
+#
 # Map each staged file to the manifest Snyk tests. Skip vendored and generated trees.
 MANIFESTS=$(staged_files | while IFS= read -r f; do
   case "$f" in
@@ -220,11 +232,26 @@ if [ -n "$MANIFESTS" ]; then
       continue
     fi
     # Python manifests: Snyk reads the versions installed in the Python it runs,
-    # not the pins in the manifest. Install requirements*.txt into a throwaway venv
-    # so the test sees what the manifest resolves to, not the host's global packages.
-    # Snyk shells out to `python`; WSL only has python3. Unresolved packages are skipped.
+    # not the pins in the manifest, so a requirements file tested against the
+    # host's packages reports on the wrong versions. Installing it into a
+    # throwaway venv fixes the accuracy -- at a price.
+    #
+    # THE PRICE, and why this is opt-in: `pip install -r` BUILDS packages, and a
+    # source distribution's build runs arbitrary code (setup.py, PEP 517 backend)
+    # as you, with your files and credentials in reach. A requirements file can
+    # also point at a local path or a VCS URL. Wiring that to `git commit` means
+    # editing one line of a manifest executes someone else's build code, which is
+    # not a thing a secret-scanning hook should do by surprise -- and a temp venv
+    # isolates the installed packages, not the build.
+    #
+    # So: off by default. Snyk still tests the manifest, reporting against
+    # whatever Python it finds, which is less accurate and harmless. Turn it on
+    # per commit, or per repo when you trust its manifests:
+    #   SNYK_HOOK_PIP_INSTALL=1 git commit ...
+    #   git config --local hook.snykPipInstall 1
     EXTRA=""
     VENV=""
+    PIP_OK=${SNYK_HOOK_PIP_INSTALL:-$(git config --get hook.snykPipInstall 2>/dev/null)}
     case "$(basename "$m")" in
       requirements*.txt|Pipfile|pyproject.toml)
         EXTRA="--skip-unresolved=true"
@@ -234,6 +261,9 @@ if [ -n "$MANIFESTS" ]; then
         fi
         case "$(basename "$m")" in
           requirements*.txt)
+            if [ "${PIP_OK:-0}" != 1 ]; then
+              log "$m: not installing it to test it (a package build runs arbitrary code); testing against host packages. SNYK_HOOK_PIP_INSTALL=1 to opt in"
+            else
             VENV=$(mktemp -d 2>/dev/null)
             if [ -n "$VENV" ] && "$PYBIN" -m venv "$VENV" >/dev/null 2>&1; then
               VPY="$VENV/bin/python"; [ -x "$VPY" ] || VPY="$VENV/Scripts/python.exe"
@@ -244,6 +274,7 @@ if [ -n "$MANIFESTS" ]; then
               fi
             else
               log "$m: could not create a temp venv; testing against host packages"
+            fi
             fi ;;
         esac
         [ "$PYBIN" = python ] || EXTRA="$EXTRA --command=$PYBIN" ;;
@@ -267,9 +298,17 @@ if [ -n "$MANIFESTS" ]; then
 fi
 
 # ---- 2. Snyk Code: once per repo per day, only when source is staged -----
+# The stamp carries the date AND that day's verdict ("<date>" clean, "<date>:fail"
+# with findings). Carrying only the date lost a block: a finding stamped the day,
+# the retry an hour later took the once-a-day skip, and FAIL started at 0 again --
+# so in block mode the second attempt at the same commit sailed through with the
+# finding unfixed. Re-asserting the verdict keeps the block without re-spending
+# the metered test.
 STAMP="$GIT_DIR_PATH/snyk-code-stamp"
 TODAY=$(date +%Y-%m-%d)
-LAST=$(cat "$STAMP" 2>/dev/null)
+LAST_RAW=$(cat "$STAMP" 2>/dev/null)
+LAST=${LAST_RAW%%:*}
+LAST_VERDICT=${LAST_RAW#*:}
 FORCE=${SNYK_CODE_FORCE:-0}
 code_staged; HAS_CODE=$?   # 0 source staged, 1 none, other: could not tell -> run
 if [ "$FORCE" != 1 ] && [ "$HAS_CODE" = 1 ]; then
@@ -277,7 +316,10 @@ if [ "$FORCE" != 1 ] && [ "$HAS_CODE" = 1 ]; then
   # today must still get its test.
   log "no source files staged; Snyk Code not run"
 elif [ "$FORCE" != 1 ] && [ "$LAST" = "$TODAY" ]; then
-  : # already ran today
+  if [ "$LAST_RAW" != "$LAST_VERDICT" ] && [ "$LAST_VERDICT" = fail ]; then
+    log "Snyk Code already ran today and found $SEVERITY+ issues; that verdict still stands (SNYK_CODE_FORCE=1 to re-scan)"
+    FAIL=1
+  fi
 else
   used=$(usage_get "$ORG" code)
   if [ "$used" -ge "$CODE_CAP" ]; then
@@ -290,7 +332,7 @@ else
     usage_inc "$ORG" code
     case $rc in
       0) echo "$TODAY" > "$STAMP" ;;
-      1) echo "$TODAY" > "$STAMP"; log "Snyk Code found $SEVERITY+ issues"; FAIL=1 ;;
+      1) echo "$TODAY:fail" > "$STAMP"; log "Snyk Code found $SEVERITY+ issues"; FAIL=1 ;;
       3) echo "$TODAY" > "$STAMP"; log "Snyk Code: no supported files, skipped" ;;
       *) log "Snyk Code error (exit $rc), not blocking" ;;
     esac

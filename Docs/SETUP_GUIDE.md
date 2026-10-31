@@ -309,10 +309,20 @@ sh tools/githooks/install.sh
 ```
 
 Copies the hooks to `~/.githooks` (pass a path, or set `GIT_HOOKS_DEST`, to put
-them elsewhere) and sets `core.hooksPath` — in WSL's git *and* in Git for
-Windows if it is present, since those are separate installs with separate
-global configs and a WSL-only install leaves every commit made from Windows
-unguarded. Re-run it after editing a hook: git runs the installed copy.
+them elsewhere) and sets `core.hooksPath`. Re-run it after editing a hook: git
+runs the installed copy.
+
+**On WSL, if you also commit from Windows, install to a Windows-visible path:**
+
+```bash
+sh tools/githooks/install.sh /mnt/c/Users/$USER/.githooks
+```
+
+Git for Windows is a separate install with its own global config, and it cannot
+reach the WSL filesystem by path — `/home/you/.githooks` has no drive-letter
+spelling. So the default destination guards WSL only. The installer warns
+instead of pointing Windows git at an unreachable path, because that would find
+no hooks and skip the scan with nothing to tell you.
 
 Then install `gitleaks`, because the gate fails closed and will otherwise block
 every commit:

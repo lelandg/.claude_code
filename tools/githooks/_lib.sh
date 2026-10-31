@@ -17,7 +17,16 @@ chain_local_hook() {
   _local="$_common/hooks"
   [ "$_local" = "$HOOK_DIR" ] && return 0
   if [ -f "$_local/$_name" ]; then
-    SNYK_HOOK_CHAINED=1 sh "$_local/$_name" "$@" || return $?
+    # Run it the way git would: let its shebang choose the interpreter. Forcing
+    # `sh` breaks any hook written for bash, node or python -- which is most of
+    # them, since Husky and the pre-commit framework both generate non-sh hooks.
+    # `sh` stays as the fallback for a hook with no executable bit, common on
+    # Windows checkouts where git cannot store the mode.
+    if [ -x "$_local/$_name" ]; then
+      SNYK_HOOK_CHAINED=1 "$_local/$_name" "$@" || return $?
+    else
+      SNYK_HOOK_CHAINED=1 sh "$_local/$_name" "$@" || return $?
+    fi
   fi
   return 0
 }

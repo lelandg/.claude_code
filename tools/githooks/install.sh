@@ -50,11 +50,38 @@ printf 'git:     core.hooksPath = %s\n' "$(git config --global --get core.hooksP
 
 # Git for Windows is a separate install with its own global config, so a WSL-only
 # install leaves every commit made from Windows unguarded. Set both.
+#
+# But only when the destination is reachable from Windows. A path under the WSL
+# filesystem (/home/you/.githooks) has no drive-letter spelling, so pointing
+# Windows git at it sets a path Windows cannot resolve -- git then finds no hooks
+# and commits silently skip the secret scan, while the installer reports success.
+# A loud warning beats that every time.
 WINGIT="/mnt/c/Program Files/Git/cmd/git.exe"
 if [ -x "$WINGIT" ]; then
   WINDEST=$(printf '%s' "$DEST" | sed -E 's#^/mnt/([a-z])/#\U\1:/#')
-  "$WINGIT" config --global core.hooksPath "$WINDEST"
-  printf 'win git: core.hooksPath = %s\n' "$("$WINGIT" config --global --get core.hooksPath | tr -d '\r')"
+  case "$WINDEST" in
+    [A-Z]:/*)
+      "$WINGIT" config --global core.hooksPath "$WINDEST"
+      printf 'win git: core.hooksPath = %s\n' "$("$WINGIT" config --global --get core.hooksPath | tr -d '\r')"
+      ;;
+    *)
+      cat >&2 <<EOF
+
+WARNING: Git for Windows is installed, and these hooks were NOT installed for it.
+
+  $DEST is on the WSL filesystem, which Windows git cannot reach by path.
+  Setting it anyway would leave Windows git pointing at a directory it cannot
+  read -- no hooks would run, and commits made from Windows would skip the
+  secret scan with nothing to tell you.
+
+  To guard both, install to a Windows-visible directory instead:
+
+      sh tools/githooks/install.sh /mnt/c/Users/\$USER/.githooks
+
+  WSL git is already set to $DEST and is unaffected.
+EOF
+      ;;
+  esac
 fi
 
 printf '\nInstalled to %s\n' "$DEST"

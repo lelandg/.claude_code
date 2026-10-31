@@ -18,6 +18,34 @@ sh tools/githooks/test-pre-commit.sh  # self-test, spends no Snyk quota
 You need `gitleaks` on PATH. `snyk` and `node` are optional — without them the
 dependency checks skip and the secret gate still runs.
 
+**On WSL, if you also commit from Windows, pass a Windows-visible destination:**
+
+```sh
+sh tools/githooks/install.sh /mnt/c/Users/$USER/.githooks
+```
+
+Git for Windows is a separate install with its own global config, and it cannot
+reach a path on the WSL filesystem — `/home/you/.githooks` has no drive-letter
+spelling. The default destination therefore guards WSL only, and the installer
+says so rather than pointing Windows git at a path it cannot read: that would
+find no hooks and skip the scan silently, which is the worst of the three
+outcomes. Installing to a `/mnt/<drive>/` path guards both.
+
+### The one thing it will not do for you
+
+`pip install` is **off by default** (`SNYK_HOOK_PIP_INSTALL=1` opts in). Snyk
+reads the versions installed in the Python it runs rather than the pins in a
+manifest, so testing `requirements.txt` accurately means installing it — and
+installing a source distribution runs its build code (`setup.py`, a PEP 517
+backend) as you, with your files and credentials in reach. A requirements file
+can also point at a local path or a VCS URL. Wiring that to `git commit` means
+editing one line of a manifest executes someone else's build code, which is not
+something a secret-scanning hook should do by surprise. A throwaway venv
+isolates the installed packages, not the build.
+
+Left off, Snyk still tests the manifest against whatever Python it finds: less
+accurate, and harmless.
+
 ## What each layer is for
 
 | Layer | Cost | Blocks? | When it runs |
@@ -76,6 +104,7 @@ meant to turn one *off* (`false`, `no`, empty) can never turn it on.
 | `SNYK_HOOK_SEVERITY` | severity threshold, default `high` |
 | `SNYK_HOOK_OS_CAP` / `SNYK_HOOK_CODE_CAP` | soft monthly caps (180 / 90) that stop testing before the plan limit |
 | `SNYK_HOOK_ORG` | Snyk org for this commit; or `git config --local hook.snykOrg <org>` per repo. Free-plan budgets are counted per org |
+| `SNYK_HOOK_PIP_INSTALL=1` | install a changed `requirements*.txt` into a throwaway venv so Snyk tests the resolved versions. **Off by default**, because `pip install` builds packages and a source distribution's build runs arbitrary code as you — see below. Or `git config --local hook.snykPipInstall 1` for a repo whose manifests you trust |
 
 ## Installing these does not disable your repo-local hooks
 

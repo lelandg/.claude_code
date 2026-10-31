@@ -193,6 +193,27 @@ printf 'export const z = 3\n' > "$T/z.ts"; g add z.ts
 PATH="$STUB:$PATH" SNYK_HOOK_MODE=warn g hook run pre-commit >/dev/null 2>&1
 ran=$(grep -c '^code test' "$LOG" 2>/dev/null); [ -f "$STAMPF" ] && st=1 || st=0
 expect "T20 then a source commit -> Code runs once, stamp written" "$ran$st" 11; reset_tree
+
+# A Code finding has to survive the once-a-day skip. Carrying only the date lost
+# the block: the finding stamped the day, the retry an hour later took the skip,
+# FAIL started at 0 again, and in block mode the same commit went through with
+# the finding unfixed.
+printf '#!/bin/sh\necho "$*" >> "%s"\ncase "$*" in "code test"*) exit 1 ;; esac\nexit 0\n' "$LOG" > "$STUB/snyk"
+chmod +x "$STUB/snyk"
+rm -f "$STAMPF"; : > "$LOG"
+printf 'export const a = 1\n' > "$T/a.ts"; g add a.ts
+PATH="$STUB:$PATH" SNYK_HOOK_MODE=block g hook run pre-commit >/dev/null 2>&1
+first=$?
+expect "T27 Code finding -> blocked in block mode" "$first" 1
+expect "T27a ... and the stamp records the verdict, not just the date" \
+  "$(grep -c ':fail' "$STAMPF" 2>/dev/null)" 1
+: > "$LOG"
+PATH="$STUB:$PATH" SNYK_HOOK_MODE=block g hook run pre-commit >/dev/null 2>&1
+second=$?
+reran=$(grep -c '^code test' "$LOG" 2>/dev/null)
+expect "T27b same-day retry -> still blocked, and no metered re-scan" "$second$reran" 10
+reset_tree
+
 g config core.hooksPath "$HERE"; rm -rf "$HK" "$STUB"
 
 [ "$FAIL" -eq 0 ] && echo "all cases pass" || echo "FAILURES above"
