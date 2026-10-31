@@ -41,7 +41,22 @@ A plain-English history of what changed in this repository and why. Newest first
   not trip the guard that reads it. One case had asserted that the Amplify list
   form was *fine*: a bypass written down as correct behaviour, which is worse
   than no test because it looks like coverage.
-
+- **The secrets guard could be made to fail *open*.** `expand_braces` built the
+  full cross-product of a brace pattern before anything checked the first
+  alternative, so 25 two-way groups is 33.5 million alternatives — enough to
+  exhaust memory or exceed the hook's 10-second timeout. A `PreToolUse` hook
+  that times out is treated as **non-blocking**, so the single input shaped to
+  break the guard was the one input that switched it off. The fan-out is now
+  counted first, bounded and short-circuited, and a pattern past the cap is
+  denied rather than expanded: 0.6 ms to deny. "Ambiguity denies" has to cover
+  ambiguity about the pattern itself.
+- **Rule 4's premise needed two preconditions it did not state.** A direct push
+  publishes everything local `main` is holding, not just the commit you made —
+  and a repo-local `core.hooksPath` (Husky, lefthook, the `pre-commit`
+  framework) takes precedence over the global one, so git never starts the
+  global hook and the gate is silently absent exactly where you assumed it was
+  present. Rule 4 now requires starting from the remote head, and
+  `git config --local core.hooksPath` coming back empty.
 ### Changed
 - **Rule 4 reverses direction.** Code still reaches `main` through a pull
   request, but a commit whose *every* path is non-functional may be committed
@@ -127,7 +142,26 @@ A plain-English history of what changed in this repository and why. Newest first
   untouched: the marketplace author, the README credit, the install-guide
   byline, the catalog title, and the `Docs/plans/` design docs, which are
   authored historical artifacts with an author line.
-
+- **The bump-timing rule contradicted itself in six places.** v0.8.0 introduced
+  "the bump is the last commit before merge" and never propagated it, so
+  `AGENTS.md`'s two workflow paths, its branch-finish pass, its PR-review
+  section, the `version-manager` skill's own description, and the
+  `feature-team` command all still cut the bump before the push. An agent
+  following the skill the rule names as authoritative produced exactly the
+  stale bump the rule exists to prevent. The `feature-team` finishing flow is
+  now split in two, because collapsing it in one direction cuts the bump before
+  review and in the other lands the release commit on the base branch.
+- **The installer pointed Windows git at a path Windows cannot read.** Under
+  WSL the default destination has no drive-letter spelling, the rewrite
+  silently no-opped, and commits from Windows skipped the secret scan while the
+  installer printed success. It now sets Windows git only when the path
+  converts, and warns otherwise.
+- **A blocked Snyk Code finding was forgotten on retry.** The day's stamp was
+  written before the block, so re-running the same commit took the skip and
+  passed with the finding unfixed. The stamp now records the verdict.
+- **Chained repo-local hooks ran under `sh`**, ignoring their shebang, which
+  broke the Husky and `pre-commit`-framework hooks that chaining exists to
+  preserve.
 ### Added
 - **The config secrets guard covers four categories, not one.** Beyond
   config-file reads it blocks bare environment dumps, cloud calls that return
@@ -140,7 +174,18 @@ A plain-English history of what changed in this repository and why. Newest first
   as the call itself.
 - **No Qt, except PySide** joins the misc rules — a stack preference that had
   been in the live config since 2026-09-12 and was never ported.
-
+- **`tools/githooks/` — the hooks the rules depend on, instead of a disclaimer.**
+  `install.sh`, a `pre-commit` that runs `gitleaks` fail-closed and then
+  delta-aware dependency checks, passthrough hooks for every event
+  `core.hooksPath` would otherwise silence, a README, and a 37-assertion
+  self-test. Rule 4's safety rests on a preventive local gate; publishing the
+  rule without the mechanism left anyone adopting it with neither.
+  Two findings there are recorded rather than patched, with the reasoning in
+  the code: `pip install -r` during a commit is now off by default behind
+  `SNYK_HOOK_PIP_INSTALL=1`, because a source distribution's build backend runs
+  arbitrary code as you and a temporary venv isolates the packages rather than
+  the build; and the decision to test reads the index while the test reads the
+  working tree, so partial staging can scan bytes you are not committing.
 ## [0.8.1] - 2026-10-26
 
 ### Removed

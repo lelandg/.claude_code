@@ -279,7 +279,17 @@ PR — unpushed commits kept local on purpose, WIP edits, untracked scratch file
    bypassed branch with no local gate has nothing checking it at all, and the
    server-side scans then report the secret after it is already in history.
    Install one first (`tools/githooks/install.sh` in the config repo ships the
-   hook this rule assumes), or keep using PRs. For the same reason, a commit
+   hook this rule assumes), or keep using PRs.
+
+   **Then check it actually runs in *this* repo.** A repo-local
+   `core.hooksPath` — Husky, lefthook, the `pre-commit` framework — takes
+   precedence over the global one, so git never starts the global hook and the
+   gate is silently absent exactly where you assumed it was present.
+   `git config --local core.hooksPath` must come back empty, or that local hook
+   must invoke the global `pre-commit` itself. Until one of those is true, this
+   repo is a PR-only repo whatever the paths say.
+
+   For the same reason, a commit
    that used the hook's degraded-scan override has never been scanned: run
    `gitleaks` over it yourself before pushing, because nothing downstream will
    stop it and rule 2 above says local `main` may hold things on purpose.
