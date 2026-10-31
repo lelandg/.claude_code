@@ -90,7 +90,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|Read"
+        "matcher": "Bash|Read|Grep|PowerShell"
       }
     ]
   },

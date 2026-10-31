@@ -54,8 +54,10 @@ import sys
 PRINT_TOOLS = (
     r"\b(?:cat|sed|awk|head|tail|less|more|diff|sdiff|comm|grep|egrep|fgrep|rg"
     r"|bat|strings|nl|od|xxd|hexdump|paste|column|sort|uniq|tac|cut|tee"
-    # PowerShell readers and their aliases (Claude Code's PowerShell tool on Windows).
-    r"|Get-Content|gc|type|Select-String|sls|Format-Hex|Compare-Object)\b"
+    # PowerShell readers and their aliases (Claude Code's PowerShell tool on
+    # Windows). PowerShell command names are case-insensitive, so `get-content`
+    # must match as surely as `Get-Content`.
+    r"|(?i:Get-Content|gc|type|Select-String|sls|Format-Hex|Compare-Object))\b"
 )
 # config*.yaml (not config.example.yaml) or .env / .env.* (not .env.example).
 # `process.env.X` / `import.meta.env.X` are code references, not dotenv files.
@@ -67,23 +69,39 @@ SECRET_FILE_RE = re.compile(SECRET_FILE + r"\b")
 PRINT_TOOLS_RE = re.compile(PRINT_TOOLS)
 
 # A command segment is the text between shell separators; a bare dump is a
-# segment that is exactly the dump command, so `set -e` and `env VAR=x cmd` pass.
-_SEG = r"(?:^|[;&|]\s*|\$\(\s*|`\s*)"
-_END = r"\s*(?:$|[;&|)>`])"
+# segment that is exactly the dump command, so `set -e` and `env VAR=x cmd`
+# pass. A newline is a separator like `;`, leading indentation is ordinary
+# formatting, and a trailing `#` comment still leaves the dump bare — so
+# `pwd\n  env  # note` is a dump, not a pass.
+_SEG = r"(?:^\s*|[\n;&|]\s*|\$\(\s*|`\s*)"
+_END = r"\s*(?:$|[\n;&|)>`]|#)"
 ENV_DUMP_RE = re.compile(
     _SEG + r"(?:env|printenv|export\s+-p|set)" + _END
     + r"|\b(?:Get-ChildItem|gci|ls|dir)\s+(?:-Path\s+)?Env:",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 _AWS_SECRET_SVC = "secrets" + "manager"  # split so other guards don't match this file's text
+# A `--query` projection redacts only when it names scalar fields: it must
+# contain a dot, no `*`, and no `environment...` segment. `--query app` and
+# `--query app.*` return the whole object, environment-variable values and all,
+# so the mere presence of `--query` is not evidence of redaction.
+_SAFE_QUERY = (
+    r"--query[=\s]+[\"']?"
+    r"(?![\w.\[\]-]*(?i:environment))"
+    r"[\w\[\]-]+(?:\.[\w\[\]-]+)+"
+)
 AWS_SECRET_RE = re.compile(
-    r"\baws\s+amplify\s+(?:get-app|get-branch)\b(?![^\n;&|]*--query)"
+    r"\baws\s+amplify\s+(?:get-app|get-branch)\b(?![^\n;&|]*" + _SAFE_QUERY + r")"
     r"|\baws\s+amplify\s+[^\n;&|]*(?i:environment-?variables)"
     r"|\baws\s+ssm\s+get-parameters?(?:-by-path)?\b[^\n;&|]*--with-decryption"
     r"|\baws\s+" + _AWS_SECRET_SVC + r"\s+get-secret-value\b",
 )
+# Global options may sit between the command and the resource, and `--live` is
+# exactly the one that makes a mutation matter.
 STRIPE_MUTATION_RE = re.compile(
-    r"\bstripe\s+(?!--)[\w-]+\s+(?:create|update|delete|del|cancel|refund|capture|confirm|pay|void)\b"
+    r"\bstripe\s+(?:--[\w-]+(?:[=\s]+[^\s-][^\s]*)?\s+)*"
+    r"(?!--)[\w-]+\s+"
+    r"(?:create|update|delete|del|cancel|refund|capture|confirm|pay|void)\b"
 )
 
 OVERRIDES = {
@@ -158,11 +176,35 @@ def path_is_blocked(path: str) -> bool:
     return bool(re.fullmatch(SECRET_FILE, basename))
 
 
+def glob_is_blocked(glob: str) -> bool:
+    """A glob selects protected files without naming one literally.
+
+    `config*.yaml` and `.env*` reach the same files as a literal path, so a
+    wildcard pattern over either family blocks — the `.example` carve-out only
+    survives when the pattern is pinned to it (`.env.example`, `*.example.yaml`).
+    """
+    if not glob:
+        return False
+    basename = glob.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if any(ch in basename for ch in "*?["):
+        if "example" in basename:
+            return False
+        return bool(
+            re.fullmatch(r"config[\w.*?\[\]-]*\.ya?ml", basename)
+            or re.fullmatch(r"\.env[\w.*?\[\]-]*", basename)
+        )
+    return bool(re.fullmatch(SECRET_FILE, basename))
+
+
 def grep_is_blocked(tool_input: dict) -> bool:
     """Grep aimed at a secret file by path or by glob prints its matching lines."""
     path = tool_input.get("path") or ""
     glob = tool_input.get("glob") or ""
-    return path_is_blocked(path) or bool(SECRET_FILE_RE.search(glob))
+    return (
+        path_is_blocked(path)
+        or glob_is_blocked(glob)
+        or bool(SECRET_FILE_RE.search(glob))
+    )
 
 
 def deny(reason: str) -> None:

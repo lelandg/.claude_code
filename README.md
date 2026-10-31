@@ -87,6 +87,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── config-secrets-guard.py    # PreToolUse hook: blocks printing config*.yaml / .env* secrets
 │   │   │                              #   (also speaks Codex hooks + Antigravity --agy protocols)
 │   │   ├── config-secrets-guard.pi.ts # Same guard as a Pi extension (~/.pi/agent/extensions/)
+│   │   ├── test-config-secrets-guard.py # Regression tests — one case per known bypass class
 │   │   └── safe-config-reader.py      # Masked config reader (structure only, strings hidden)
 │   ├── output-styles/                 # Output formatting styles
 │   │   ├── genui.md                   # Generative UI (HTML output)
@@ -378,7 +379,11 @@ Three output styles for different contexts:
 `statusline-command.sh` renders a two-line status bar: user@host, working directory, git branch, and worktree badge on line 1; model, context usage (color-coded: green <50%, yellow 50–79%, red ≥80%), rate-limit badges (5h/7d, for Claude.ai subscribers), PR badge (color-coded by review state), session name, and vim mode on line 2.
 
 ### Config Secrets Guard
-A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) blocks any Bash command or Read call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript — where it could be logged or shared. The companion `tools/safe-config-reader.py` prints a config file's structure with every string value masked, so agents can debug configuration without ever seeing the secrets. A human-approved `# config-ok` suffix is the escape hatch for write-only commands (e.g. `sed -i`).
+A `PreToolUse` hook (`tools/config-secrets-guard.py`, wired in `settings.json`) blocks any tool call that would print a secret-bearing config file (`config*.yaml`, `.env*`) into the conversation transcript — where it could be logged or shared. It covers four categories, each with its own human-approved escape hatch appended to the command: config-file reads (`# config-ok`), bare environment dumps (`# env-ok`), cloud calls that return secret values (`# aws-ok`), and live-money CLI mutations (`# stripe-ok`). The companion `tools/safe-config-reader.py` prints a config file's structure with every string value masked, so agents can debug configuration without ever seeing the secrets.
+
+The hatches are **human-only** by design: the guard matches on command text, so documentation *about* a blocked call trips the same wire as the call itself. That false positive is the intended trade — switch tools and move on; never let the model append its own hatch.
+
+`tools/test-config-secrets-guard.py` is the regression suite, and worth reading before changing a pattern: each case under its `BYPASSES` marker is a hole a cross-provider review found *after* the guard grew past config-file reads — an arbitrary `--query` taken as proof of redaction, a global flag before the resource (`stripe --live charges create`), a newline as a non-separator, a glob that selects protected files without naming one, a case-sensitive match on case-insensitive PowerShell names. A guard that grows new categories grows new holes at the seams; the test is where that knowledge lives.
 
 The same guard extends to the other agent CLIs:
 
