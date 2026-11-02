@@ -192,7 +192,9 @@ route.
      `scanned_commit` (a plain fast-forward). If `origin` moved at all,
      report `stale` and push nothing. Re-scan and re-approve that repo.
    - PR route: push the verified SHA as the branch, confirm the remote tip
-     equals it, open the PR, and bump the version if the
+     equals it, open the PR. Never merge or enable auto-merge if any
+     instruction or rule file changed on the base since `scanned_commit`,
+     because the verifier never saw that change. Bump the version if the
      repo requires one. Merge only when that repo's rules allow autonomous
      merging and checks are green. Otherwise enable auto-merge or leave the
      PR open.

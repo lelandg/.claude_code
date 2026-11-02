@@ -378,17 +378,28 @@ amend or rebase a commit here: anything not byte-for-byte the verified SHA is un
 - pr: \`git push origin <apply_result>.commit:refs/heads/<apply_result>.branch\`, then confirm the remote branch tip
   equals <apply_result>.commit; if not, report "failed". Open the PR against <default_branch> (mirror the repo's PR
   template headings) and follow the repo's versioning rule if it requires a bump on PRs (a bump is a separate,
-  normally reviewed commit on that PR, not part of this verified change). Merge only if the repo's rules allow
-  autonomous merging and every required check is green now; if checks are pending and auto-merge is allowed,
-  enable it; otherwise leave the PR open.
+  normally reviewed commit on that PR, not part of this verified change).
+  Before merging or enabling auto-merge: \`git diff --name-only <plan>.scanned_commit origin/<default_branch>\` must
+  list no instruction or rule file (AGENTS.md, CLAUDE.md, GEMINI.md, .github/copilot-instructions.md, CONTRIBUTING*,
+  PR templates, commitlint/hook config) — the verifier never saw those, so merging could combine unverified rule
+  changes with this one. If any are listed, leave the PR open and say so in notes. Otherwise merge only if the
+  repo's rules allow autonomous merging and every required check is green now; if checks are pending and
+  auto-merge is allowed, enable it; otherwise leave the PR open.
 3. Remove the worktree (\`git worktree remove\`); delete the local branch only if it was pushed.
 Report final status, the pushed SHA in commit, branch, PR URL.`),
         tag('plan', { repo: plan.repo, route: plan.route, scanned_commit: plan.scanned_commit, default_branch: plan.default_branch }),
         tag('apply_result', res),
       ].join('\n\n'), { label: `publish:${short(plan.repo)}`, phase: 'Publish', schema: APPLY_SCHEMA })
-        .then(p => !p ? null : (p.commit && p.commit !== res.commit && !['stale', 'failed'].includes(p.status))
-          ? { ...res, ...p, repo: plan.repo, verify: res.verify, status: 'failed', notes: `published SHA ${p.commit} is not the verified SHA ${res.commit}: investigate` }
-          : { ...res, ...p, repo: plan.repo, verify: res.verify })
+        .then(p => {
+          if (!p) return null
+          // A success status must carry exactly the verified SHA. Empty or different SHA = not proven published.
+          const success = !['stale', 'failed', 'blocked', 'no-change', 'verify-failed'].includes(p.status)
+          if (success && p.commit !== res.commit) {
+            return { ...res, ...p, commit: res.commit, repo: plan.repo, verify: res.verify, status: 'failed',
+              notes: `publish reported SHA "${p.commit || '(empty)'}", not the verified SHA ${res.commit}: investigate before trusting this repo` }
+          }
+          return { ...res, ...p, commit: p.commit || res.commit, repo: plan.repo, verify: res.verify }
+        })
         .then(p => p || { ...res, status: 'failed', notes: 'publish agent returned no result: commit verified but NOT published' })
     },
   )
