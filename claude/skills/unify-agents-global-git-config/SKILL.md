@@ -83,9 +83,12 @@ Find every git repo that holds the source:
 - `~/.claude` may sit inside a larger repo (on WSL the home directory itself
   can be a dotfiles repo). Scope `git status --porcelain` to every rule file
   step 1 read under `~`, including linked ones (`git -C ~ status --porcelain
-  -- <each file, relative to ~>`). Never judge the source by unrelated untracked
-  files in home. If the rule files show as untracked (`??`), that repo does
-  not version them, so it is not a source repo. Skip it and let the mirror
+  --untracked-files=all --ignored -- <each file, relative to ~>`; the flags
+  matter because dotfiles repos often ignore everything or set
+  `status.showUntrackedFiles=no`, which would hide a file from the check).
+  Unrelated untracked files in home say nothing about the source. If the rule
+  files show as untracked (`??`) or ignored (`!!`), that repo does not
+  version them, so it is not a source repo. Skip it and let the mirror
   check stand as the committed record; do not offer to commit them there.
 - `local` / `dir`: the repo containing the source.
 
