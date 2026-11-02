@@ -117,8 +117,9 @@ the user's preferences/memory (e.g. `D:\Documents\Code\GitHub` → WSL
 are in: `D:\...` on Windows, `/mnt/d/...` on WSL. Never mix the two in one
 `repos` list, because every agent runs its git commands in your runtime.
 Enumerate git repos at depth ≤ 2 (`find <root> -maxdepth 3 -name .git -prune`;
-on Windows run it in Git Bash, or use `Get-ChildItem <root> -Directory -Depth 2
--Filter .git -Force`). Exclude `3rdParty/`, the source repos themselves, and
+on Windows run it in Git Bash, or use `Get-ChildItem <root> -Depth 2 -Filter
+.git -Force`, with no `-Directory`, because `.git` is a file in linked
+worktrees and submodules). Exclude `3rdParty/`, the source repos themselves, and
 `.ugr-*` directories (worktrees kept from an earlier `verify-failed` apply). If no root is found, ask with AskUserQuestion: list the
 candidates you found plus "Other". In `quiet` mode that is a stop.
 
