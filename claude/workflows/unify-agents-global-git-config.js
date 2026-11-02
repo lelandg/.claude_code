@@ -321,7 +321,8 @@ as a LOCAL commit only. The plan is already approved by the user: do exactly thi
 2. Create a throwaway worktree on a new local branch FROM plan.scanned_commit (the exact revision the user approved),
    so local WIP and unpushed local commits never leak:
    \`git -C <repo> worktree add -b ${branch} <repo>/../.ugr-<repo-name>-${ts} <scanned_commit>\` (absolute path; your
-   working directory is not the repo). Never touch the user's working tree. If that branch name exists, append -2, -3, ...
+   working directory is not the repo). Never touch the user's working tree. If that branch name, that worktree path,
+   or the ugr-backups/${ts} directory below already exists, append the same -2, -3, ... suffix to all three.
 3. Back up each target file at that same revision into the repo's COMMON git dir, resolved with
    \`git -C <repo> rev-parse --path-format=absolute --git-common-dir\` (\`.git\` is a FILE in linked worktrees and
    submodules, so never hard-code <repo>/.git; and a per-worktree git dir is deleted with its worktree):

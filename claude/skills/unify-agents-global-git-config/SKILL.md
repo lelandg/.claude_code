@@ -99,7 +99,10 @@ Find every git repo that holds the source:
 
 For each source repo:
 
-1. **Uncommitted changes** to rule files (`git status --porcelain`): explain
+1. **Uncommitted changes** to rule files (`git status --porcelain`, plus
+   `git hash-object <file>` against `git rev-parse HEAD:<file>` for each one,
+   since an `assume-unchanged` or `skip-worktree` flag hides edits from
+   status): explain
    what is uncommitted and why it matters. Anything uncommitted gets copied
    into N repos and can never be reproduced from history. Then ask with
    AskUserQuestion: *commit* or *stop*. Make the commit proposal concrete and
