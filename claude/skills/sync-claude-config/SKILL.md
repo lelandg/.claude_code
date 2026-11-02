@@ -47,6 +47,7 @@ claude --version                            # local, for comparison
 | `agents/` | `rsync -aL --delete --exclude .git --exclude .idea` — **`-L` is mandatory**: some local agents may be symlinks into a source repo; the remote needs materialized files. `--delete` mirrors archivals. |
 | `skills/` | `rsync -a --exclude '*-workspace' --exclude '*.skill' --exclude '*.zip'` — **additive, NO --delete** (preserve remote-only skills) |
 | `commands/` | Copy **portable ones only**. Read each command first: skip any that shell out to local-only tooling (e.g. commands that need an admin CLI or virtualenv present only on the dev machine). Never delete remote-only command dirs. |
+| `workflows/` | `rsync -a` — additive, NO --delete. Saved Workflow scripts that commands invoke by name (e.g. `unify-agents-global-git-config.js`) |
 | `settings.json` | **Programmatic merge, never replace** (§5) |
 | `statusline-command.sh` + `statusLine` settings block | **Copy + ADAPT** (§5b) — portable script; rewrite the local path-shortening for the remote's project root; back up any host-customized remote copy first |
 | `tools/` | `rsync -a` — portable hook/guard scripts (config-secrets-guard, safe-config-reader). Sync **before** the settings merge so hook commands resolve on the remote |
