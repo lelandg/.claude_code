@@ -38,6 +38,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── install-claude-config.md  # Bootstrap command (run after cloning)
 │       ├── sync-claude-config.md     # /sync-claude-config slash command
 │       ├── unify-agents-md.md        # /unify-agents-md slash command
+│       ├── unify-agents-global-git-config.md  # Same git/commit rules in every repo (workflow)
 │       ├── feature-team.md           # Multi-task plan with review loop + model ladder
 │       ├── rename-code.md            # Safe cross-codebase symbol rename
 │       ├── repo-doctor.md            # /repo-doctor slash command
@@ -93,6 +94,8 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── genui.md                   # Generative UI (HTML output)
 │   │   ├── html.md                    # HTML/web development focus
 │   │   └── technical-quality.md       # Comprehensive technical analysis
+│   ├── workflows/                     # Saved Workflow scripts (multi-agent fan-out)
+│   │   └── unify-agents-global-git-config.js
 │   └── skills/                        # Custom skills (slash commands)
 │       ├── time.md                    # Execution time tracking
 │       ├── agent-config-sync/         # Report/reconcile drift between two runtimes' agent config
@@ -117,6 +120,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── sync-claude-config/        # Sync ~/.claude/ to this repo
 │       ├── technical-documenter/      # Developer/support docs generator
 │       ├── unify-agents-md/           # Make AGENTS.md canonical across all AI CLIs
+│       ├── unify-agents-global-git-config/  # One source of git rules → every repo
 │       ├── update-code-map/           # CodeMap maintenance skill
 │       ├── update-hermes/             # Backup-first Hermes Agent updater
 │       ├── version-manager/           # Standardized version bumps + changelog currency
@@ -328,6 +332,7 @@ Custom skills extend Claude Code with repeatable workflows:
 - **raginclude-generator** - Generates a `.raginclude` file to curate what a RAG knowledge base should ingest
 - **disk-doctor** - Disk cleanup + install hygiene: scans home/dev/cache locations, proposes a plan, deletes only via an audited safe-trash helper with one-command undo
 - **unify-agents-md** - Restructures instruction files so `AGENTS.md` is the single canonical guide every coding CLI follows (Claude Code, Codex, Copilot, Gemini, Pi), with `CLAUDE.md`/`GEMINI.md` as thin `@import` pointers
+- **unify-agents-global-git-config** - Makes git/commit rules identical across every repo: reads them from one source of truth (global `~/.claude` config by default, or a project/dir), refuses to copy from an uncommitted or red source, scans all repos via a saved Workflow, asks the fewest possible questions to settle cross-repo conflicts, then writes one managed `unified-git-rules` block per repo and commits/PRs/merges as each repo's own rules allow. `quiet` mode applies only when no question is needed, otherwise writes a report
 - **repo-doctor** - Read-only triage over the whole agent-docs layer of a repo: instruction-file topology, always-loaded token cost, CodeMap age plus *sampled line-number accuracy* (claims are checked against the source, not assumed), broken pointers, and changelog-vs-code version drift. Reports first, then dispatches `unify-agents-md` → `claude-md-optimizer` → `update-code-map` → `version-manager` in dependency order — topology before content, because rightsizing a `CLAUDE.md` that is about to become an `@import` pointer throws the work away
 - **update-hermes** - Backup-first updater for a Hermes Agent install: patch/tarball backup of source customizations (the built-in backup excludes the source repo), `hermes update --backup`, post-update verification, and a documented restore path
 - **cl-project-init** - *(ChameleonLabs-specific, sanitized)* Example project scaffolder (Next.js SaaS / Python / library templates). Fork and rename for your own company — the `cl-` prefix marks it as company-scoped.

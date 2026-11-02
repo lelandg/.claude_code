@@ -93,6 +93,11 @@ Code invokes the codex plugin, so it is a Claude mechanism.)
   Dry-run by default, `--apply` to write. `backfill` is once per repo (reconstructs
   git tags from history, fills changelog gaps). Required before every PR per the
   versioning rule in `~/.config/agents/AGENTS.md`.
+- `/unify-agents-global-git-config [global|local|dir <path>] [target <path>] [quiet]`
+  — identical git/commit rules across all repos: green-source check, Workflow
+  scan (`~/.claude/workflows/unify-agents-global-git-config.js`), unified
+  conflict questions, one managed `unified-git-rules` block per repo
+  (`skill: unify-agents-global-git-config`).
 - `/repo-doctor [path | all] [--fix]` — read-only audit of a repo's agent-docs
   layer: AGENTS.md/CLAUDE.md topology, always-loaded token cost, CodeMap age +
   sampled line-number accuracy, broken pointers, changelog-vs-code drift

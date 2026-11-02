@@ -3,6 +3,31 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.10.0] - 2026-11-02
+
+### Added
+- **New command + skill: `/unify-agents-global-git-config`.** Makes git and
+  commit rules identical across every repository, copied from one source of
+  truth: the global `~/.claude` / `~/.config/agents` config by default, or
+  `local`/`project` or a `dir`. It refuses to copy rules out of a source that
+  is uncommitted, out of step with its published mirror, or CI-red, because a
+  rule copied into twenty repos from an unreproducible state can never be
+  traced back. The fan-out runs as a saved Workflow
+  (`claude/workflows/unify-agents-global-git-config.js`) in two runs: a
+  read-only `scan` (canon extraction → per-repo rule inventory, following
+  `@imports` and linked files → per-repo diff → one barrier that merges
+  disagreements into the *fewest* questions, one per rule rather than one per
+  repo), then an `apply` that works in throwaway worktrees cut from
+  `origin/<default>` so local WIP never leaks. Each repo gets a single
+  self-contained `<!-- BEGIN unified-git-rules -->` block, duplicates
+  elsewhere in the repo are removed so nothing can drift. Each repo's change
+  is committed locally from the exact commit the user approved, checked by an
+  independent verifier, and published only if it passes, so nothing reaches
+  a remote unverified, not even on the direct-to-main route. Whether a change goes straight to `main`
+  or through a PR is decided by each repo's own rules and whether its
+  pre-commit gate actually runs there. `quiet` mode applies only when no
+  question would be needed. Otherwise it changes nothing and writes a report.
+
 ## [0.9.2] - 2026-10-31
 
 ### Fixed
