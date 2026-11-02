@@ -220,7 +220,8 @@ remote-tracking refs), resolve the default branch from origin/HEAD, record \`git
 scanned_commit, and read every file with \`git show <scanned_commit>:<path>\` / \`git ls-tree -r <scanned_commit>\`.
 Then compare the local checkout's instruction files against that revision and describe any difference (other
 branch checked out, uncommitted or unpushed rule edits) in local_divergence, so the user sees it before approving.
-Git state (read-only commands besides the fetch): remote URL, current branch, dirty?, commits on the local default
+Git state (read-only commands besides the fetch): remote = the exact output of \`git remote get-url --push origin\`
+(the push URL, not the fetch URL: publish compares against it), current branch, dirty?, commits on the local default
 branch missing from origin, local core.hooksPath, and whether a pre-commit hook actually runs here (global
 hooksPath hook not shadowed by a local one, or a local framework that calls it).
 Set skip_reason if: not a git repo; no origin remote; the remote owner is not the user or their org (third-party,
