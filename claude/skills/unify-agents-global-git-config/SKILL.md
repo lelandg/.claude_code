@@ -183,18 +183,24 @@ route.
    checks: one managed block equal to the approved one, no contradicting
    copies left in the repo, no non-git content lost, `@import` still on
    line 1, and a commit message that follows the rules.
-3. **Publish (verified commits only).**
-   - Direct to main: push the commit. If `origin/<default>` moved without
-     touching those files, rebase the single commit onto it first; otherwise
-     report `stale`.
-   - PR route: push the branch, open the PR, and bump the version if the
+3. **Publish (verified commits only).** Publish pushes *exactly* the
+   verified SHA, to the `default_branch` the scan recorded. It never
+   creates, amends, or rebases a commit, because any new SHA would be
+   unverified. A result whose pushed SHA differs from the verified one is
+   reported `failed`.
+   - Direct to main: push the commit only if `origin/<default>` still equals
+     `scanned_commit` (a plain fast-forward). If `origin` moved at all,
+     report `stale` and push nothing. Re-scan and re-approve that repo.
+   - PR route: push the verified SHA as the branch, confirm the remote tip
+     equals it, open the PR, and bump the version if the
      repo requires one. Merge only when that repo's rules allow autonomous
      merging and checks are green. Otherwise enable auto-merge or leave the
      PR open.
    - A repo that fails verification is reported `verify-failed`. Its local
      branch is kept for inspection, and nothing is pushed.
 
-Plans missing `repo`, `route`, `scanned_commit` or `target_file` are
+Plans missing `repo`, `route`, `scanned_commit`, `default_branch` or
+`target_file` are
 rejected before any agent runs.
 
 ### 7. Report

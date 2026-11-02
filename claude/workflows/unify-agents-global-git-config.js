@@ -298,8 +298,8 @@ auto: one line per non-decision change. skipped: one line per entry in <skipped_
 if (MODE === 'apply') {
   if (!A.canon || !Array.isArray(A.plans)) throw new Error('apply needs args.canon and args.plans')
   const ROUTES = ['direct-main', 'pr', 'blocked']
-  const bad = A.plans.filter(p => !p || !p.repo || !ROUTES.includes(p.route) || !p.scanned_commit || !p.target_file)
-  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, route (${ROUTES.join('|')}), scanned_commit, target_file: ${JSON.stringify(bad)}`)
+  const bad = A.plans.filter(p => !p || !p.repo || !ROUTES.includes(p.route) || !p.scanned_commit || !p.default_branch || !p.target_file)
+  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, route (${ROUTES.join('|')}), scanned_commit, default_branch, target_file: ${JSON.stringify(bad)}`)
   const ts = DATE.replace(/[^0-9]/g, '')
   const branch = `docs/unify-git-rules-${DATE.slice(0, 10)}`
   const SKIP = ['blocked', 'failed', 'no-change', 'stale']
@@ -365,22 +365,31 @@ Check:
         return { ...res, status: 'verify-failed', notes: `${res.notes || ''} NOT published: verification failed. Local branch ${res.branch} kept for inspection.`.trim() }
       }
       return agent([
-        tag('instructions', `Publish the verified local commit <apply_result>.commit (branch <apply_result>.branch, worktree
-<apply_result>.worktree) in the repository in <plan>.repo, by route <plan>.route.
-- direct-main: \`git fetch\`. If origin/<default> is still <plan>.scanned_commit, push the commit to <default>.
-  If it moved but none of <apply_result>.files_changed changed since scanned_commit, rebase the single commit onto
-  origin/<default>, confirm \`git log origin/<default>..HEAD\` shows only that commit and the file contents are
-  unchanged, then push. Otherwise do not push; report "stale". Never force-push, never --admin, never bypass a
-  failed check.
-- pr: push the branch, open a PR (mirror the repo's PR template headings), follow the repo's versioning rule if
-  it requires a bump on PRs. Merge only if the repo's rules allow autonomous merging and every required check is
-  green now; if checks are pending and auto-merge is allowed, enable it; otherwise leave the PR open.
-Then remove the worktree (\`git worktree remove\`); delete the local branch only if it was pushed or merged.
-Report final status, commit sha, branch, PR URL.`),
-        tag('plan', { repo: plan.repo, route: plan.route, scanned_commit: plan.scanned_commit }),
+        tag('instructions', `Publish EXACTLY the verified commit <apply_result>.commit in the repository in <plan>.repo, by route
+<plan>.route. The target branch is <plan>.default_branch (resolved at scan time; never re-derive it). Never create,
+amend or rebase a commit here: anything not byte-for-byte the verified SHA is unverified and must not be pushed.
+1. Pin: \`git -C <apply_result>.worktree rev-parse HEAD\` must equal <apply_result>.commit, and its parent must be
+   <plan>.scanned_commit. If not, push nothing and report "failed".
+2. \`git fetch\`.
+- direct-main: \`git rev-parse origin/<default_branch>\` must still equal <plan>.scanned_commit. If it does, run
+  \`git push origin <apply_result>.commit:refs/heads/<default_branch>\` (a plain fast-forward push). If origin moved
+  at all, push nothing and report "stale" (re-scan and re-approve that repo). Never force-push, never --admin, never
+  bypass a failed check.
+- pr: \`git push origin <apply_result>.commit:refs/heads/<apply_result>.branch\`, then confirm the remote branch tip
+  equals <apply_result>.commit; if not, report "failed". Open the PR against <default_branch> (mirror the repo's PR
+  template headings) and follow the repo's versioning rule if it requires a bump on PRs (a bump is a separate,
+  normally reviewed commit on that PR, not part of this verified change). Merge only if the repo's rules allow
+  autonomous merging and every required check is green now; if checks are pending and auto-merge is allowed,
+  enable it; otherwise leave the PR open.
+3. Remove the worktree (\`git worktree remove\`); delete the local branch only if it was pushed.
+Report final status, the pushed SHA in commit, branch, PR URL.`),
+        tag('plan', { repo: plan.repo, route: plan.route, scanned_commit: plan.scanned_commit, default_branch: plan.default_branch }),
         tag('apply_result', res),
       ].join('\n\n'), { label: `publish:${short(plan.repo)}`, phase: 'Publish', schema: APPLY_SCHEMA })
-        .then(p => p ? { ...res, ...p, repo: plan.repo, verify: res.verify } : { ...res, status: 'failed', notes: 'publish agent returned no result: commit verified but NOT published' })
+        .then(p => !p ? null : (p.commit && p.commit !== res.commit && !['stale', 'failed'].includes(p.status))
+          ? { ...res, ...p, repo: plan.repo, verify: res.verify, status: 'failed', notes: `published SHA ${p.commit} is not the verified SHA ${res.commit}: investigate` }
+          : { ...res, ...p, repo: plan.repo, verify: res.verify })
+        .then(p => p || { ...res, status: 'failed', notes: 'publish agent returned no result: commit verified but NOT published' })
     },
   )
 
