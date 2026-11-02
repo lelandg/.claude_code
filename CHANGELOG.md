@@ -20,8 +20,10 @@ A plain-English history of what changed in this repository and why. Newest first
   repo), then an `apply` that works in throwaway worktrees cut from
   `origin/<default>` so local WIP never leaks. Each repo gets a single
   self-contained `<!-- BEGIN unified-git-rules -->` block, duplicates
-  elsewhere in the repo are removed so nothing can drift, and an independent
-  verifier re-reads what was pushed. Whether a change goes straight to `main`
+  elsewhere in the repo are removed so nothing can drift. Each repo's change
+  is committed locally from the exact commit the user approved, checked by an
+  independent verifier, and published only if it passes, so nothing reaches
+  a remote unverified, not even on the direct-to-main route. Whether a change goes straight to `main`
   or through a PR is decided by each repo's own rules and whether its
   pre-commit gate actually runs there. `quiet` mode applies only when no
   question would be needed. Otherwise it changes nothing and writes a report.

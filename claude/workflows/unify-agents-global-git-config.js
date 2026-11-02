@@ -7,8 +7,9 @@ export const meta = {
     { title: 'Scan', detail: 'one agent per repo: collect every git/SCM rule, following links' },
     { title: 'Compare', detail: 'diff each repo against the canon' },
     { title: 'Unify', detail: 'merge cross-repo conflicts into the fewest questions' },
-    { title: 'Apply', detail: 'one agent per repo: edit, commit, push, PR/merge as its rules allow' },
-    { title: 'Verify', detail: 'independent re-read: does each repo now match the canon?' },
+    { title: 'Apply', detail: 'one agent per repo: edit and commit locally in a worktree from the scanned commit' },
+    { title: 'Verify', detail: 'independent check of that local commit before anything is pushed' },
+    { title: 'Publish', detail: 'push / PR / merge only verified commits, as each repo\'s rules allow' },
   ],
 }
 
@@ -149,15 +150,16 @@ const APPLY_SCHEMA = {
   type: 'object',
   properties: {
     repo: { type: 'string' },
-    status: { type: 'string', enum: ['committed-main', 'pr-open', 'pr-merged', 'pr-auto-merge', 'no-change', 'stale', 'blocked', 'failed'] },
+    status: { type: 'string', enum: ['committed-local', 'committed-main', 'pr-open', 'pr-merged', 'pr-auto-merge', 'no-change', 'stale', 'blocked', 'verify-failed', 'failed'] },
     files_changed: { type: 'array', items: { type: 'string' } },
     backups: { type: 'array', items: { type: 'string' } },
     commit: { type: 'string' },
     branch: { type: 'string' },
+    worktree: { type: 'string' },
     pr_url: { type: 'string' },
     notes: { type: 'string' },
   },
-  required: ['repo', 'status', 'files_changed', 'backups', 'commit', 'branch', 'pr_url', 'notes'],
+  required: ['repo', 'status', 'files_changed', 'backups', 'commit', 'branch', 'worktree', 'pr_url', 'notes'],
 }
 
 const VERIFY_SCHEMA = {
@@ -295,72 +297,101 @@ auto: one line per non-decision change. skipped: one line per entry in <skipped_
 // ---------------------------------------------------------------------------
 if (MODE === 'apply') {
   if (!A.canon || !Array.isArray(A.plans)) throw new Error('apply needs args.canon and args.plans')
+  const ROUTES = ['direct-main', 'pr', 'blocked']
+  const bad = A.plans.filter(p => !p || !p.repo || !ROUTES.includes(p.route) || !p.scanned_commit || !p.target_file)
+  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, route (${ROUTES.join('|')}), scanned_commit, target_file: ${JSON.stringify(bad)}`)
   const ts = DATE.replace(/[^0-9]/g, '')
+  const branch = `docs/unify-git-rules-${DATE.slice(0, 10)}`
+  const SKIP = ['blocked', 'failed', 'no-change', 'stale']
 
+  // Order per repo: edit + commit LOCALLY -> independent verify of that commit -> publish only if verified.
+  // Nothing reaches a remote (including the direct-main route) before the verifier has passed it.
   phase('Apply')
   const applied = await pipeline(
     A.plans,
     plan => {
-      const block = plan.block || A.canon.block_markdown
+      if (plan.route === 'blocked') return { repo: plan.repo, status: 'blocked', files_changed: [], backups: [], commit: '', branch: '', worktree: '', pr_url: '', notes: 'route blocked in plan' }
       return agent([
-        tag('instructions', `Apply the approved unified git rules (<plan>, <managed_block>) to the repository in <plan>.repo.
-The plan is already approved by the user: do exactly this, nothing more.
+        tag('instructions', `Apply the approved unified git rules (<plan>, <managed_block>) to the repository in <plan>.repo,
+as a LOCAL commit only. The plan is already approved by the user: do exactly this, nothing more. Do NOT push.
 1. \`git fetch\`. If \`git rev-parse origin/<default>\` differs from plan.scanned_commit, run
-   \`git diff --stat <scanned_commit> origin/<default>\`. If any instruction or rule file the plan references
-   changed, change nothing and report status "stale" (the approval was for different text). Otherwise continue.
-2. Work in a throwaway worktree cut from origin/<default>, so local WIP and unpushed local commits never leak:
-   \`git worktree add ../.ugr-<repo-name>-${ts} origin/<default>\`. Never touch the user's working tree.
-3. Before editing, back up each target file AT THAT SAME REVISION (the content you are about to change):
-   \`git show origin/<default>:<file> > <repo>/.git/ugr-backups/${ts}/<file>\` (mkdir -p; inside .git, so it is
-   never committed and never clutters the checkout; never overwrite an existing backup). List the paths.
+   \`git diff --stat <scanned_commit> origin/<default>\`. If any file the plan references changed, change nothing
+   and report status "stale" (the approval was for different text). Otherwise continue.
+2. Create a throwaway worktree on a new local branch FROM plan.scanned_commit (the exact revision the user approved),
+   so local WIP and unpushed local commits never leak:
+   \`git worktree add -b ${branch} ../.ugr-<repo-name>-${ts} <scanned_commit>\`. Never touch the user's working tree.
+   If that branch name exists, append -2, -3, ...
+3. Back up each target file at that same revision:
+   \`git show <scanned_commit>:<file> > <repo>/.git/ugr-backups/${ts}/<file>\` (mkdir -p; inside .git, so it is never
+   committed and never clutters the checkout; never overwrite an existing backup). List the paths.
 4. Write/replace the block between ${BLOCK_BEGIN} and ${BLOCK_END} in plan.target_file (create the markers if
    absent, at the end of the file or replacing the existing git section). Apply plan.removals (delete/reword
    duplicate or conflicting git statements elsewhere) and put plan.exceptions under "## Repo-specific git
    exceptions" right after the block. Keep every non-git line intact. @imports stay on line 1.
-5. Commit following the commit-message and attribution rules in the managed block (they are now this repo's rules).
-   Route plan.route:
-   - direct-main: commit in the worktree, verify \`git log origin/<default>..HEAD\` shows only your commit, push to
-     <default>. Never force-push, never --admin, never bypass a failed check.
-   - pr: branch docs/unify-git-rules-${DATE.slice(0, 10)}, push, open a PR (mirror the repo's PR template headings),
-     follow the repo's versioning rule if it requires a bump on PRs. Merge only if the repo's rules allow
-     autonomous merging and every required check is green now; if checks are pending and auto-merge is allowed,
-     enable it; otherwise leave the PR open and report its URL.
-   - blocked: change nothing, report why.
-6. Remove the worktree. Report status, files, backups, commit sha, branch, PR URL.`),
+5. Commit in the worktree following the commit-message and attribution rules in <managed_block> (they are now
+   this repo's rules). Do not push. Leave the worktree in place for the verifier.
+Report status "committed-local" (or "no-change" if the files already matched), files, backups, commit sha,
+branch, and the worktree path.`),
         tag('plan', plan),
-        tag('managed_block', block),
+        tag('managed_block', plan.block || A.canon.block_markdown),
       ].join('\n\n'), { label: `apply:${short(plan.repo)}`, phase: 'Apply', schema: APPLY_SCHEMA })
-        .then(res => res ? { ...res, repo: plan.repo } : { repo: plan.repo, status: 'failed', files_changed: [], backups: [], commit: '', branch: '', pr_url: '', notes: 'apply agent returned no result' })
+        .then(res => res ? { ...res, repo: plan.repo } : { repo: plan.repo, status: 'failed', files_changed: [], backups: [], commit: '', branch: '', worktree: '', pr_url: '', notes: 'apply agent returned no result' })
     },
     (res, plan) => {
-      if (['blocked', 'failed', 'no-change', 'stale'].includes(res.status)) return res
+      if (SKIP.includes(res.status)) return res
       return agent([
-        tag('instructions', `Independently verify the git-rules sync for the repository in <plan>.repo. Try to find a problem;
-default matches=false if unsure. Read the repo AS PUSHED (origin/<default> after git fetch, or the PR branch in
-<apply_result>.branch), not the local working tree.
+        tag('instructions', `Independently verify the LOCAL, not yet pushed commit <apply_result>.commit in the repository in
+<plan>.repo, before anything is published. Try to find a problem; default matches=false if unsure.
+Read it with \`git show <commit>:<path>\` and \`git diff <plan>.scanned_commit <commit>\`, never the user's working tree.
 Check:
+- the commit's parent is <plan>.scanned_commit and it touches only instruction/rule files;
 - exactly one managed block (${BLOCK_BEGIN} ... ${BLOCK_END}), and its body equals <approved_block>;
 - no git statement elsewhere in the repo contradicts or duplicates a rule in <canon_rules>, unless it is listed
   in <plan>.exceptions;
-- non-git content was not lost (compare with the backups listed in <apply_result>.backups);
+- the diff removes no non-git content (only the planned removals);
 - @imports are still on line 1;
 - the commit message follows the commit rules in <approved_block>.`),
         tag('how_to_read_rules', HOW_TO_READ_RULES),
-        tag('plan', { repo: plan.repo, target_file: plan.target_file, exceptions: plan.exceptions || [], removals: plan.removals || [] }),
+        tag('plan', { repo: plan.repo, scanned_commit: plan.scanned_commit, target_file: plan.target_file, exceptions: plan.exceptions || [], removals: plan.removals || [] }),
         tag('apply_result', res),
         tag('approved_block', plan.block || A.canon.block_markdown),
         tag('canon_rules', A.canon.rules),
       ].join('\n\n'), { label: `verify:${short(plan.repo)}`, phase: 'Verify', schema: VERIFY_SCHEMA, effort: 'high' })
         .then(v => ({ ...res, verify: v ? { ...v, repo: plan.repo } : { repo: plan.repo, matches: false, problems: ['verifier returned no result: NOT verified'] } }))
     },
+    (res, plan) => {
+      if (SKIP.includes(res.status)) return res
+      if (!res.verify.matches) {
+        return { ...res, status: 'verify-failed', notes: `${res.notes || ''} NOT published: verification failed. Local branch ${res.branch} kept for inspection.`.trim() }
+      }
+      return agent([
+        tag('instructions', `Publish the verified local commit <apply_result>.commit (branch <apply_result>.branch, worktree
+<apply_result>.worktree) in the repository in <plan>.repo, by route <plan>.route.
+- direct-main: \`git fetch\`. If origin/<default> is still <plan>.scanned_commit, push the commit to <default>.
+  If it moved but none of <apply_result>.files_changed changed since scanned_commit, rebase the single commit onto
+  origin/<default>, confirm \`git log origin/<default>..HEAD\` shows only that commit and the file contents are
+  unchanged, then push. Otherwise do not push; report "stale". Never force-push, never --admin, never bypass a
+  failed check.
+- pr: push the branch, open a PR (mirror the repo's PR template headings), follow the repo's versioning rule if
+  it requires a bump on PRs. Merge only if the repo's rules allow autonomous merging and every required check is
+  green now; if checks are pending and auto-merge is allowed, enable it; otherwise leave the PR open.
+Then remove the worktree (\`git worktree remove\`); delete the local branch only if it was pushed or merged.
+Report final status, commit sha, branch, PR URL.`),
+        tag('plan', { repo: plan.repo, route: plan.route, scanned_commit: plan.scanned_commit }),
+        tag('apply_result', res),
+      ].join('\n\n'), { label: `publish:${short(plan.repo)}`, phase: 'Publish', schema: APPLY_SCHEMA })
+        .then(p => p ? { ...res, ...p, repo: plan.repo, verify: res.verify } : { ...res, status: 'failed', notes: 'publish agent returned no result: commit verified but NOT published' })
+    },
   )
 
   const out = applied.map((r, i) => r || { repo: A.plans[i].repo, status: 'failed', notes: 'pipeline dropped this repo' })
-  const unverified = out.filter(r => r.verify && !r.verify.matches)
-  const failedApply = out.filter(r => r.status === 'failed' || r.status === 'stale')
-  if (failedApply.length) log(`WARNING: ${failedApply.length} repo(s) failed or stale: ${failedApply.map(r => short(r.repo)).join(', ')}`)
-  if (unverified.length) log(`WARNING: ${unverified.length} repo(s) did not verify: ${unverified.map(r => short(r.repo)).join(', ')}`)
-  return { mode: 'apply', date: DATE, results: out, failed: failedApply.length, unverified: unverified.length }
+  const problems = out.filter(r => ['failed', 'stale', 'verify-failed', 'committed-local'].includes(r.status))
+  if (problems.length) log(`WARNING: ${problems.length} repo(s) not published: ${problems.map(r => `${short(r.repo)} (${r.status})`).join(', ')}`)
+  return {
+    mode: 'apply', date: DATE, results: out,
+    failed: out.filter(r => r.status === 'failed' || r.status === 'stale').length,
+    unverified: out.filter(r => r.verify && !r.verify.matches).length,
+  }
 }
 
 throw new Error(`unknown mode: ${MODE}`)

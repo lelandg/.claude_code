@@ -164,23 +164,43 @@ Workflow({ name: "unify-agents-global-git-config", args: {
   mode: "apply", date: "<same>", canon: <scan.canon>, plans: [...] } })
 ```
 
-Each apply agent re-fetches first. If `origin/<default>` has moved past
-`scanned_commit` and the files the plan touches changed, it changes nothing
-and reports `stale`, because the user approved different text. Re-scan that
-repo. Otherwise it works in a throwaway worktree cut from `origin/<default>`,
-so the user's WIP and unpushed local commits never leak. It backs up each
-file at that same revision to `<repo>/.git/ugr-backups/<timestamp>/`, which
-is never committed and never clutters the checkout. Then it commits under
-the new rules:
-direct to main, or branch + PR + version bump if the repo requires one. It
-merges only when that repo's rules allow autonomous merging and checks are
-green. Otherwise it enables auto-merge or leaves the PR open. A verify agent
-then re-reads what was pushed and tries to refute the sync.
+Each repo goes through three stages. Nothing reaches a remote until an
+independent verifier has passed it, and that includes the direct-to-main
+route.
+
+1. **Apply (local only).** The agent re-fetches. If `origin/<default>` has
+   moved past `scanned_commit` and any file the plan touches changed, it
+   changes nothing and reports `stale`, because the user approved different
+   text. Re-scan that repo. Otherwise it creates a throwaway worktree on a new
+   local branch **from `scanned_commit`**, the exact revision the user
+   approved, so the user's WIP and unpushed local commits never leak. It
+   backs up each file at that revision to
+   `<repo>/.git/ugr-backups/<timestamp>/`, which is never committed and never
+   clutters the checkout. It then edits and commits under the new rules. It
+   does not push.
+2. **Verify.** A separate agent reads that local commit (`git show`, and
+   `git diff scanned_commit..commit`) and tries to refute the sync. It
+   checks: one managed block equal to the approved one, no contradicting
+   copies left in the repo, no non-git content lost, `@import` still on
+   line 1, and a commit message that follows the rules.
+3. **Publish (verified commits only).**
+   - Direct to main: push the commit. If `origin/<default>` moved without
+     touching those files, rebase the single commit onto it first; otherwise
+     report `stale`.
+   - PR route: push the branch, open the PR, and bump the version if the
+     repo requires one. Merge only when that repo's rules allow autonomous
+     merging and checks are green. Otherwise enable auto-merge or leave the
+     PR open.
+   - A repo that fails verification is reported `verify-failed`. Its local
+     branch is kept for inspection, and nothing is pushed.
+
+Plans missing `repo`, `route`, `scanned_commit` or `target_file` are
+rejected before any agent runs.
 
 ### 7. Report
 
 Show a table: repo | status | commit/PR | verify. Every `verify.matches ==
-false`, `failed`, and `stale` row is a failure. Show its problems; the
+false`, `failed`, `stale`, and `verify-failed` row is a failure. Show its problems; the
 result's `failed` and `unverified` counts must match the table. Write a summary markdown into the
 source repo's notes/docs directory, matching its convention (`Notes/` or
 `Docs/`; for `global` that is the mirror repo, else `~/.claude/reports/`).
