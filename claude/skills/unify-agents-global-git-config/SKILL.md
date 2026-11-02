@@ -84,7 +84,9 @@ Find every git repo that holds the source:
   can be a dotfiles repo). Scope `git status --porcelain` to the rule files
   (`git -C ~ status --porcelain -- .claude/CLAUDE.md .claude/instructions
   .config/agents/AGENTS.md`). Never judge the source by unrelated untracked
-  files in home.
+  files in home. If the rule files show as untracked (`??`), that repo does
+  not version them, so it is not a source repo. Skip it and let the mirror
+  check stand as the committed record; do not offer to commit them there.
 - `local` / `dir`: the repo containing the source.
 
 For each source repo:
