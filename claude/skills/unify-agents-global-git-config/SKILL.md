@@ -90,6 +90,11 @@ Find every git repo that holds the source:
   files show as untracked (`??`) or ignored (`!!`), that repo does not
   version them, so it is not a source repo. Skip it and let the mirror
   check stand as the committed record; do not offer to commit them there.
+- Any rule file step 1 read from **outside** `~` (a linked doc in some other
+  repo) is checked in the repo that owns it: group the files by `git -C
+  <file's directory> rev-parse --show-toplevel` and run the same scoped
+  status there. A file that belongs to no repo cannot be reproduced from
+  history: treat it as uncommitted.
 - `local` / `dir`: the repo containing the source.
 
 For each source repo:
@@ -124,9 +129,11 @@ on Windows run it in Git Bash, or use `Get-ChildItem <root> -Depth 2 -Filter
 .git -Force`, with no `-Directory`, because `.git` is a file in linked
 worktrees and submodules). Exclude `3rdParty/`, the source repos themselves, and
 `.ugr-*` directories (worktrees kept from an earlier `verify-failed` apply).
+Each hit is a `.git` entry; the repo is its **parent directory**, and that
+is what goes into `repos` and into every `git -C` below.
 Then deduplicate: a main checkout and its linked worktrees share one
 repository, and scanning both would open duplicate PRs or competing pushes.
-Key each hit by `git -C <hit> rev-parse --path-format=absolute
+Key each repo by `git -C <repo> rev-parse --path-format=absolute
 --git-common-dir` plus its `origin` URL, and keep one per key, preferring the
 main checkout. Submodules have their own common dir, so they stay distinct.
 If no root is found, ask with AskUserQuestion: list the candidates you found
