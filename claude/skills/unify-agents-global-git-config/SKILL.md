@@ -72,8 +72,19 @@ Find every git repo that holds the source:
   `.claude_code` repo that `/publish-claude-config` publishes. Look for it
   in the repo root from step 3, or for a README that says "mirrors
   ~/.claude". Diff the live global files against the mirror's copies
-  (`config/agents/AGENTS.md`, `claude/CLAUDE.md`, `claude/instructions/`). If
-  `tools/agent-config-sync/sync.py check` exists, run it as well.
+  (`config/agents/AGENTS.md`, `claude/CLAUDE.md`, `claude/instructions/`;
+  ignore CR/LF with `diff --strip-trailing-cr`). **The mirror is deliberately
+  sanitized** (names, handles, companies, paths replaced by placeholders), so
+  every shared file differs and *differing is not diverged*. Count the mirror
+  as diverged only when a git/SCM rule in the live files is missing from the
+  mirror or says something different there once placeholders are ignored.
+  Name each such rule. If `tools/agent-config-sync/sync.py check` exists, run
+  it as well.
+- `~/.claude` may sit inside a larger repo (on WSL the home directory itself
+  can be a dotfiles repo). Scope `git status --porcelain` to the rule files
+  (`git -C ~ status --porcelain -- .claude/CLAUDE.md .claude/instructions
+  .config/agents/AGENTS.md`). Never judge the source by unrelated untracked
+  files in home.
 - `local` / `dir`: the repo containing the source.
 
 For each source repo:
@@ -100,9 +111,13 @@ For each source repo:
 `target` if given. Otherwise the user's known repo root. Check, in order:
 the user's preferences/memory (e.g. `D:\Documents\Code\GitHub` → WSL
 `/mnt/d/Documents/Code/GitHub`, plus its `Web/` subdirectory), `~/code`,
-`~/src`, `~/GitHub`, `~/projects`. Enumerate git repos at depth ≤ 2 (`find
-<root> -maxdepth 3 -name .git -prune`). Exclude `3rdParty/` and the source
-repos themselves. If no root is found, ask with AskUserQuestion: list the
+`~/src`, `~/GitHub`, `~/projects`. Use the spelling native to the runtime you
+are in: `D:\...` on Windows, `/mnt/d/...` on WSL. Never mix the two in one
+`repos` list, because every agent runs its git commands in your runtime.
+Enumerate git repos at depth ≤ 2 (`find <root> -maxdepth 3 -name .git -prune`;
+on Windows run it in Git Bash, or use `Get-ChildItem <root> -Directory -Depth 2
+-Filter .git -Force`). Exclude `3rdParty/`, the source repos themselves, and
+`.ugr-*` directories (worktrees kept from an earlier `verify-failed` apply). If no root is found, ask with AskUserQuestion: list the
 candidates you found plus "Other". In `quiet` mode that is a stop.
 
 ### 4. Scan (workflow, read-only)
@@ -175,8 +190,9 @@ route.
    local branch **from `scanned_commit`**, the exact revision the user
    approved, so the user's WIP and unpushed local commits never leak. It
    backs up each file at that revision to
-   `<repo>/.git/ugr-backups/<timestamp>/`, which is never committed and never
-   clutters the checkout. It then edits and commits under the new rules. It
+   `<git-dir>/ugr-backups/<timestamp>/` (`git rev-parse --absolute-git-dir`,
+   which is not `<repo>/.git` in a linked worktree or submodule). That folder
+   is never committed and never clutters the checkout. It then edits and commits under the new rules. It
    does not push.
 2. **Verify.** A separate agent reads that local commit (`git show`, and
    `git diff scanned_commit..commit`) and tries to refute the sync. It
