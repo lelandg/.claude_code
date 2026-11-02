@@ -322,10 +322,12 @@ as a LOCAL commit only. The plan is already approved by the user: do exactly thi
    so local WIP and unpushed local commits never leak:
    \`git -C <repo> worktree add -b ${branch} <repo>/../.ugr-<repo-name>-${ts} <scanned_commit>\` (absolute path; your
    working directory is not the repo). Never touch the user's working tree. If that branch name exists, append -2, -3, ...
-3. Back up each target file at that same revision into the repo's git dir, resolved with
-   \`git -C <repo> rev-parse --absolute-git-dir\` (\`.git\` is a FILE in linked worktrees and submodules, so never
-   hard-code <repo>/.git): \`git -C <repo> show <scanned_commit>:<file> > <gitdir>/ugr-backups/${ts}/<file>\`
-   (mkdir -p; never committed and never clutters the checkout; never overwrite an existing backup). List the paths.
+3. Back up each target file at that same revision into the repo's COMMON git dir, resolved with
+   \`git -C <repo> rev-parse --path-format=absolute --git-common-dir\` (\`.git\` is a FILE in linked worktrees and
+   submodules, so never hard-code <repo>/.git; and a per-worktree git dir is deleted with its worktree):
+   \`git -C <repo> show <scanned_commit>:<file> > <gitdir>/ugr-backups/${ts}/<file>\` (mkdir -p; never committed and
+   never clutters the checkout; never overwrite an existing backup). Run the redirect in a POSIX shell (Git Bash on
+   Windows) or PowerShell 7.4+: older PowerShell re-encodes redirected native output. List the paths.
 4. Write/replace the block between ${BLOCK_BEGIN} and ${BLOCK_END} in plan.target_file (create the markers if
    absent, at the end of the file or replacing the existing git section). Apply plan.removals (delete/reword
    duplicate or conflicting git statements elsewhere) and put plan.exceptions under "## Repo-specific git

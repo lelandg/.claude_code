@@ -81,9 +81,9 @@ Find every git repo that holds the source:
   Name each such rule. If `tools/agent-config-sync/sync.py check` exists, run
   it as well.
 - `~/.claude` may sit inside a larger repo (on WSL the home directory itself
-  can be a dotfiles repo). Scope `git status --porcelain` to the rule files
-  (`git -C ~ status --porcelain -- .claude/CLAUDE.md .claude/instructions
-  .config/agents/AGENTS.md`). Never judge the source by unrelated untracked
+  can be a dotfiles repo). Scope `git status --porcelain` to every rule file
+  step 1 read under `~`, including linked ones (`git -C ~ status --porcelain
+  -- <each file, relative to ~>`). Never judge the source by unrelated untracked
   files in home. If the rule files show as untracked (`??`), that repo does
   not version them, so it is not a source repo. Skip it and let the mirror
   check stand as the committed record; do not offer to commit them there.
@@ -120,8 +120,14 @@ Enumerate git repos at depth ≤ 2 (`find <root> -maxdepth 3 -name .git -prune`;
 on Windows run it in Git Bash, or use `Get-ChildItem <root> -Depth 2 -Filter
 .git -Force`, with no `-Directory`, because `.git` is a file in linked
 worktrees and submodules). Exclude `3rdParty/`, the source repos themselves, and
-`.ugr-*` directories (worktrees kept from an earlier `verify-failed` apply). If no root is found, ask with AskUserQuestion: list the
-candidates you found plus "Other". In `quiet` mode that is a stop.
+`.ugr-*` directories (worktrees kept from an earlier `verify-failed` apply).
+Then deduplicate: a main checkout and its linked worktrees share one
+repository, and scanning both would open duplicate PRs or competing pushes.
+Key each hit by `git -C <hit> rev-parse --path-format=absolute
+--git-common-dir` plus its `origin` URL, and keep one per key, preferring the
+main checkout. Submodules have their own common dir, so they stay distinct.
+If no root is found, ask with AskUserQuestion: list the candidates you found
+plus "Other". In `quiet` mode that is a stop.
 
 ### 4. Scan (workflow, read-only)
 
@@ -193,9 +199,12 @@ route.
    local branch **from `scanned_commit`**, the exact revision the user
    approved, so the user's WIP and unpushed local commits never leak. It
    backs up each file at that revision to
-   `<git-dir>/ugr-backups/<timestamp>/` (`git rev-parse --absolute-git-dir`,
-   which is not `<repo>/.git` in a linked worktree or submodule). That folder
-   is never committed and never clutters the checkout. It then edits and commits under the new rules. It
+   `<common-git-dir>/ugr-backups/<timestamp>/` (`git rev-parse
+   --path-format=absolute --git-common-dir`: not `<repo>/.git` in a submodule,
+   and not the per-worktree dir that `git worktree remove` deletes). That
+   folder is never committed and never clutters the checkout. The redirect
+   runs in a POSIX shell (Git Bash on Windows) or PowerShell 7.4+, because
+   older PowerShell re-encodes redirected native output. It then edits and commits under the new rules. It
    does not push.
 2. **Verify.** A separate agent reads that local commit (`git show`, and
    `git diff scanned_commit..commit`) and tries to refute the sync. It
