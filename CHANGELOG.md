@@ -19,14 +19,49 @@ A plain-English history of what changed in this repository and why. Newest first
   disagreements into the *fewest* questions, one per rule rather than one per
   repo), then an `apply` that works in throwaway worktrees cut from
   `origin/<default>` so local WIP never leaks. Each repo gets a single
-  self-contained `<!-- BEGIN unified-git-rules -->` block, duplicates
+  self-contained `<!-- BEGIN unified-git-rules -->` block, and duplicates
   elsewhere in the repo are removed so nothing can drift. Each repo's change
   is committed locally from the exact commit the user approved, checked by an
   independent verifier, and published only if it passes, so nothing reaches
-  a remote unverified, not even on the direct-to-main route. Whether a change goes straight to `main`
-  or through a PR is decided by each repo's own rules and whether its
-  pre-commit gate actually runs there. `quiet` mode applies only when no
-  question would be needed. Otherwise it changes nothing and writes a report.
+  a remote unverified, not even on the direct-to-main route. Whether a change
+  goes straight to `main` or through a PR is decided by each repo's own rules
+  and whether its pre-commit gate actually runs there. `quiet` mode applies
+  only when no question would be needed. Otherwise it changes nothing and
+  writes a report.
+
+### Fixed
+- **`/unify-agents-global-git-config` works on a real Windows + WSL machine.**
+  Verified there before installing, and four things would not have worked:
+  - *The green-source gate always failed in `global` mode.* It treated any
+    difference between the live config and the mirror as divergence, but the
+    mirror is sanitized on purpose. So every run stopped, and `quiet` mode
+    could never apply. Divergence now means a git rule missing or changed
+    once placeholders and CR/LF are ignored.
+  - *On WSL, `~/.claude` sits inside a home dotfiles repo that tracks none of
+    it.* The uncommitted-source check is now scoped to the rule files, and an
+    untracked set is skipped rather than offered for commit there.
+  - *The PowerShell repo discovery skipped linked worktrees and submodules*,
+    whose `.git` is a file (found by the Codex review). Here that was 154 of
+    200 repos found.
+  - *Apply-step paths.* `worktree add` uses absolute paths, and backups go
+    under the common git dir, which a removed worktree does not take with
+    it. Workflow labels handle `D:\` paths, and same-minute reruns get a
+    suffix instead of colliding. Kept `.ugr-*` worktrees are excluded from
+    later scans, and a main checkout and its linked worktrees are scanned
+    once, not twice.
+- **The source gate checks each rule file where it is actually versioned.**
+  Every file is resolved to its owning repo first. The check sees ignored
+  files and files hidden by `assume-unchanged`, and compares a symlink by
+  its link text, because hashing a clean link reads its target and looks
+  modified.
+- **Publishing is bound to the approved remote.** The scan records the push
+  URL. Every plan must carry it, and publish pushes nothing if `origin` was
+  repointed between approval and push.
+- **The githooks pip tests no longer lose their own evidence.** The Python
+  stubs baked `$PYLOG` in at generation time, so a temp path containing `$`
+  logged nowhere and the "Python never ran" check passed vacuously. The suite
+  also again watches the hook's fallback message, since an empty call log
+  alone cannot tell "nothing ran" from "ran unseen".
 
 ## [0.9.2] - 2026-10-31
 

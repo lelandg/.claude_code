@@ -13,8 +13,9 @@ Arguments from `$ARGUMENTS` (order-free, `key=value` / `--flag` also accepted):
   - `local` or `project`: the current project's instruction files.
   - `dir <path>`: instruction files in that directory.
 - `target <path>`: optional. The repos (or the root of repos) to unify.
-  Default: the known user repo location (`/mnt/d/Documents/Code/GitHub`
-  plus `Web/`). If no location is found, ask with AskUserQuestion.
+  Default: the known user repo location (`D:\Documents\Code\GitHub` on
+  Windows, `/mnt/d/Documents/Code/GitHub` on WSL, plus `Web/`). If no
+  location is found, ask with AskUserQuestion.
 - `quiet`: apply without asking. If anything would need a question
   (uncommitted or red source, no target, rule conflicts), change nothing.
   Stop and save a report in the source repo's notes/docs directory.

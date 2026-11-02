@@ -20,7 +20,7 @@ export const meta = {
 //   source:      { kind: 'global'|'local'|'dir', path, files: [abs paths] }
 //   repos:       [abs repo paths]                       (scan)
 //   canon:       canon object returned by a previous scan (apply)
-//   plans:       [{ repo, scanned_commit, default_branch, target_file, route, block, removals, exceptions, notes }] (apply)
+//   plans:       [{ repo, remote, scanned_commit, default_branch, target_file, route, block, removals, exceptions, notes }] (apply)
 //   quiet:       boolean
 // ---------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ const SCAN_SCHEMA = {
   properties: {
     repo: { type: 'string' },
     skip_reason: { type: 'string', description: 'Empty unless the repo must be skipped (not a git repo, third-party/fork, archived, no write access)' },
-    remote: { type: 'string' },
+    remote: { type: 'string', description: 'exact output of `git remote get-url --push origin` (publish refuses if it changes)' },
     default_branch: { type: 'string' },
     scanned_commit: { type: 'string', description: 'sha of origin/<default> that was read (after git fetch)' },
     local_divergence: { type: 'string', description: 'How the local checkout\'s instruction files differ from origin/<default> (branch, uncommitted, unpushed), or empty' },
@@ -188,7 +188,8 @@ Read only. Never edit, never run anything that writes.`
 
 // Model inputs: instructions and supplied data go in separate XML-style tags (AGENTS.md "Prompt formatting").
 const tag = (name, body) => `<${name}>\n${typeof body === 'string' ? body : JSON.stringify(body, null, 1)}\n</${name}>`
-const short = repo => repo.split('/').filter(Boolean).pop()
+// Repo paths arrive as POSIX (/mnt/d/...) or Windows (D:\...) depending on the runtime.
+const short = repo => repo.split(/[\\/]/).filter(Boolean).pop()
 
 // ---------------------------------------------------------------------------
 if (MODE === 'scan') {
@@ -219,7 +220,8 @@ remote-tracking refs), resolve the default branch from origin/HEAD, record \`git
 scanned_commit, and read every file with \`git show <scanned_commit>:<path>\` / \`git ls-tree -r <scanned_commit>\`.
 Then compare the local checkout's instruction files against that revision and describe any difference (other
 branch checked out, uncommitted or unpushed rule edits) in local_divergence, so the user sees it before approving.
-Git state (read-only commands besides the fetch): remote URL, current branch, dirty?, commits on the local default
+Git state (read-only commands besides the fetch): remote = the exact output of \`git remote get-url --push origin\`
+(the push URL, not the fetch URL: publish compares against it), current branch, dirty?, commits on the local default
 branch missing from origin, local core.hooksPath, and whether a pre-commit hook actually runs here (global
 hooksPath hook not shadowed by a local one, or a local framework that calls it).
 Set skip_reason if: not a git repo; no origin remote; the remote owner is not the user or their org (third-party,
@@ -298,8 +300,8 @@ auto: one line per non-decision change. skipped: one line per entry in <skipped_
 if (MODE === 'apply') {
   if (!A.canon || !Array.isArray(A.plans)) throw new Error('apply needs args.canon and args.plans')
   const ROUTES = ['direct-main', 'pr', 'blocked']
-  const bad = A.plans.filter(p => !p || !p.repo || !ROUTES.includes(p.route) || !p.scanned_commit || !p.default_branch || !p.target_file)
-  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, route (${ROUTES.join('|')}), scanned_commit, default_branch, target_file: ${JSON.stringify(bad)}`)
+  const bad = A.plans.filter(p => !p || !p.repo || !p.remote || !ROUTES.includes(p.route) || !p.scanned_commit || !p.default_branch || !p.target_file)
+  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, remote, route (${ROUTES.join('|')}), scanned_commit, default_branch, target_file: ${JSON.stringify(bad)}`)
   const ts = DATE.replace(/[^0-9]/g, '')
   const branch = `docs/unify-git-rules-${DATE.slice(0, 10)}`
   const SKIP = ['blocked', 'failed', 'no-change', 'stale']
@@ -319,11 +321,15 @@ as a LOCAL commit only. The plan is already approved by the user: do exactly thi
    and report status "stale" (the approval was for different text). Otherwise continue.
 2. Create a throwaway worktree on a new local branch FROM plan.scanned_commit (the exact revision the user approved),
    so local WIP and unpushed local commits never leak:
-   \`git worktree add -b ${branch} ../.ugr-<repo-name>-${ts} <scanned_commit>\`. Never touch the user's working tree.
-   If that branch name exists, append -2, -3, ...
-3. Back up each target file at that same revision:
-   \`git show <scanned_commit>:<file> > <repo>/.git/ugr-backups/${ts}/<file>\` (mkdir -p; inside .git, so it is never
-   committed and never clutters the checkout; never overwrite an existing backup). List the paths.
+   \`git -C <repo> worktree add -b ${branch} <repo>/../.ugr-<repo-name>-${ts} <scanned_commit>\` (absolute path; your
+   working directory is not the repo). Never touch the user's working tree. If that branch name, that worktree path,
+   or the ugr-backups/${ts} directory below already exists, append the same -2, -3, ... suffix to all three.
+3. Back up each target file at that same revision into the repo's COMMON git dir, resolved with
+   \`git -C <repo> rev-parse --path-format=absolute --git-common-dir\` (\`.git\` is a FILE in linked worktrees and
+   submodules, so never hard-code <repo>/.git; and a per-worktree git dir is deleted with its worktree):
+   \`git -C <repo> show <scanned_commit>:<file> > <gitdir>/ugr-backups/${ts}/<file>\` (mkdir -p; never committed and
+   never clutters the checkout; never overwrite an existing backup). Run the redirect in a POSIX shell (Git Bash on
+   Windows) or PowerShell 7.4+: older PowerShell re-encodes redirected native output. List the paths.
 4. Write/replace the block between ${BLOCK_BEGIN} and ${BLOCK_END} in plan.target_file (create the markers if
    absent, at the end of the file or replacing the existing git section). Apply plan.removals (delete/reword
    duplicate or conflicting git statements elsewhere) and put plan.exceptions under "## Repo-specific git
@@ -370,6 +376,8 @@ Check:
 amend or rebase a commit here: anything not byte-for-byte the verified SHA is unverified and must not be pushed.
 1. Pin: \`git -C <apply_result>.worktree rev-parse HEAD\` must equal <apply_result>.commit, and its parent must be
    <plan>.scanned_commit. If not, push nothing and report "failed".
+   Bind the destination: \`git -C <plan>.repo remote get-url --push origin\` must equal <plan>.remote (the remote the
+   user approved at scan time). If origin was repointed since, push nothing and report "failed".
 2. \`git fetch\`.
 - direct-main: \`git rev-parse origin/<default_branch>\` must still equal <plan>.scanned_commit. If it does, run
   \`git push origin <apply_result>.commit:refs/heads/<default_branch>\` (a plain fast-forward push). If origin moved
@@ -387,7 +395,7 @@ amend or rebase a commit here: anything not byte-for-byte the verified SHA is un
   auto-merge is allowed, enable it; otherwise leave the PR open.
 3. Remove the worktree (\`git worktree remove\`); delete the local branch only if it was pushed.
 Report final status, the pushed SHA in commit, branch, PR URL.`),
-        tag('plan', { repo: plan.repo, route: plan.route, scanned_commit: plan.scanned_commit, default_branch: plan.default_branch }),
+        tag('plan', { repo: plan.repo, remote: plan.remote, route: plan.route, scanned_commit: plan.scanned_commit, default_branch: plan.default_branch }),
         tag('apply_result', res),
       ].join('\n\n'), { label: `publish:${short(plan.repo)}`, phase: 'Publish', schema: APPLY_SCHEMA })
         .then(p => {

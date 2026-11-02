@@ -72,13 +72,40 @@ Find every git repo that holds the source:
   `.claude_code` repo that `/publish-claude-config` publishes. Look for it
   in the repo root from step 3, or for a README that says "mirrors
   ~/.claude". Diff the live global files against the mirror's copies
-  (`config/agents/AGENTS.md`, `claude/CLAUDE.md`, `claude/instructions/`). If
-  `tools/agent-config-sync/sync.py check` exists, run it as well.
+  (`config/agents/AGENTS.md`, `claude/CLAUDE.md`, `claude/instructions/`;
+  ignore CR/LF with `diff --strip-trailing-cr`). **The mirror is deliberately
+  sanitized** (names, handles, companies, paths replaced by placeholders), so
+  every shared file differs and *differing is not diverged*. Count the mirror
+  as diverged only when a git/SCM rule in the live files is missing from the
+  mirror or says something different there once placeholders are ignored.
+  Name each such rule. If `tools/agent-config-sync/sync.py check` exists, run
+  it as well.
+- Every rule file step 1 read is checked in the repo that **owns** it, which
+  may be a dotfiles repo around `~` (common on WSL), a nested repo or
+  submodule, or some other repo a link points into. Resolve each with
+  `git -C <file's directory> rev-parse --show-toplevel`, group by that repo,
+  and run `git status --porcelain --untracked-files=all --ignored -- <its
+  files>` there. The flags matter: dotfiles repos often ignore everything or
+  set `status.showUntrackedFiles=no`, which would hide a file from the check.
+  Unrelated untracked files in that repo say nothing about the source.
+- A rule file that its repo reports as untracked (`??`) or ignored (`!!`), or
+  that belongs to no repo at all, is not versioned there. For global files
+  under `~` that is expected (on Windows `~/.claude` is often no repo at all):
+  skip that repo and let the mirror check stand as the committed record. Do
+  not offer to commit them there. Anywhere else, treat the file as
+  uncommitted.
 - `local` / `dir`: the repo containing the source.
 
 For each source repo:
 
-1. **Uncommitted changes** to rule files (`git status --porcelain`): explain
+1. **Uncommitted changes** to rule files (`git status --porcelain`). An
+   `assume-unchanged` or `skip-worktree` flag hides edits from status, so
+   also compare each regular file's `git hash-object <file>` with `git
+   rev-parse HEAD:<file>`. For a tracked symlink, compare the link text
+   (`readlink`, or `(Get-Item -LiteralPath <file> -Force).Target` in
+   PowerShell 7.4+) with `git cat-file -p HEAD:<file>`. Hashing a symlink
+   reads its target, not the link, so a clean link would look modified.
+   Then check the resolved target in its own owning repo. Explain
    what is uncommitted and why it matters. Anything uncommitted gets copied
    into N repos and can never be reproduced from history. Then ask with
    AskUserQuestion: *commit* or *stop*. Make the commit proposal concrete and
@@ -100,10 +127,23 @@ For each source repo:
 `target` if given. Otherwise the user's known repo root. Check, in order:
 the user's preferences/memory (e.g. `D:\Documents\Code\GitHub` → WSL
 `/mnt/d/Documents/Code/GitHub`, plus its `Web/` subdirectory), `~/code`,
-`~/src`, `~/GitHub`, `~/projects`. Enumerate git repos at depth ≤ 2 (`find
-<root> -maxdepth 3 -name .git -prune`). Exclude `3rdParty/` and the source
-repos themselves. If no root is found, ask with AskUserQuestion: list the
-candidates you found plus "Other". In `quiet` mode that is a stop.
+`~/src`, `~/GitHub`, `~/projects`. Use the spelling native to the runtime you
+are in: `D:\...` on Windows, `/mnt/d/...` on WSL. Never mix the two in one
+`repos` list, because every agent runs its git commands in your runtime.
+Enumerate git repos at depth ≤ 2 (`find <root> -maxdepth 3 -name .git -prune`;
+on Windows run it in Git Bash, or use `Get-ChildItem <root> -Depth 2 -Filter
+.git -Force`, with no `-Directory`, because `.git` is a file in linked
+worktrees and submodules). Exclude `3rdParty/`, the source repos themselves, and
+`.ugr-*` directories (worktrees kept from an earlier `verify-failed` apply).
+Each hit is a `.git` entry; the repo is its **parent directory**, and that
+is what goes into `repos` and into every `git -C` below.
+Then deduplicate: a main checkout and its linked worktrees share one
+repository, and scanning both would open duplicate PRs or competing pushes.
+Key each repo by `git -C <repo> rev-parse --path-format=absolute
+--git-common-dir` plus its `origin` URL, and keep one per key, preferring the
+main checkout. Submodules have their own common dir, so they stay distinct.
+If no root is found, ask with AskUserQuestion: list the candidates you found
+plus "Other". In `quiet` mode that is a stop.
 
 ### 4. Scan (workflow, read-only)
 
@@ -155,8 +195,9 @@ direct to main, K via PR)?* Pushing to remotes is outward-facing.
 ### 6. Apply (workflow)
 
 Build one plan per non-skipped, non-blocked repo:
-`{ repo, scanned_commit, default_branch, target_file, route, block, removals: [{file,line,action}], exceptions: [text], notes }`.
-Copy `scanned_commit` and `default_branch` from that repo's scan.
+`{ repo, remote, scanned_commit, default_branch, target_file, route, block, removals: [{file,line,action}], exceptions: [text], notes }`.
+Copy `remote`, `scanned_commit` and `default_branch` from that repo's scan.
+Publish refuses to push if `origin` no longer points at that `remote`.
 Then run:
 
 ```
@@ -175,8 +216,12 @@ route.
    local branch **from `scanned_commit`**, the exact revision the user
    approved, so the user's WIP and unpushed local commits never leak. It
    backs up each file at that revision to
-   `<repo>/.git/ugr-backups/<timestamp>/`, which is never committed and never
-   clutters the checkout. It then edits and commits under the new rules. It
+   `<common-git-dir>/ugr-backups/<timestamp>/` (`git rev-parse
+   --path-format=absolute --git-common-dir`: not `<repo>/.git` in a submodule,
+   and not the per-worktree dir that `git worktree remove` deletes). That
+   folder is never committed and never clutters the checkout. The redirect
+   runs in a POSIX shell (Git Bash on Windows) or PowerShell 7.4+, because
+   older PowerShell re-encodes redirected native output. It then edits and commits under the new rules. It
    does not push.
 2. **Verify.** A separate agent reads that local commit (`git show`, and
    `git diff scanned_commit..commit`) and tries to refute the sync. It
@@ -201,9 +246,8 @@ route.
    - A repo that fails verification is reported `verify-failed`. Its local
      branch is kept for inspection, and nothing is pushed.
 
-Plans missing `repo`, `route`, `scanned_commit`, `default_branch` or
-`target_file` are
-rejected before any agent runs.
+Plans missing `repo`, `remote`, `route`, `scanned_commit`,
+`default_branch` or `target_file` are rejected before any agent runs.
 
 ### 7. Report
 
