@@ -119,10 +119,21 @@ If the name does not resolve, use
 `~` expanded. In this config repo the script also lives at
 `claude/workflows/`. Pass `args` as real JSON values, not as a string.
 
-The result contains: `canon` (rules + rendered block), `repos[]`
-(`{scan, cmp}`: each repo's rules, git state, diff items, and route
-`direct-main|pr|blocked`), and `unify` (`questions`, `auto`, `skipped`).
-Report `uncovered > 0` explicitly. Never let a partial scan read as complete.
+Each repo is scanned at `origin/<default>` after a `git fetch`, which is
+the revision that apply will edit, not the working tree. Its sha is recorded
+as `scan.scanned_commit`. Local differences (another branch checked out,
+uncommitted or unpushed rule edits) are reported in `scan.local_divergence`.
+Show them to the user before approving.
+
+The result contains:
+- `canon`: the rules and the rendered block.
+- `repos[]`: one `{repo, scan, cmp}` per repo, with its rules, git state,
+  diff items, and route `direct-main|pr|blocked`.
+- `unify`: `questions`, `auto`, and `skipped`.
+- `failed[]`: repos whose scan or compare returned nothing.
+
+Report each `failed` repo explicitly. Never let a partial scan read as
+complete, and never apply to a failed repo.
 
 ### 5. Propose, then ask the unified questions
 
@@ -144,7 +155,8 @@ direct to main, K via PR)?* Pushing to remotes is outward-facing.
 ### 6. Apply (workflow)
 
 Build one plan per non-skipped, non-blocked repo:
-`{ repo, target_file, route, block, removals: [{file,line,action}], exceptions: [text], notes }`.
+`{ repo, scanned_commit, default_branch, target_file, route, block, removals: [{file,line,action}], exceptions: [text], notes }`.
+Copy `scanned_commit` and `default_branch` from that repo's scan.
 Then run:
 
 ```
@@ -152,9 +164,14 @@ Workflow({ name: "unify-agents-global-git-config", args: {
   mode: "apply", date: "<same>", canon: <scan.canon>, plans: [...] } })
 ```
 
-Each apply agent works in a throwaway worktree cut from `origin/<default>`,
-so the user's WIP and unpushed local commits never leak. It backs up edited
-files (`.bak-<timestamp>`, `cp -n`), then commits under the new rules:
+Each apply agent re-fetches first. If `origin/<default>` has moved past
+`scanned_commit` and the files the plan touches changed, it changes nothing
+and reports `stale`, because the user approved different text. Re-scan that
+repo. Otherwise it works in a throwaway worktree cut from `origin/<default>`,
+so the user's WIP and unpushed local commits never leak. It backs up each
+file at that same revision to `<repo>/.git/ugr-backups/<timestamp>/`, which
+is never committed and never clutters the checkout. Then it commits under
+the new rules:
 direct to main, or branch + PR + version bump if the repo requires one. It
 merges only when that repo's rules allow autonomous merging and checks are
 green. Otherwise it enables auto-merge or leaves the PR open. A verify agent
@@ -163,7 +180,8 @@ then re-reads what was pushed and tries to refute the sync.
 ### 7. Report
 
 Show a table: repo | status | commit/PR | verify. Every `verify.matches ==
-false` is a failure; show its problems. Write a summary markdown into the
+false`, `failed`, and `stale` row is a failure. Show its problems; the
+result's `failed` and `unverified` counts must match the table. Write a summary markdown into the
 source repo's notes/docs directory, matching its convention (`Notes/` or
 `Docs/`; for `global` that is the mirror repo, else `~/.claude/reports/`).
 Name it `<YYYY-MM-DD>-unify-git-rules.md`. Commit it per the source repo's
