@@ -80,29 +80,32 @@ Find every git repo that holds the source:
   mirror or says something different there once placeholders are ignored.
   Name each such rule. If `tools/agent-config-sync/sync.py check` exists, run
   it as well.
-- `~/.claude` may sit inside a larger repo (on WSL the home directory itself
-  can be a dotfiles repo). Scope `git status --porcelain` to every rule file
-  step 1 read under `~`, including linked ones (`git -C ~ status --porcelain
-  --untracked-files=all --ignored -- <each file, relative to ~>`; the flags
-  matter because dotfiles repos often ignore everything or set
-  `status.showUntrackedFiles=no`, which would hide a file from the check).
-  Unrelated untracked files in home say nothing about the source. If the rule
-  files show as untracked (`??`) or ignored (`!!`), that repo does not
-  version them, so it is not a source repo. Skip it and let the mirror
-  check stand as the committed record; do not offer to commit them there.
-- Any rule file step 1 read from **outside** `~` (a linked doc in some other
-  repo) is checked in the repo that owns it: group the files by `git -C
-  <file's directory> rev-parse --show-toplevel` and run the same scoped
-  status there. A file that belongs to no repo cannot be reproduced from
-  history: treat it as uncommitted.
+- Every rule file step 1 read is checked in the repo that **owns** it, which
+  may be a dotfiles repo around `~` (common on WSL), a nested repo or
+  submodule, or some other repo a link points into. Resolve each with
+  `git -C <file's directory> rev-parse --show-toplevel`, group by that repo,
+  and run `git status --porcelain --untracked-files=all --ignored -- <its
+  files>` there. The flags matter: dotfiles repos often ignore everything or
+  set `status.showUntrackedFiles=no`, which would hide a file from the check.
+  Unrelated untracked files in that repo say nothing about the source.
+- A rule file that its repo reports as untracked (`??`) or ignored (`!!`), or
+  that belongs to no repo at all, is not versioned there. For global files
+  under `~` that is expected (on Windows `~/.claude` is often no repo at all):
+  skip that repo and let the mirror check stand as the committed record. Do
+  not offer to commit them there. Anywhere else, treat the file as
+  uncommitted.
 - `local` / `dir`: the repo containing the source.
 
 For each source repo:
 
-1. **Uncommitted changes** to rule files (`git status --porcelain`, plus
-   `git hash-object <file>` against `git rev-parse HEAD:<file>` for each one,
-   since an `assume-unchanged` or `skip-worktree` flag hides edits from
-   status): explain
+1. **Uncommitted changes** to rule files (`git status --porcelain`). An
+   `assume-unchanged` or `skip-worktree` flag hides edits from status, so
+   also compare each regular file's `git hash-object <file>` with `git
+   rev-parse HEAD:<file>`. For a tracked symlink, compare the link text
+   (`readlink`, or `(Get-Item -LiteralPath <file> -Force).Target` in
+   PowerShell 7.4+) with `git cat-file -p HEAD:<file>`. Hashing a symlink
+   reads its target, not the link, so a clean link would look modified.
+   Then check the resolved target in its own owning repo. Explain
    what is uncommitted and why it matters. Anything uncommitted gets copied
    into N repos and can never be reproduced from history. Then ask with
    AskUserQuestion: *commit* or *stop*. Make the commit proposal concrete and
