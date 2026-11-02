@@ -192,8 +192,9 @@ direct to main, K via PR)?* Pushing to remotes is outward-facing.
 ### 6. Apply (workflow)
 
 Build one plan per non-skipped, non-blocked repo:
-`{ repo, scanned_commit, default_branch, target_file, route, block, removals: [{file,line,action}], exceptions: [text], notes }`.
-Copy `scanned_commit` and `default_branch` from that repo's scan.
+`{ repo, remote, scanned_commit, default_branch, target_file, route, block, removals: [{file,line,action}], exceptions: [text], notes }`.
+Copy `remote`, `scanned_commit` and `default_branch` from that repo's scan.
+Publish refuses to push if `origin` no longer points at that `remote`.
 Then run:
 
 ```
@@ -242,9 +243,8 @@ route.
    - A repo that fails verification is reported `verify-failed`. Its local
      branch is kept for inspection, and nothing is pushed.
 
-Plans missing `repo`, `route`, `scanned_commit`, `default_branch` or
-`target_file` are
-rejected before any agent runs.
+Plans missing `repo`, `remote`, `route`, `scanned_commit`,
+`default_branch` or `target_file` are rejected before any agent runs.
 
 ### 7. Report
 

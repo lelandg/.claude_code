@@ -20,7 +20,7 @@ export const meta = {
 //   source:      { kind: 'global'|'local'|'dir', path, files: [abs paths] }
 //   repos:       [abs repo paths]                       (scan)
 //   canon:       canon object returned by a previous scan (apply)
-//   plans:       [{ repo, scanned_commit, default_branch, target_file, route, block, removals, exceptions, notes }] (apply)
+//   plans:       [{ repo, remote, scanned_commit, default_branch, target_file, route, block, removals, exceptions, notes }] (apply)
 //   quiet:       boolean
 // ---------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ const SCAN_SCHEMA = {
   properties: {
     repo: { type: 'string' },
     skip_reason: { type: 'string', description: 'Empty unless the repo must be skipped (not a git repo, third-party/fork, archived, no write access)' },
-    remote: { type: 'string' },
+    remote: { type: 'string', description: 'exact output of `git remote get-url --push origin` (publish refuses if it changes)' },
     default_branch: { type: 'string' },
     scanned_commit: { type: 'string', description: 'sha of origin/<default> that was read (after git fetch)' },
     local_divergence: { type: 'string', description: 'How the local checkout\'s instruction files differ from origin/<default> (branch, uncommitted, unpushed), or empty' },
@@ -299,8 +299,8 @@ auto: one line per non-decision change. skipped: one line per entry in <skipped_
 if (MODE === 'apply') {
   if (!A.canon || !Array.isArray(A.plans)) throw new Error('apply needs args.canon and args.plans')
   const ROUTES = ['direct-main', 'pr', 'blocked']
-  const bad = A.plans.filter(p => !p || !p.repo || !ROUTES.includes(p.route) || !p.scanned_commit || !p.default_branch || !p.target_file)
-  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, route (${ROUTES.join('|')}), scanned_commit, default_branch, target_file: ${JSON.stringify(bad)}`)
+  const bad = A.plans.filter(p => !p || !p.repo || !p.remote || !ROUTES.includes(p.route) || !p.scanned_commit || !p.default_branch || !p.target_file)
+  if (bad.length) throw new Error(`invalid plan(s) — each needs repo, remote, route (${ROUTES.join('|')}), scanned_commit, default_branch, target_file: ${JSON.stringify(bad)}`)
   const ts = DATE.replace(/[^0-9]/g, '')
   const branch = `docs/unify-git-rules-${DATE.slice(0, 10)}`
   const SKIP = ['blocked', 'failed', 'no-change', 'stale']
@@ -375,6 +375,8 @@ Check:
 amend or rebase a commit here: anything not byte-for-byte the verified SHA is unverified and must not be pushed.
 1. Pin: \`git -C <apply_result>.worktree rev-parse HEAD\` must equal <apply_result>.commit, and its parent must be
    <plan>.scanned_commit. If not, push nothing and report "failed".
+   Bind the destination: \`git -C <plan>.repo remote get-url --push origin\` must equal <plan>.remote (the remote the
+   user approved at scan time). If origin was repointed since, push nothing and report "failed".
 2. \`git fetch\`.
 - direct-main: \`git rev-parse origin/<default_branch>\` must still equal <plan>.scanned_commit. If it does, run
   \`git push origin <apply_result>.commit:refs/heads/<default_branch>\` (a plain fast-forward push). If origin moved
@@ -392,7 +394,7 @@ amend or rebase a commit here: anything not byte-for-byte the verified SHA is un
   auto-merge is allowed, enable it; otherwise leave the PR open.
 3. Remove the worktree (\`git worktree remove\`); delete the local branch only if it was pushed.
 Report final status, the pushed SHA in commit, branch, PR URL.`),
-        tag('plan', { repo: plan.repo, route: plan.route, scanned_commit: plan.scanned_commit, default_branch: plan.default_branch }),
+        tag('plan', { repo: plan.repo, remote: plan.remote, route: plan.route, scanned_commit: plan.scanned_commit, default_branch: plan.default_branch }),
         tag('apply_result', res),
       ].join('\n\n'), { label: `publish:${short(plan.repo)}`, phase: 'Publish', schema: APPLY_SCHEMA })
         .then(p => {
