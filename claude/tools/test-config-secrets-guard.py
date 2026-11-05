@@ -231,6 +231,11 @@ GREPS = [
     ({"glob": "{a,b}" * 25 + "*.ts"}, True),
     ({"glob": "{a,{b,c}}" * 12 + "*.ts"}, True),
     ({"glob": "{a,b}{c,d}*.ts"}, False),
+
+    # 24. The fan-out cap bounds the count, not the depth: 1500 single-
+    #     alternative groups fan out to 1 yet recurse 1500 deep, and a
+    #     RecursionError exits 1 -- NON-blocking. Count groups before recursing.
+    ({"glob": "{a}" * 1500 + "*.ts"}, True),
 ]
 
 

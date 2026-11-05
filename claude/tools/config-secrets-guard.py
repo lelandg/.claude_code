@@ -355,6 +355,13 @@ _PROTECTED_PROBES = tuple(
 # "ambiguity denies" has to hold for ambiguity about the pattern itself.
 _MAX_GLOB_FANOUT = 256
 
+# The fan-out cap bounds the *count*, not the *depth*: a thousand single-
+# alternative groups (`{a}{a}{a}...`) fan out to exactly 1, yet `brace_fanout`
+# and `expand_braces` recurse once per group and raise RecursionError, which
+# ends the hook with a traceback and exit 1 -- NON-blocking in Claude Code, so
+# the guard fails open. Count the groups before recursing and deny past this.
+_MAX_BRACE_GROUPS = 32
+
 
 def brace_fanout(pattern: str, cap: int = _MAX_GLOB_FANOUT) -> int:
     """How many alternatives `expand_braces` would yield, short-circuited at cap.
@@ -402,6 +409,8 @@ def glob_is_blocked(glob: str) -> bool:
     if not glob:
         return False
     normalized = glob.replace("\\", "/")
+    if normalized.count("{") > _MAX_BRACE_GROUPS:
+        return True  # too many groups to recurse through: deny rather than crash
     if brace_fanout(normalized) > _MAX_GLOB_FANOUT:
         return True  # too many alternatives to check: deny rather than time out
     for alternative in expand_braces(normalized):
@@ -502,10 +511,19 @@ def main() -> None:
         sys.exit(0)  # malformed input — never block on guard failure
     if not isinstance(data, dict):
         sys.exit(0)
-    if "--agy" in sys.argv[1:]:
-        main_agy(data)
-    else:
-        main_claude(data)
+    agy = "--agy" in sys.argv[1:]
+    try:
+        if agy:
+            main_agy(data)
+        else:
+            main_claude(data)
+    except Exception as exc:  # a crash is exit 1 and exit 1 is NON-blocking: deny instead
+        reason = f"config-secrets-guard could not classify this call ({type(exc).__name__}); denying rather than failing open."
+        if agy:
+            print(json.dumps({"decision": "deny", "reason": reason}))
+        else:
+            deny(reason)
+        sys.exit(0)
 
 
 if __name__ == "__main__":
