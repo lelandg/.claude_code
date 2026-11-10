@@ -12,7 +12,7 @@ A plain-English history of what changed in this repository and why. Newest first
 - **`SECURITY.md`**, covering how to report a vulnerability privately, and
   **`CONTRIBUTING.md`**, covering how to report bugs and send pull requests.
 - **Free security scanning in CI** (`.github/workflows/security.yml`).
-  gitleaks scans the commits each push or pull request introduces, and the
+  gitleaks scans the commits each pull request or push to `master` introduces, and the
   full history weekly. osv-scanner checks workflow action references for
   known vulnerabilities. Actions are SHA-pinned and scanner binaries are
   checksum-verified. Both are installed outside the PR-controlled checkout,
