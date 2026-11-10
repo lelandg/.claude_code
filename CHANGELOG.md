@@ -3,6 +3,24 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.10.1] - 2026-11-09
+
+### Added
+- **MIT `LICENSE` file.** The README and the plugin manifest already said
+  MIT. Now the repository carries the license text too, so GitHub shows the
+  license.
+- **`SECURITY.md`**, covering how to report a vulnerability privately, and
+  **`CONTRIBUTING.md`**, covering how to report bugs and send pull requests.
+- **Free security scanning in CI** (`.github/workflows/security.yml`).
+  gitleaks scans the commits each pull request or push to `master` introduces, and the
+  full history weekly. osv-scanner checks workflow action references for
+  known vulnerabilities. Actions are SHA-pinned and scanner binaries are
+  checksum-verified. Both are installed outside the PR-controlled checkout,
+  and suppression config supplied by a pull request is ignored.
+- **Dependabot** for GitHub Actions, the only ecosystem this repository has.
+  A pending major-version update cannot block the weekly minor and patch
+  group.
+
 ## [0.10.0] - 2026-11-02
 
 ### Added
