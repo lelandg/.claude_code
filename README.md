@@ -473,4 +473,4 @@ Found something useful to add? PRs welcome. Keep these principles in mind:
 
 ## License
 
-MIT - Use however you like.
+MIT - see [LICENSE](LICENSE). Use however you like.
