@@ -251,7 +251,7 @@ query($owner:String!,$name:String!,$number:Int!){
       commits(last:100){nodes{commit{oid messageHeadline committedDate
         parents(first:3){nodes{oid}}}}}
       tail:commits(last:20){nodes{commit{oid
-        checkSuites(first:50){nodes{createdAt status conclusion
+        checkSuites(first:100){totalCount nodes{createdAt status conclusion
           workflowRun{event workflow{databaseId name}}}}
         statusCheckRollup{contexts(first:100){nodes{__typename
           ... on CheckRun{name status conclusion}
@@ -656,6 +656,15 @@ def pr_from_node(repo: str, repo_node: dict,
     if seen_checks.get("totalCount", 0) > len(rollup):
         unverifiable.append(f"{seen_checks['totalCount']} checks; only the "
                             "first 100 were read")
+    # An unfinished workflow run past the page that was read is invisible to
+    # the "has every run finished" gate, so more than one page is a refusal.
+    tail_nodes = (n.get("tail") or {}).get("nodes", [])
+    head_suites = ((tail_nodes[-1].get("commit") or {}).get("checkSuites") or {}) \
+        if tail_nodes else {}
+    if head_suites.get("totalCount", 0) > len(head_suites.get("nodes", [])):
+        unverifiable.append(f"{head_suites['totalCount']} check suites on the "
+                            "head; only the first 100 were read, so not every "
+                            "workflow run is known finished")
     methods =[m for m, ok in (("squash", repo_node.get("squashMergeAllowed")),
                                ("merge", repo_node.get("mergeCommitAllowed")),
                                ("rebase", repo_node.get("rebaseMergeAllowed")))

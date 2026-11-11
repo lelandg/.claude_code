@@ -650,6 +650,13 @@ def test_a_pr_too_big_to_read_in_one_page_is_refused_not_passed():
     node["pullRequest"]["reviewThreads"] = {"totalCount": 0, "nodes": []}
     node["pullRequest"]["statusCheckRollup"]["contexts"]["totalCount"] = 250
     assert pt.classify(_pr(node), NOW, ME).state == "BLOCKED"
+    # More check suites on the head than the page read: an unfinished
+    # workflow run could be hiding past it.
+    del node["pullRequest"]["statusCheckRollup"]["contexts"]["totalCount"]
+    assert pt.classify(_pr(node), NOW, ME).state == "READY"
+    node["pullRequest"]["tail"]["nodes"][-1]["commit"]["checkSuites"]["totalCount"] = 140
+    v = pt.classify(_pr(node), NOW, ME)
+    assert v.state == "BLOCKED" and "140 check suites" in v.reasons[0]
 
 
 def test_unseen_files_count_as_sensitive():
