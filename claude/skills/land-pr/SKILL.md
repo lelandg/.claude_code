@@ -81,7 +81,7 @@ a PR title or a file; the lander assigns it at merge.
 | `THREADS` | unresolved review threads | fix or answer each, then resolve it |
 | `FAILING` | a check failed, or one never reported on the head within 30 min | fix and push, or re-run it |
 | `CONFLICT` | conflicts with the base branch | merge base in, resolve |
-| `REVIEW` | auth / billing / migration paths, no adversarial review recorded | run it, note "adversarial" in the PR body |
+| `REVIEW` | auth / billing / migration paths, no adversarial review recorded | run it, add the line `Adversarial review: <result>` to the PR body |
 | `BLOCKED` | a branch rule refuses the merge | read `gh pr merge` output |
 | `SUPERSEDED` | autofix draft whose source PR merged or closed | `sweep --apply` closes it |
 | `AUTOFIX` | autofix draft, source still open | fold into the source, or close |
@@ -109,14 +109,21 @@ below.
   failing in it. So a head is never READY in its first 3 minutes, while a
   workflow run GitHub has created for it is unfinished, or while a reviewer
   check that ran on an earlier commit has not reported on it. A review counts
-  only if it is of the head: the bot's review of that commit, a passing
-  reviewer check on it, or a bot comment written after the push. It is safe to
+  only if it names the head commit: the bot's review of that commit, or a
+  reviewer check that finished on it. A bot comment is not evidence (it has
+  no commit, and may be the bot finishing the commit before). It is safe to
   run `land --apply` straight after pushing a fix; it waits.
-- **A check that never arrives becomes `FAILING` after 30 minutes**, not
-  READY. Re-run it or push again. GrepTile does not re-review a push, so
-  re-trigger it. For a workflow that is path-filtered and will never run on
-  this head, `land <ref> --apply --accept-missing` says so explicitly; `sweep`
-  never implies it.
+- **Once a reviewer has acted on a PR, the head needs its review.** Its
+  silence on a new head is WAITING for 30 minutes, then `FAILING`, never
+  READY: re-trigger it (GrepTile does not re-review a push). The 15-minute
+  grace applies only where no reviewer has ever acted. If the reviewer is
+  gone for good, `land <ref> --apply --accept-missing-review` says so for
+  that one PR; `sweep` never implies it.
+- **A workflow run that exists and has not finished always blocks,** WAITING
+  then `FAILING` after 30 minutes. No flag skips it: re-run or cancel it.
+- **The record for a sensitive PR is a line of its own:**
+  `Adversarial review: <result and where it ran>`. The word alone, an empty
+  result, or `none` / `not run` / `pending` does not count.
 - **`land` on a merged PR finishes it.** If a run died after the merge, or the
   tag was refused, run the same command again: it tags the merge commit if
   the version is untagged, deletes the branch if it is still as merged, and
@@ -130,9 +137,12 @@ below.
 - **A PR too big to read in one page is `BLOCKED`,** not passed on the part
   that was read (over 100 review threads or checks). Changed files are read
   in full; if some still cannot be seen the PR counts as sensitive.
-- **The lander's own commits carry the earlier review.** A release bump or a
-  clean merge of the base adds no code, so the review of the commit before
-  them still covers the head. A merge made by hand does not get this.
+- **The lander's own commits carry the earlier review, when proven.** A
+  release bump or a clean merge of the base adds no code, so the review of
+  the commit before them still covers the head. The title is only a claim:
+  a release commit must change nothing but version lines and the changelog,
+  and a merge must be of a commit already on the base, with exactly the tree
+  `git merge-tree` gives (checked in a local clone; no clone, no proof).
 
 - **Unresolved means unresolved.** An outdated thread still blocks. Reply in
   the thread, then `threads --resolve`. Never resolve without a fix or reply.

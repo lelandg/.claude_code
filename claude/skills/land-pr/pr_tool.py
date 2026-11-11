@@ -206,8 +206,9 @@ query($owner:String!,$name:String!,$number:Int!){
       baseRefName headRefName headRefOid
       mergeCommit{oid}
       files(first:100){totalCount nodes{path}}
-      commits(last:100){nodes{commit{oid messageHeadline committedDate}}}
-      tail:commits(last:6){nodes{commit{oid
+      commits(last:100){nodes{commit{oid messageHeadline committedDate
+        parents(first:3){nodes{oid}}}}}
+      tail:commits(last:20){nodes{commit{oid
         checkSuites(first:50){nodes{createdAt status conclusion
           workflowRun{workflow{name}}}}
         statusCheckRollup{contexts(first:100){nodes{__typename
@@ -218,8 +219,7 @@ query($owner:String!,$name:String!,$number:Int!){
         ... on StatusContext{context state}}}}
       reviewThreads(first:100){totalCount nodes{id isResolved isOutdated path line
         comments(first:1){nodes{author{login} body url}}}}
-      reviews(last:50){nodes{author{login} commit{oid}}}
-      comments(last:50){nodes{author{login} createdAt}}
+      reviews(last:50){totalCount nodes{author{login} commit{oid}}}
     }}}
 """
 
@@ -255,6 +255,7 @@ class PR:
     head_pushed: datetime | None = None    # None: same as head_committed
     review_clock: datetime | None = None   # None: same as head_pushed
     reviewed_head: bool = False            # automated review covers the head
+    reviewer_active: bool = False          # a reviewer has acted on this PR
     expected_checks: list[str] = field(default_factory=list)  # ran earlier
     running_workflows: list[str] = field(default_factory=list)  # unfinished
     unverifiable: list[str] = field(default_factory=list)  # truncated reads
@@ -302,8 +303,105 @@ def is_reviewer_check(name: str) -> bool:
     return any(fnmatchcase(name.lower(), p) for p in REVIEWER_CHECKS)
 
 
+SEMVER = re.compile(r"\d+\.\d+\.\d+(?:\.\d+)?")
+
+
+def release_diff_is_mechanical(files: list[dict]) -> bool:
+    """True when a commit changes nothing but version numbers and a changelog.
+
+    `files` is the GitHub commit API's list. A commit titled like a release
+    can hold anything, so the title is never trusted: outside the changelog,
+    every removed line must come back as the same line with only its version
+    number changed, on a line that is about a version. Anything the patch
+    does not show (binary, too large, renamed, added) fails.
+    """
+    if not files or len(files) > 20:
+        return False
+    for f in files:
+        base = (f.get("filename") or "").rsplit("/", 1)[-1]
+        if base.upper().startswith("CHANGELOG"):
+            continue
+        patch = f.get("patch")
+        if not patch or f.get("status") != "modified":
+            return False
+        lines = [x for x in patch.splitlines() if x[:1] in "+-"]
+        minus = [x[1:] for x in lines if x[0] == "-"]
+        plus = [x[1:] for x in lines if x[0] == "+"]
+        if not plus or len(minus) != len(plus):
+            return False
+        for old, new in zip(minus, plus):
+            if not SEMVER.search(new) \
+                    or SEMVER.sub("V", old) != SEMVER.sub("V", new):
+                return False
+            if base != "VERSION" and "version" not in new.lower():
+                return False
+    return True
+
+
+def merge_is_clean(repo: str, base: str, oid: str, parents: list[str]) -> bool:
+    """True when `oid` is a merge of the base branch with no hand edits.
+
+    Checked two ways, both required: the merged-in parent is already on the
+    base branch (so it brought in nothing unreviewed), and the commit's tree
+    is exactly what `git merge-tree` produces for its two parents (so no
+    conflict was resolved and nothing was slipped in). Needs a local clone;
+    without one the answer is no.
+    """
+    if len(parents) != 2:
+        return False
+    on_base = gh("api", f"repos/{repo}/compare/{base}...{parents[1]}",
+                 "--jq", ".status", check=False).strip()
+    if on_base not in ("behind", "identical"):
+        return False
+    clone = find_clone(repo)
+    if clone is None:
+        return False
+    for sha in (oid, *parents):
+        if run(["git", "-C", str(clone), "cat-file", "-e", f"{sha}^{{commit}}"],
+               check=False).returncode != 0:
+            run(["git", "-C", str(clone), "fetch", "--quiet", "origin", sha],
+                check=False)
+    made = run(["git", "-C", str(clone), "merge-tree", "--write-tree",
+                parents[0], parents[1]], check=False)
+    want = (made.stdout.split() or [""])[0] if made.returncode == 0 else ""
+    have = run(["git", "-C", str(clone), "rev-parse", f"{oid}^{{tree}}"],
+               check=False).stdout.strip()
+    return bool(want) and want == have
+
+
+def verified_mechanical(repo: str, base: str, commits: list[dict]) -> set[str]:
+    """The trailing commits that are provably the lander's own.
+
+    Walks back from the head while a commit both LOOKS mechanical (its title)
+    and IS (its content), and stops at the first that is not. Never includes
+    the PR's first commit.
+    """
+    proven: set[str] = set()
+    for c in reversed(commits[1:]):
+        title = c.get("messageHeadline") or ""
+        if not MECHANICAL_COMMIT.match(title):
+            break
+        parents = [p["oid"] for p in (c.get("parents") or {}).get("nodes", [])]
+        if title.startswith("Merge "):
+            good = merge_is_clean(repo, base, c["oid"], parents)
+        else:
+            raw = gh("api", f"repos/{repo}/commits/{c['oid']}", "--jq", ".files",
+                     check=False)
+            try:
+                files = json.loads(raw) if raw.strip() else []
+            except json.JSONDecodeError:
+                files = []
+            good = len(parents) == 1 and isinstance(files, list) \
+                and release_diff_is_mechanical(files)
+        if not good:
+            break
+        proven.add(c["oid"])
+    return proven
+
+
 def head_facts(n: dict, commits: list[dict],
-               head_checks: list[tuple[str, str]]) -> dict:
+               head_checks: list[tuple[str, str]],
+               mechanical: set[str] | None = None) -> dict:
     """What is known about the PR's CURRENT head, as opposed to the PR.
 
     pushed        when the head reached GitHub: its first check suite's
@@ -318,14 +416,22 @@ def head_facts(n: dict, commits: list[dict],
                   reviewer checks: other apps' checks can be conditional on
                   the paths a commit touches (Dependabot's config check).
     reviewed      an automated review covers the head: a reviewer bot's
-                  review of it, a passing reviewer check on it, or a reviewer
-                  bot comment written after it was pushed.
+                  review OF THAT COMMIT, or a reviewer check that finished on
+                  it. Comments are not evidence: a comment has no commit, and
+                  one posted after a push may be the bot finishing its review
+                  of the commit before.
+    active        a reviewer has acted on this PR at all (a bot review, or a
+                  reviewer check on any recent commit). Once one has, the
+                  head needs its review; waiting it out is not an option.
     review_clock  when the wait for a review starts.
 
     The lander's own commits (release bump, clean merge of the base) carry no
     new code, so a review of the last commit before them still covers the
-    head, and reviewers that do not re-review a push are not expected on them.
+    head. `mechanical` is the set of commits PROVEN to be such by their
+    content (verified_mechanical); a title alone proves nothing, and with no
+    set given nothing is treated as mechanical.
     """
+    mechanical = mechanical or set()
     tail = [c["commit"] for c in (n.get("tail") or {}).get("nodes", [])]
 
     def buckets(commit: dict) -> list[tuple[str, str]]:
@@ -353,7 +459,7 @@ def head_facts(n: dict, commits: list[dict],
 
     # Walk back over the lander's own commits to the last one with real code.
     i = len(commits) - 1
-    while i > 0 and MECHANICAL_COMMIT.match(commits[i].get("messageHeadline") or ""):
+    while i > 0 and commits[i].get("oid") in mechanical:
         i -= 1
     mechanical_head = bool(commits) and i < len(commits) - 1
     covered = {c.get("oid") for c in commits[i:]} if commits else set()
@@ -361,31 +467,41 @@ def head_facts(n: dict, commits: list[dict],
     def bot(x: dict) -> bool:
         return ((x.get("author") or {}).get("login") or "").lower() in REVIEWER_BOTS
 
-    by_review = any(bot(r) and (r.get("commit") or {}).get("oid") in covered
-                    for r in (n.get("reviews") or {}).get("nodes", []))
-    by_check = any(is_reviewer_check(name) and b == "pass"
+    reviews = n.get("reviews") or {}
+    bot_reviews = [r for r in reviews.get("nodes", []) if bot(r)]
+    by_review = any((r.get("commit") or {}).get("oid") in covered
+                    for r in bot_reviews)
+    # "skip" counts: the reviewer looked at this commit and chose not to
+    # review it (its own rules), which is its answer for the commit.
+    done = ("pass", "skip")
+    by_check = any(is_reviewer_check(name) and b in done
                    for name, b in head_checks) or any(
-        is_reviewer_check(name) and b == "pass"
+        is_reviewer_check(name) and b in done
         for c in tail if c.get("oid") in covered for name, b in buckets(c))
-    by_comment = any(bot(c) and c.get("createdAt")
-                     and _when(c["createdAt"]) >= pushed
-                     for c in (n.get("comments") or {}).get("nodes", []))
-    reviewed = by_review or by_check or by_comment
+    reviewed = by_review or by_check
+
+    seen_checks = [name for c in tail for name, _ in buckets(c)
+                   if is_reviewer_check(name)]
+    active = bool(bot_reviews or seen_checks
+                  or any(is_reviewer_check(name) for name, _ in head_checks)
+                  # More reviews than were read: assume one was a reviewer's.
+                  or reviews.get("totalCount", 0) > len(reviews.get("nodes", [])))
 
     expected: list[str] = []
-    if not (mechanical_head and (by_review or by_check)):
+    if not (mechanical_head and reviewed):
         for c in tail[:-1]:
             for name, _ in buckets(c):
                 if is_reviewer_check(name) and name not in expected:
                     expected.append(name)
 
     return {"pushed": pushed, "expected": expected, "reviewed": reviewed,
-            "running": running,
+            "running": running, "active": active,
             "review_clock": _when(commits[i]["committedDate"])
             if mechanical_head else pushed}
 
 
-def pr_from_node(repo: str, repo_node: dict) -> PR:
+def pr_from_node(repo: str, repo_node: dict,
+                 mechanical: set[str] | None = None) -> PR:
     n = repo_node["pullRequest"]
     if n is None:
         raise ToolError(f"{repo}: pull request not found")
@@ -404,7 +520,7 @@ def pr_from_node(repo: str, repo_node: dict) -> PR:
             "body": (first.get("body") or "").strip(),
             "url": first.get("url", ""),
         })
-    head = head_facts(n, commits, [check_bucket(c) for c in rollup])
+    head = head_facts(n, commits, [check_bucket(c) for c in rollup], mechanical)
     # One page of each list is read. A PR too big for a page must not pass a
     # gate on the part that was read: say so and let classify refuse it.
     unverifiable = []
@@ -440,7 +556,8 @@ def pr_from_node(repo: str, repo_node: dict) -> PR:
         checks=[check_bucket(c) for c in rollup],
         threads=threads,
         head_pushed=head["pushed"], review_clock=head["review_clock"],
-        reviewed_head=head["reviewed"], expected_checks=head["expected"],
+        reviewed_head=head["reviewed"], reviewer_active=head["active"],
+        expected_checks=head["expected"],
         running_workflows=head["running"], unverifiable=unverifiable,
         merge_commit=(n.get("mergeCommit") or {}).get("oid"),
         methods=methods or ["merge"],
@@ -460,14 +577,27 @@ def all_files(repo: str, number: int) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+def _parse(repo: str, repo_node: dict) -> PR:
+    """pr_from_node, after proving which trailing commits are the lander's own
+    (only asked when the head's title claims to be one; it costs API calls)."""
+    n = repo_node.get("pullRequest") or {}
+    commits = [c["commit"] for c in (n.get("commits") or {}).get("nodes", [])]
+    proven: set[str] = set()
+    if n.get("state") == "OPEN" and commits and MECHANICAL_COMMIT.match(
+            commits[-1].get("messageHeadline") or ""):
+        proven = verified_mechanical(repo, n.get("baseRefName") or "main",
+                                     commits)
+    return pr_from_node(repo, repo_node, proven)
+
+
 def fetch_pr(repo: str, number: int) -> PR:
     owner, name = repo.split("/", 1)
     data = gql(PR_QUERY, owner=owner, name=name, number=number)
-    pr = pr_from_node(repo, data["repository"])
+    pr = _parse(repo, data["repository"])
     if pr.state == "OPEN" and pr.mergeable == "UNKNOWN":
         time.sleep(2)   # GitHub computes mergeability lazily; ask once more
         data = gql(PR_QUERY, owner=owner, name=name, number=number)
-        pr = pr_from_node(repo, data["repository"])
+        pr = _parse(repo, data["repository"])
     if pr.state == "OPEN" and pr.files_total > len(pr.files):
         pr.files = all_files(repo, number) or pr.files
     src = autofix_source(pr)
@@ -591,19 +721,21 @@ def classify(pr: PR, now: datetime, trusted: set[str],
         return verdict("WAITING", *(f"{n} running" for n in pending))
     have = {n for n, _ in pr.checks}
     missing = [n for n in pr.expected_checks if n not in have]
-    if (pr.running_workflows or missing) and not accept_missing:
+    # A workflow run that exists and has not finished always blocks. No flag
+    # skips it: these are the scans, and a run that will not start is fixed
+    # by re-running it, not by merging without it.
+    if pr.running_workflows:
+        late = since_push >= MISSING_CHECK_MIN
+        return verdict("FAILING" if late else "WAITING",
+                       *(f"workflow {w} "
+                         f"{'never finished' if late else 'has not finished'} "
+                         "on this head" for w in pr.running_workflows))
+    if missing and not accept_missing:
         if since_push < MISSING_CHECK_MIN:
-            return verdict(
-                "WAITING",
-                *(f"workflow {w} has not finished on this head"
-                  for w in pr.running_workflows),
-                *(f"{n} has not started on this head" for n in missing))
-        return verdict(
-            "FAILING",
-            *(f"workflow {w} never finished on this head"
-              for w in pr.running_workflows),
-            *(f"{n} ran on an earlier commit but never started on this head"
-              for n in missing))
+            return verdict("WAITING", *(f"{n} has not started on this head"
+                                        for n in missing))
+        return verdict("FAILING", *(f"{n} ran on an earlier commit but never "
+                                    "started on this head" for n in missing))
     if pr.threads:
         return verdict("THREADS", f"{len(pr.threads)} unresolved review "
                        f"thread{'s' if len(pr.threads) != 1 else ''}")
@@ -619,9 +751,17 @@ def classify(pr: PR, now: datetime, trusted: set[str],
         return verdict("REVIEW", f"{what}, and the PR body has no "
                        f"`{EVIDENCE_FORMAT}` line")
     since_review = (now - pr.review_clock).total_seconds() / 60
-    if not pr.reviewed_head and not pr.author_is_bot \
-            and since_review < REVIEW_GRACE_MIN:
-        return verdict("WAITING", "no automated review of this head yet")
+    if not pr.reviewed_head and not pr.author_is_bot:
+        if pr.reviewer_active and not accept_missing:
+            # A reviewer works on this PR, so its silence on the head is not
+            # "this repo has no reviewer": it never becomes READY by waiting.
+            if since_review < MISSING_CHECK_MIN:
+                return verdict("WAITING", "no automated review of this head "
+                               "yet (a reviewer acted on this PR earlier)")
+            return verdict("FAILING", "a reviewer acted on this PR earlier but "
+                           "has not reviewed this head: re-trigger it")
+        if not pr.reviewer_active and since_review < REVIEW_GRACE_MIN:
+            return verdict("WAITING", "no automated review of this head yet")
     return verdict("READY")
 
 
@@ -1347,10 +1487,12 @@ def main(argv: list[str] | None = None) -> int:
     la.add_argument("--clone", help="local clone to work from")
     la.add_argument("--wait", type=float, default=8.0,
                     help="minutes to wait on checks before exiting 3 (default 8)")
-    la.add_argument("--accept-missing", action="store_true",
-                    help="land although a check that ran on an earlier commit "
-                         "has not reported on the head (path-filtered or "
-                         "removed workflows); never implied, never in sweep")
+    la.add_argument("--accept-missing-review", dest="accept_missing",
+                    action="store_true",
+                    help="land although the automated reviewer that acted on "
+                         "this PR earlier has not reviewed the head (it is "
+                         "gone, or will not re-review). Never skips a check "
+                         "or a running workflow; never implied; never in sweep")
 
     sw = sub.add_parser("sweep", help="close superseded, land everything READY")
     scope(sw)

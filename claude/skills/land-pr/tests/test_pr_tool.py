@@ -8,6 +8,7 @@ failure there means a real branch would be mishandled at landing.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -103,9 +104,15 @@ def test_check_seen_on_an_earlier_commit_must_report_on_the_head():
     # Every expected check present: ready again.
     full = [(n, "pass") for n in ran_before]
     assert state(checks=full, expected_checks=ran_before) == "READY"
-    # The explicit override is per call, for path-filtered workflows.
+    # The explicit override is per call, for a reviewer that will not return.
     assert pt.classify(make(checks=partial, expected_checks=ran_before),
                        NOW, ME, accept_missing=True).state == "READY"
+    # It never skips a workflow run that exists and has not finished.
+    for age in (timedelta(minutes=10), timedelta(hours=2)):
+        v = pt.classify(make(head_committed=NOW - age,
+                             running_workflows=["security"]),
+                        NOW, ME, accept_missing=True)
+        assert v.state in ("WAITING", "FAILING") and "security" in v.reasons[0]
 
 
 def _node(commits, *, reviews=(), comments=(), rollup=(), tail=None):
@@ -147,9 +154,9 @@ def _node(commits, *, reviews=(), comments=(), rollup=(), tail=None):
     }}
 
 
-def _pr(node) -> pt.PR:
+def _pr(node, mechanical=None) -> pt.PR:
     return pt.pr_from_node("octo-user/r", {"pullRequest": node["pullRequest"],
-                                         "squashMergeAllowed": True})
+                                         "squashMergeAllowed": True}, mechanical)
 
 
 def test_review_of_an_earlier_head_does_not_cover_the_new_one():
@@ -170,8 +177,11 @@ def test_review_of_an_earlier_head_does_not_cover_the_new_one():
     assert pr.running_workflows == ["security"]
     v = pt.classify(pr, NOW, ME)
     assert v.state == "WAITING"
-    assert v.reasons == ["workflow security has not finished on this head",
-                         "CodeRabbit has not started on this head"]
+    assert v.reasons == ["workflow security has not finished on this head"]
+    # Once the workflow is done, the missing reviewer check is what holds it.
+    pr.running_workflows = []
+    assert pt.classify(pr, NOW, ME).reasons == [
+        "CodeRabbit has not started on this head"]
 
 
 def test_queued_suite_of_an_app_that_never_reports_does_not_block():
@@ -197,42 +207,126 @@ def test_push_time_comes_from_the_heads_first_check_suite():
     assert pt.classify(pr, NOW, ME).state == "WAITING"
 
 
-def test_reviewer_evidence_on_the_head_counts_three_ways():
+def test_review_evidence_must_name_the_head_commit():
     t0, t1 = NOW - timedelta(minutes=40), NOW - timedelta(minutes=20)
     commits = [("a1", "fix: thing", t0), ("b2", "fix: more", t1)]
     tail = [("a1", t0, ["ci"]), ("b2", t1, ["ci"])]
     by_review = _pr(_node(commits, reviews=[("greptile-apps", "b2")],
                           rollup=["ci"], tail=tail))
     by_check = _pr(_node(commits, rollup=["ci", "CodeRabbit"], tail=tail))
+    # A bot comment has no commit. One posted after the push may be the bot
+    # finishing its review of the commit BEFORE: it is not evidence.
     by_comment = _pr(_node(commits, comments=[("claude", t1 + timedelta(minutes=4))],
                            rollup=["ci"], tail=tail))
-    stale_comment = _pr(_node(commits, comments=[("claude", t0 + timedelta(minutes=4))],
-                              rollup=["ci"], tail=tail))
-    assert [p.reviewed_head for p in (by_review, by_check, by_comment,
-                                      stale_comment)] == [True, True, True, False]
+    earlier = _pr(_node(commits, reviews=[("greptile-apps", "a1")],
+                        rollup=["ci"], tail=tail))
+    assert [p.reviewed_head for p in (by_review, by_check, by_comment, earlier)] \
+        == [True, True, False, False]
+    assert [p.reviewer_active for p in (by_review, by_check, by_comment, earlier)] \
+        == [True, True, False, True]
 
 
-def test_landers_own_commits_keep_the_review_of_the_code_before_them():
+def test_an_active_reviewer_silent_on_the_head_never_times_out_to_ready():
+    def verdict(minutes, **kw):
+        t = NOW - timedelta(minutes=minutes)
+        return pt.classify(make(head_committed=t, reviewed_head=False, **kw),
+                           NOW, ME)
+    # No reviewer has ever acted here: the grace runs out and it is ready.
+    assert verdict(10).state == "WAITING" and verdict(20).state == "READY"
+    # One has: 20 minutes is still waiting, two hours is a failure to act on.
+    assert verdict(20, reviewer_active=True).state == "WAITING"
+    late = verdict(120, reviewer_active=True)
+    assert late.state == "FAILING" and "re-trigger" in late.reasons[0]
+    # Only the explicit, per-PR override gets past it.
+    t = NOW - timedelta(hours=2)
+    assert pt.classify(make(head_committed=t, reviewed_head=False,
+                            reviewer_active=True), NOW, ME,
+                       accept_missing=True).state == "READY"
+    # Reviews past the page that was read: assume a reviewer is among them.
+    node = _node([("a1", "fix: thing", t)], rollup=["ci"], tail=[("a1", t, ["ci"])])
+    node["pullRequest"]["reviews"]["totalCount"] = 80
+    assert _pr(node).reviewer_active is True
+
+
+LANDER = [("m2", "Merge remote-tracking branch 'origin/main' into HEAD"),
+          ("r3", "chore(release): v1.4.2")]
+
+
+def test_landers_own_commits_keep_the_review_only_when_proven():
     t0, t1, t2 = (NOW - timedelta(minutes=m) for m in (60, 10, 9))
-    commits = [("a1", "fix: thing", t0),
-               ("m2", "Merge remote-tracking branch 'origin/main' into HEAD", t1),
-               ("r3", "chore(release): v1.4.2", t2)]
-    pr = _pr(_node(commits, reviews=[("greptile-apps", "a1")],
-                   rollup=["ci", "CodeRabbit"],
-                   tail=[("a1", t0, ["ci", "CodeRabbit", "Greptile Review"]),
-                         ("m2", t1, []), ("r3", t2, ["ci", "CodeRabbit"])]))
-    assert pr.reviewed_head is True
-    # The code was reviewed, and the bump adds none: reviewer checks are not
-    # required again on it (GrepTile never re-reviews a push; CodeRabbit shows
-    # as pending if it does).
-    assert pr.expected_checks == []
-    assert pt.classify(pr, NOW, ME).state == "READY"
-    # A hand-made merge may carry conflict resolutions: it is NOT mechanical.
-    hand = [("a1", "fix: thing", t0),
-            ("m2", "Merge remote-tracking branch 'origin/main' into fix/thing", t1)]
-    pr = _pr(_node(hand, reviews=[("greptile-apps", "a1")], rollup=["ci"],
-                   tail=[("a1", t0, ["ci"]), ("m2", t1, ["ci"])]))
-    assert pr.reviewed_head is False
+    commits = [("a1", "fix: thing", t0), (*LANDER[0], t1), (*LANDER[1], t2)]
+    node = _node(commits, reviews=[("greptile-apps", "a1")], rollup=["ci"],
+                 tail=[("a1", t0, ["ci", "Greptile Review"]),
+                       ("m2", t1, []), ("r3", t2, ["ci"])])
+    proven = _pr(node, mechanical={"m2", "r3"})
+    assert proven.reviewed_head is True
+    # The code was reviewed and the bump adds none: GrepTile, which never
+    # re-reviews a push, is not expected again on it.
+    assert proven.expected_checks == []
+    assert pt.classify(proven, NOW, ME).state == "READY"
+    # The same titles with no proof of what the commits contain: a title is
+    # only a claim, so the head counts as unreviewed code.
+    claimed = _pr(node)
+    assert claimed.reviewed_head is False
+    assert claimed.expected_checks == ["Greptile Review"]
+    assert pt.classify(claimed, NOW, ME).state == "WAITING"
+    # Proof stops at the first commit that fails it: r3 alone is not enough
+    # to reach back past an unproven merge.
+    assert _pr(node, mechanical={"r3"}).reviewed_head is False
+
+
+def test_a_release_commit_is_mechanical_only_if_its_diff_is():
+    def f(name, patch, status="modified"):
+        return {"filename": name, "status": status, "patch": patch}
+    bump = [f("package.json", '@@ -1,3 +1,3 @@\n {\n-  "version": "1.4.1",\n'
+                              '+  "version": "1.4.2",\n   "private": true'),
+            f("VERSION", "@@ -1 +1 @@\n-1.4.1\n+1.4.2"),
+            f("src/App.csproj", "@@ -3 +3 @@\n-    <Version>1.4.1</Version>\n"
+                                "+    <Version>1.4.2</Version>"),
+            f("CHANGELOG.md", "@@ -1,2 +1,6 @@\n # Changelog\n+\n+## [1.4.2]\n"
+                              "+- anything at all goes in a changelog")]
+    assert pt.release_diff_is_mechanical(bump)
+    code = f("src/app.py", "@@ -1 +1,2 @@\n x = 1\n+y = something_new()")
+    assert not pt.release_diff_is_mechanical(bump + [code])
+    # A dependency pin changes a version number too, but not a version line.
+    dep = f("package.json", '@@ -9 +9 @@\n-    "left-pad": "1.3.0"\n'
+                            '+    "left-pad": "1.3.1"')
+    assert not pt.release_diff_is_mechanical([dep])
+    # Same line count, different content beside the number.
+    swapped = f("package.json", '@@ -2 +2 @@\n-  "version": "1.4.1",\n'
+                                '+  "version": "1.4.2", "scripts": {"x": "y"},')
+    assert not pt.release_diff_is_mechanical([swapped])
+    # What the patch does not show cannot be vouched for.
+    assert not pt.release_diff_is_mechanical([f("logo.png", None)])
+    assert not pt.release_diff_is_mechanical([f("new.py", "@@ +1 @@\n+x", "added")])
+    assert not pt.release_diff_is_mechanical([])
+
+
+def test_verified_mechanical_walks_back_and_stops_at_the_first_failure(monkeypatch):
+    def c(oid, title, parents):
+        return {"oid": oid, "messageHeadline": title,
+                "parents": {"nodes": [{"oid": p} for p in parents]}}
+    commits = [c("a1", "fix: thing", ["z0"]),
+               c("m2", LANDER[0][1], ["a1", "base9"]),
+               c("r3", LANDER[1][1], ["m2"])]
+    good_bump = json.dumps([{"filename": "VERSION", "status": "modified",
+                             "patch": "@@ -1 +1 @@\n-1.4.1\n+1.4.2"}])
+    monkeypatch.setattr(pt, "gh", lambda *a, **k: good_bump)
+    monkeypatch.setattr(pt, "merge_is_clean", lambda *a: True)
+    assert pt.verified_mechanical("o/r", "main", commits) == {"m2", "r3"}
+    monkeypatch.setattr(pt, "merge_is_clean", lambda *a: False)
+    assert pt.verified_mechanical("o/r", "main", commits) == {"r3"}
+    # A "release" commit that also changes code proves nothing, and nothing
+    # behind it is reached.
+    with_code = json.dumps([{"filename": "src/app.py", "status": "modified",
+                             "patch": "@@ -1 +1 @@\n-x = 1\n+x = 2"}])
+    monkeypatch.setattr(pt, "gh", lambda *a, **k: with_code)
+    monkeypatch.setattr(pt, "merge_is_clean", lambda *a: True)
+    assert pt.verified_mechanical("o/r", "main", commits) == set()
+    # The PR's first commit is never mechanical, whatever it is called.
+    only = [c("r1", "chore(release): v1.0.0", ["z0"])]
+    monkeypatch.setattr(pt, "gh", lambda *a, **k: good_bump)
+    assert pt.verified_mechanical("o/r", "main", only) == set()
 
 
 def test_outside_contributor_is_never_ready():
@@ -569,6 +663,34 @@ def repo(tmp_path: Path):
     sh(work, "push", "origin", "HEAD:main")
     sh(work, "checkout", "-b", "feature")
     return work
+
+
+def test_merge_is_clean_only_for_an_untouched_merge_of_the_base(repo, monkeypatch):
+    commit(repo, "feat.js", "feature\n", "feat: a")
+    sh(repo, "checkout", "-q", "--detach", "origin/main")
+    commit(repo, "other.js", "other\n", "fix: something else lands on main")
+    sh(repo, "push", "-q", "origin", "HEAD:main")
+    sh(repo, "checkout", "-q", "feature")
+    sh(repo, "fetch", "-q", "origin")
+    sh(repo, "merge", "-q", "--no-edit", "origin/main")
+    merge = sh(repo, "rev-parse", "HEAD")
+    parents = [sh(repo, "rev-parse", "HEAD^1"), sh(repo, "rev-parse", "HEAD^2")]
+    monkeypatch.setattr(pt, "find_clone", lambda r, hint=None: repo)
+    monkeypatch.setattr(pt, "gh", lambda *a, **k: "behind\n")
+    assert pt.merge_is_clean("o/r", "main", merge, parents) is True
+    # The merged-in side is not on the base branch: it could carry anything.
+    monkeypatch.setattr(pt, "gh", lambda *a, **k: "diverged\n")
+    assert pt.merge_is_clean("o/r", "main", merge, parents) is False
+    # Same two parents, but an edit was slipped into the merge commit.
+    monkeypatch.setattr(pt, "gh", lambda *a, **k: "behind\n")
+    (repo / "feat.js").write_bytes(b"feature\nplus something nobody reviewed\n")
+    sh(repo, "commit", "-q", "-a", "--amend", "--no-edit")
+    evil = sh(repo, "rev-parse", "HEAD")
+    assert [sh(repo, "rev-parse", "HEAD^1"), sh(repo, "rev-parse", "HEAD^2")] == parents
+    assert pt.merge_is_clean("o/r", "main", evil, parents) is False
+    # No local clone to check against: the answer is no.
+    monkeypatch.setattr(pt, "find_clone", lambda r, hint=None: None)
+    assert pt.merge_is_clean("o/r", "main", merge, parents) is False
 
 
 def commit(work: Path, name: str, data: str, msg: str) -> None:
