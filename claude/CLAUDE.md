@@ -91,8 +91,15 @@ Code invokes the codex plugin, so it is a Claude mechanism.)
   version bump + changelog for any repo, auto-detecting where the version lives
   (`skill: version-manager`; tool: `~/.claude/skills/version-manager/version_tool.py`).
   Dry-run by default, `--apply` to write. `backfill` is once per repo (reconstructs
-  git tags from history, fills changelog gaps). Required before every PR per the
-  versioning rule in `~/.config/agents/AGENTS.md`.
+  git tags from history, fills changelog gaps). The lander runs `release` at
+  merge time; run it yourself only for `check`, `backfill`, or a release
+  outside a PR.
+- `/land-pr [status | land <owner/repo#N> | sweep]` — finish pull requests:
+  classify every open PR, land the ready ones (version bump → checks → merge →
+  tag) and close superseded autofix drafts (`skill: land-pr`; tool:
+  `~/.claude/skills/land-pr/pr_tool.py`). Dry-run by default, `--apply` to
+  write. Run `status --repo` before reporting work done, per "Landing" in
+  `~/.config/agents/AGENTS.md`.
 - `/unify-agents-global-git-config [global|local|dir <path>] [target <path>] [quiet]`
   — identical git/commit rules across all repos: green-source check, Workflow
   scan (`~/.claude/workflows/unify-agents-global-git-config.js`), unified

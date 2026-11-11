@@ -142,8 +142,9 @@ gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/dependabot/
 Then:
 
 - **Merge the green ones as you go.** A Dependabot PR that is green and does
-  not touch a deployed artifact is a merge, not a review. Letting twenty pile
-  up makes each one riskier, not safer.
+  not touch a deployed artifact is a merge, not a review (`pr_tool.py land`;
+  bot PRs land without a version bump). Letting twenty pile up makes each one
+  riskier, not safer.
 - **"No PR" never means "no vulnerability."** Security PRs go missing for
   real reasons: a transitive-only dependency in a lockfile Dependabot cannot
   rewrite (`uv.lock`), an advisory with no fixed version, a resolution it
@@ -320,8 +321,9 @@ gate below is green, merge it — do not stop to ask. A go-ahead to ship
 ("implement and publish", "ship it", "merge when green") is still welcome but
 is no longer what authorizes the merge; the work itself does. The whole path
 runs unprompted: branch → implement → gates → commit → Codex review → push →
-PR → automated review → fixes → version bump → **merge** → post-deploy check.
-The bump sits second-to-last on purpose; see "Versioning" for why. A
+PR → automated review → fixes → **land** → post-deploy check. Landing is one
+command that cuts the version bump, waits for checks, merges and tags; see
+"Landing" below, and "Versioning" for why the bump lives there. A
 non-functional change under rule 4 skips this path entirely: commit on `main`
 and push.
 
@@ -352,6 +354,9 @@ Gates before merge, by the riskiest thing the change touches:
   section. Scoping this gate to what the PR touches is what keeps those two
   rules from contradicting each other.) Use the repo's merge style. Never
   bypass branch protection (`--admin`), never force-push the default branch.
+  Merge with the lander (see "Landing"), not a hand-run `gh pr merge`: it
+  checks the first two conditions mechanically and reads the merge style from
+  the repo's history.
 - **After merging to a deploying branch,** watch the deploy, then smoke-test
   production as a user. If either fails, fix forward or revert the PR at once,
   then tell the user.
@@ -362,6 +367,48 @@ Gates before merge, by the riskiest thing the change touches:
   systems, secret values, force-push, deleting anything outside the change, new
   recurring cost (paid resources or plans), IAM and DNS changes, and anything
   outside the repos in scope.
+
+### Landing — every PR ends merged or closed
+
+An open PR is unfinished work. The session that opens one owns it until it is
+merged or closed; "PR opened, waiting on review" is not a place to stop. (The
+failure this rule exists for: PRs piling up fully green with nothing left to
+wait for, because the session that opened them ended first, next to autofix
+drafts nobody closed.)
+
+Tool: `python3 ~/.claude/skills/land-pr/pr_tool.py` (skill `land-pr`),
+read-only until `--apply`.
+
+- `land <owner/repo#N> --apply` is the whole finishing sequence: it verifies
+  green checks and resolved review threads, cuts the version bump, waits for
+  checks on it, merges, tags the merge commit, deletes the branch, and closes
+  that PR's leftover autofix drafts. Exit `3` means checks are still running:
+  run the same command again. It is resumable from any session.
+- `status [--repo owner/name]` classifies every open PR. `sweep --apply`
+  closes superseded drafts and lands everything READY.
+
+1. **Land before you report.** Before reporting work done, run `status --repo`
+   for each repo you opened a PR in and land what is READY. If a PR cannot
+   land in this session, name its state and what unblocks it. Never end on
+   "the PR is open" alone.
+2. **Any session may land any READY PR.** Which session opened it does not
+   matter, and it needs no go-ahead; do not park a green PR as a decision for
+   the user. The exceptions are the states the tool refuses to call READY:
+   an outside contributor, auth/billing/migration paths with no adversarial
+   review recorded in the PR body, and anything idle 14+ days.
+3. **Resolve the thread when you fix or answer it.** An unresolved review
+   thread is how the tools read "open finding", outdated or not. Reply in the
+   thread, then `threads <ref> --resolve <id>`. Never resolve without one.
+4. **Fleet rollouts land as they go.** When one change goes to many repos,
+   land each PR as it turns green, and keep at most five open at once.
+5. **Autofix drafts die with their source PR.** Fold a wanted fix into the
+   source PR; the draft is closed when the source merges or closes.
+6. **Stale is a decision, not a state.** Rows `status` marks `STALE`,
+   `EXTERNAL` or `ELSEWHERE` go in the end-of-task report as close-or-revive
+   decisions for the user. Do not close a feature PR on your own.
+
+GitHub's native auto-merge stays off: review findings arrive as comments, not
+checks, and the bump must be the last commit, so it would merge ahead of both.
 
 ### Site UI verification — all sites
 
@@ -384,7 +431,7 @@ Gates before merge, by the riskiest thing the change touches:
   In multi-task / subagent plans, each task's gate is scoped lint (touched
   files) + project typecheck + that task's tests — never the full build. The
   full build runs exactly once, in the branch-finish pass (build → fix →
-  final review → push/PR → version bump → merge). Solo small changes still
+  final review → push/PR → land). Solo small changes still
   build before any push to a deploying branch.
 - One PR per finished **whole feature**, not per sub-project or phase. Commit
   along the way; open the PR when the feature is complete, and merge it once
@@ -409,30 +456,48 @@ Gates before merge, by the riskiest thing the change touches:
 
 ### Versioning & changelog (every repo)
 
-Every PR carries a version bump and a changelog entry **in the same commit** —
-except a non-functional change, which needs no bump and may skip the PR
-altogether (rule 4). Cut it immediately before merging, not when you open the
-PR (the next paragraph says why), via
-`python3 ~/.claude/skills/version-manager/version_tool.py --repo <abs-path>
-release <major|minor|patch>` (dry-run first; curate the generated notes into
-prose with `--notes FILE --apply`). **Never hand-edit a version number or a
-changelog heading** — the tool owns both. First time in a repo: `check`, then
-`backfill --apply` (once per repo). Full workflow: the `version-manager` skill.
+Every PR that changes what the product ships gets a version bump and a
+changelog entry in one commit, **cut by the lander at merge time, not by you
+in the PR**. The PR carries the notes, never the number. Put this in the PR
+body:
 
-**The bump is the last commit before merge, not the first.** With several PRs
-open at once, every one of them claims the same next version and only the
-first to merge keeps it. So cut the bump *after* the final merge of
-`origin/main` into the branch, immediately before merging — and if a PR then
-sits while something else lands, re-cut it. A PR whose title or changelog
-names a version that `main` already shipped has a stale bump; fix it before
-merging, don't merge around it.
+```markdown
+## Release notes
 
-**Never delete a version tag that another branch is holding.** The tool
-refuses on collision (`REFUSED: tag vX.Y.Z already exists`). Check
-`git ls-remote --tags origin refs/tags/vX.Y.Z` — empty means local-only — then
-move it aside rather than deleting it:
-`git tag vX.Y.Z-<branch>-draft <sha> && git tag -d vX.Y.Z`. Say in the PR body
-which branch has to re-cut.
+Release: patch
+
+- What changed, in words a user would recognize.
+```
+
+`Release:` is `major` (breaking), `minor` (feature), `patch` (fixes) or
+`none`. `pr_tool.py land` reads the section, merges `origin/main` into the
+branch, runs `version_tool.py release` with those notes, waits for checks on
+that one commit, merges, and tags the merge commit. With no section it infers
+the level and drafts notes from commit subjects; that lands, but reads worse.
+
+- **No version number in a PR title, a branch name or a hand-edited file.** A
+  number written before landing is a claim on `main`'s next version that every
+  other open PR is also making; only the first to merge keeps it. The lander
+  writes the real one into the squash subject. **Never hand-edit a version
+  number or a changelog heading**: the tool owns both.
+- **`Release: none`** is for a PR that changes nothing the product ships: CI
+  and workflow files, tests, scanner and reviewer config, dev tooling. The
+  lander infers it when every changed path is in that class (`SHIPS_NOTHING`
+  in `pr_tool.py`). This is not rule 4: these changes still need the PR, just
+  not a version. Bot PRs land without a bump too.
+- **A branch that already carries a bump:** leave it. The lander keeps it when
+  it is still the next version, and otherwise drops and re-cuts it without a
+  force-push, carrying a hand-written changelog section over as the notes.
+- **Version tags are pushed only after the merge,** by the lander, on the
+  merge commit. Never push one from a branch: `v*` tags are protected, so a
+  tag for a bump that then goes stale cannot be taken back. A local-only tag
+  in the way is moved aside (`vX.Y.Z-draft-<sha>`), never deleted.
+- **Outside a PR** (first-time adoption, repairing drift) run the tool
+  directly: `python3 ~/.claude/skills/version-manager/version_tool.py --repo
+  <abs-path> check`, then `backfill --apply` once per repo. A repo with no
+  version location lands without a bump and the lander says so; backfill it.
+  Full workflow: the `version-manager` skill.
+- A non-functional change (rule 4) needs no bump and skips the PR altogether.
 
 ---
 
@@ -452,8 +517,8 @@ Codex stop-review gate **off**; invoke reviews at commit/PR boundaries.
 
 When the user asks to commit, push, or open a PR (or gives a shipping
 go-ahead), run the local checks, commit, run the Codex review (see "Shipping
-autonomy"), push, and open the PR — the version bump comes later, as the last
-commit before the merge. That request
+autonomy"), push, and open the PR with its `## Release notes` section; the
+version bump is cut when the PR lands, not before. That request
 authorizes whatever automated reviewer the repo has configured to review the
 PR. After opening, wait for that review (2-5 minutes) and inspect its results
 and any autofix PR by the procedure in
@@ -461,7 +526,7 @@ and any autofix PR by the procedure in
 before push; it does not replace the wait for the automated review. On a repo
 with no automated reviewer configured, a local Claude review (`code-reviewer`
 agent) stands in for it: implement → tests green → commit → Codex + Claude
-review → reconcile/fix → push → PR → version bump → merge.
+review → reconcile/fix → push → PR → land.
 
 **Which reviewer that is varies by repo, so read the repo's own `AGENTS.md`
 rather than assuming.** Two properties decide which one you actually gate on,

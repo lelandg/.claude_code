@@ -10,7 +10,7 @@ per-repository config file. Every verb is read-only until it prints its plan;
     version_tool.py check    [--repo PATH]
     version_tool.py backfill [--repo PATH] [--apply] [--fix-dates]
     version_tool.py release  <major|minor|patch> [--repo PATH] [--apply]
-                             [--notes FILE]
+                             [--notes FILE] [--no-tag]
 """
 from __future__ import annotations
 
@@ -176,6 +176,22 @@ def _read(repo: Path, rel: Path) -> str | None:
         return None
 
 
+def _write(path: Path, text: str) -> None:
+    """Write text keeping the file's existing line endings.
+
+    Path.write_text translates newlines to os.linesep, so on native Windows a
+    bump would rewrite an LF file as CRLF from end to end.
+    """
+    newline = "\n"
+    try:
+        if b"\r\n" in path.read_bytes():
+            newline = "\r\n"
+    except OSError:
+        pass
+    with open(path, "w", encoding="utf-8", newline=newline) as fh:
+        fh.write(text)
+
+
 def _extract(text: str, kind: str) -> str | None:
     m = PATTERNS[kind].search(text)
     return m.group("v") if m else None
@@ -308,7 +324,7 @@ def write_version(repo: Path, loc: Location, new: str) -> None:
             updated = re.sub(
                 rf"(<{tag}>\s*)\d+\.\d+\.\d+(?:\.\d+)?(\s*</{tag}>)",
                 rf"\g<1>{new}.0\g<2>", updated, count=1)
-    (repo / loc.path).write_text(updated, encoding="utf-8")
+    _write(repo / loc.path, updated)
 
 
 # --------------------------------------------------------------------------
@@ -644,7 +660,7 @@ def insert_section(repo: Path, version: str, when: str, body: str) -> None:
             updated = text[:m.start()] + section.lstrip("\n") + "\n" + text[m.start():]
         else:
             updated = text.rstrip() + "\n" + section
-    (repo / rel).write_text(updated, encoding="utf-8")
+    _write(repo / rel, updated)
 
 
 def fix_changelog_date(repo: Path, version: str, when: str) -> bool:
@@ -656,7 +672,7 @@ def fix_changelog_date(repo: Path, version: str, when: str) -> bool:
                          re.M)
     if not pattern.search(text):
         return False
-    (repo / rel).write_text(pattern.sub(rf"\1 - {when}", text), encoding="utf-8")
+    _write(repo / rel, pattern.sub(rf"\1 - {when}", text))
     return True
 
 
@@ -761,7 +777,7 @@ def cmd_backfill(repo: Path, apply: bool = False, fix_dates: bool = False,
         if canonical is None:
             canonical = Location(Path("VERSION"), "version_file", None)
             if not (repo / "VERSION").exists() and apply:
-                (repo / "VERSION").write_text(head + "\n", encoding="utf-8")
+                _write(repo / "VERSION", head + "\n")
         elif apply:
             write_version(repo, canonical, head)
             for m in mirrors:
@@ -825,7 +841,8 @@ def _subjects_for(repo: Path, rec: Reconciliation, version: str) -> list[str]:
 
 
 def cmd_release(repo: Path, level: str, apply: bool = False,
-                notes: str | None = None, **_: object) -> int:
+                notes: str | None = None, no_tag: bool = False,
+                **_: object) -> int:
     _header(repo)
     if is_dirty(repo):
         print("  REFUSED: working tree is dirty — commit or stash first")
@@ -878,7 +895,8 @@ def cmd_release(repo: Path, level: str, apply: bool = False,
     for t in targets:
         print(f"  - set {t.label} = {new}")
     print(f"  - insert changelog [{new}] - {date.today()}")
-    print(f"  - commit and tag {tag}")
+    print("  - commit" + (" (tag deferred: the lander tags the merge commit)"
+                          if no_tag else f" and tag {tag}"))
 
     if not apply:
         return 0
@@ -888,8 +906,9 @@ def cmd_release(repo: Path, level: str, apply: bool = False,
     insert_section(repo, new, str(date.today()), body)
     git(repo, "add", "-A")
     git(repo, "commit", "-m", f"chore(release): {tag}")
-    git(repo, "tag", "-a", tag, "-m", f"Version {new}")
-    print(f"\nreleased {tag}")
+    if not no_tag:
+        git(repo, "tag", "-a", tag, "-m", f"Version {new}")
+    print(f"\nreleased {tag}" + (" (untagged)" if no_tag else ""))
     return 0
 
 
@@ -911,6 +930,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("level", choices=["major", "minor", "patch"])
     r.add_argument("--apply", action="store_true")
     r.add_argument("--notes", help="file holding the curated changelog body")
+    r.add_argument("--no-tag", action="store_true",
+                   help="commit the bump but leave tagging to the lander, "
+                        "which tags the merge commit once the PR has merged")
 
     args = ap.parse_args(argv)
     repo = Path(args.repo).resolve()

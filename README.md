@@ -112,6 +112,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── html-doc/                  # Standalone HTML deliverables (reports, explainers)
 │       ├── imageai-cli/               # Drive the ImageAI CLI (images/video/layouts, any provider)
 │       ├── install-claude-config/     # Install config into ~/.claude/
+│       ├── land-pr/                   # Finish PRs: classify, bump at merge, merge, tag, close drafts
 │       ├── model-registry/            # Wire current LLM model IDs from a published registry
 │       ├── product-manager/           # Product management toolkit
 │       ├── project-documenter/        # Per-project user-facing docs generator
@@ -341,7 +342,8 @@ Custom skills extend Claude Code with repeatable workflows:
 - **astrocade-game-creation** - Design, prompt-plan, playtest, and ship casual games on [Astrocade](https://www.astrocade.com), the wish-based AI game-creation platform: staged wish plans, a game-design-doc template, and the Astro Academy silent-observation playtest method
 - **install-claude-config** - Merges this repo's config into `~/.claude/` with diff-and-ask conflict resolution
 - **sync-claude-config** - Syncs `~/.claude/` back to this repo with automatic sanitization of private info
-- **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default.
+- **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default. `release --no-tag` commits a bump and leaves the tag to the lander, and writes keep each file's line endings.
+- **land-pr** - Drives every pull request to merged or closed. `status` classifies each open PR (READY, WAITING, THREADS, FAILING, CONFLICT, REVIEW, BLOCKED, SUPERSEDED, AUTOFIX, DRAFT, EXTERNAL, ELSEWHERE, with a STALE overlay); `land <owner/repo#N> --apply` cuts the version bump at merge time from the PR body's `## Release notes` section, waits for checks, merges in the repo's own style, tags the merge commit and closes leftover autofix drafts; `sweep --apply` does that for the whole backlog. Keeps no state, so a run that times out waiting on CI is finished by running it again from any session. Set `OWNERS` and `CODE_ROOTS` at the top of `pr_tool.py` first. Stdlib + `gh` + `git`; delegates bumps to `version-manager`.
 - **time** - Tracks execution time for each step in a workflow
 
 ### Agent config sync (two-way, WSL <-> Windows)

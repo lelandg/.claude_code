@@ -19,10 +19,10 @@ behaviour below is specific to that App.
 ## Procedure
 
 1. Complete local checks, commit the feature, run the Codex review against the
-   committed branch, push, and open the PR. Cut the version bump last,
-   immediately before merging (see "Shipping autonomy" and "Versioning" in
-   `~/.config/agents/AGENTS.md`). The request authorizes the automation to
-   review the PR; no further confirmation is needed before opening it.
+   committed branch, push, and open the PR with a `## Release notes` section
+   in its body. Do not cut a version bump: the lander cuts it at merge time
+   (see "Landing" and "Versioning" in `~/.config/agents/AGENTS.md`). The
+   request authorizes the automation to review the PR; no further confirmation is needed before opening it.
 2. After opening the PR, wait for the automated Claude Code review. It normally
    arrives in 2-5 minutes. Autofix is conditional and can create a separate
    draft PR without adding a comment or changing the original PR head.
@@ -56,14 +56,19 @@ behaviour below is specific to that App.
 7. When authorized to address review feedback, comment on the original PR with
    what changed, validation results, unresolved findings, and concrete next
    steps. If work remains pending, post next steps instead of leaving the PR
-   silent. After updating the original PR, explain any superseded autofix PR by
-   comment.
+   silent. Resolve each review thread once it is fixed or answered: an
+   unresolved thread is what the lander reads as an open finding. After
+   updating the original PR, close any superseded autofix PR with a comment
+   saying why; the lander closes `autofix/pr-<number>` drafts itself when
+   their source PR merges.
 8. Verify fixes before reporting completion. For ineligible findings or failed
    autofix, address verified findings directly. Do not assume every review
    triggers autofix. Push tested manual corrections within the authorized scope
    and wait for the updated review. Report missing review or unresolved
-   automation status as pending. Commit/push/PR/merge per "Shipping autonomy"
-   in `~/.config/agents/AGENTS.md`.
+   automation status as pending. Commit/push/PR per "Shipping autonomy" in
+   `~/.config/agents/AGENTS.md`, then land the PR with
+   `python3 ~/.claude/skills/land-pr/pr_tool.py land <owner/repo#N> --apply`.
+   Exit `3` means checks are still running: run the same command again.
 
 ## Notes
 
