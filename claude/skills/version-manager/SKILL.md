@@ -1,6 +1,6 @@
 ---
 name: version-manager
-description: Use when bumping a version, cutting a release, or when a CHANGELOG is stale, missing versions, or disagrees with the code — and on every PR, cut as the last commit before the merge, per the versioning rule in AGENTS.md. Also on /version-manager [check|backfill|release], or when the user says "bump the version", "cut a release", "the changelog is old". Auto-detects version locations in any stack (pyproject, package.json, VERSION file, module constants, README display) — no per-repo config.
+description: Use when bumping a version, cutting a release, or when a CHANGELOG is stale, missing versions, or disagrees with the code. For a pull request the land-pr skill runs the release at merge time; use this one for check, backfill, and releases outside a PR. Also on /version-manager [check|backfill|release], or when the user says "bump the version", "cut a release", "the changelog is old". Auto-detects version locations in any stack (pyproject, package.json, VERSION file, module constants, README display) — no per-repo config.
 ---
 
 # Version Manager
@@ -32,16 +32,26 @@ write nothing until you add `--apply`. Always show the user the dry run first.
 
 ## Standard workflow
 
-**Immediately before merging a PR, as its last commit** — not when you open it.
-With several PRs open at once each one claims the same next version and only the
-first to merge keeps it, so a bump cut early goes stale and has to be re-cut.
-(This is the house rule in `~/.config/agents/AGENTS.md`.)
+**For a pull request, do not run `release` yourself.** The lander does it at
+merge time (`~/.claude/skills/land-pr/pr_tool.py land <owner/repo#N> --apply`,
+skill `land-pr`): it reads the level and notes from the PR body's
+`## Release notes` section, merges the base branch in, runs
+`release <level> --notes ... --apply --no-tag` as the branch's last commit,
+and tags the merge commit after the merge. With several PRs open at once each
+one would otherwise claim the same next version, and only the first to merge
+keeps it. (House rule: "Versioning" in `~/.config/agents/AGENTS.md`.)
+
+Run `release` directly only outside a PR:
 
 ```bash
 T=~/.claude/skills/version-manager/version_tool.py
 python3 $T --repo /abs/path/to/repo release minor            # dry run: read the draft
 python3 $T --repo /abs/path/to/repo release minor --notes /tmp/notes.md --apply
 ```
+
+`--no-tag` commits the bump and leaves the tag to the lander. Use it for any
+bump that is not yet on the default branch: `v*` tags are protected, so a tag
+on a bump that later goes stale cannot be taken back.
 
 Pick the level from what actually shipped — `major` for a breaking change,
 `minor` for a feature, `patch` for fixes and docs. The dry run prints the level
@@ -82,6 +92,13 @@ release.
 
 `README.md`'s `**Version X.Y.Z**` display is always a mirror, never canonical.
 An empty `{}` `package.json` is a stub and is skipped, not filled.
+
+Also detected: a `.csproj` `<Version>` (every declaration in the file moves
+together; two that disagree are drift and `release` refuses), and a
+single-plugin `.claude-plugin/marketplace.json`, where the version is the
+plugin entry's own `version` key (never `metadata.version`, never a nested
+`source.version`). When that plugin's source is a folder in the repo and it
+has its own `.claude-plugin/plugin.json`, that file's `version` is a mirror.
 
 ## Gotchas
 

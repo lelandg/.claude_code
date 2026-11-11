@@ -3,6 +3,12 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.11.0] - 2026-11-11
+
+- New `land-pr` skill: finishes pull requests by cutting the version bump at merge time, waiting for checks, merging, tagging the merge commit and closing leftover autofix drafts.
+- House rules: a PR now carries a `## Release notes` section with a `Release:` line instead of a version number, and every PR ends merged or closed.
+- `version-manager`: `release --no-tag`, and bumps keep each file's line endings on Windows.
+
 ## [0.10.1] - 2026-11-09
 
 ### Added
