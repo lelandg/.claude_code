@@ -109,6 +109,11 @@ def test_check_bucket_maps_rollup_nodes():
     assert run(status="COMPLETED", conclusion="SUCCESS") == "pass"
     assert run(status="COMPLETED", conclusion="NEUTRAL") == "skip"
     assert run(status="COMPLETED", conclusion="TIMED_OUT") == "fail"
+    # GitHub can report a stale status beside a real conclusion: the
+    # conclusion wins, in both directions.
+    assert run(status="IN_PROGRESS", conclusion="SUCCESS") == "pass"
+    assert run(status="IN_PROGRESS", conclusion="FAILURE") == "fail"
+    assert run(status="QUEUED", conclusion=None) == "pending"
     ctx = lambda s: pt.check_bucket({"__typename": "StatusContext",  # noqa: E731
                                      "context": "CodeRabbit", "state": s})[1]
     assert (ctx("SUCCESS"), ctx("PENDING"), ctx("ERROR")) == ("pass", "pending", "fail")

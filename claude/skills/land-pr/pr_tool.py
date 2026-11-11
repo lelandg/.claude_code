@@ -222,9 +222,13 @@ def check_bucket(node: dict) -> tuple[str, str]:
     """(name, pass|fail|pending|skip) for one status-check rollup entry."""
     if node.get("__typename") == "CheckRun":
         name = node.get("name") or "check"
-        if node.get("status") != "COMPLETED":
-            return name, "pending"
         conclusion = node.get("conclusion")
+        # A conclusion is the verdict. GitHub can leave status IN_PROGRESS on
+        # a run that already has one (seen for a day on Heimdallr#6 and
+        # AppTemplateWPF#3, 2026-11-11), so status only decides when there is
+        # no conclusion yet.
+        if not conclusion and node.get("status") != "COMPLETED":
+            return name, "pending"
         if conclusion == "SUCCESS":
             return name, "pass"
         if conclusion in ("SKIPPED", "NEUTRAL"):
