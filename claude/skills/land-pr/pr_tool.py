@@ -41,10 +41,17 @@ from pathlib import Path
 # mechanism. Tune them here; nothing else needs to change.
 # --------------------------------------------------------------------------
 
-# Accounts whose open PRs `status` and `sweep` look at (PR_TOOL_OWNERS=a,b
-# overrides). PRs you authored elsewhere are always included.
-# EDIT THIS: your GitHub login and any organizations you land PRs in.
-OWNERS = ["your-github-username", "your-org"]
+# Who you are is per machine, not per copy of this file, so it is NOT set
+# here: an installed copy (a plugin cache) cannot be edited. In order:
+#   --owner, PR_TOOL_OWNERS=a,b, `owners` in the config file, OWNERS below,
+#   and last the account `gh` is signed in as.
+# The config file is JSON, ~/.claude/land-pr.json (PR_TOOL_CONFIG overrides):
+#   {"owners": ["me", "my-org"], "code_roots": ["~/code"]}
+CONFIG_PATH = "~/.claude/land-pr.json"
+
+# Accounts whose open PRs `status` and `sweep` look at, and whose repositories
+# count as yours to merge in. PRs you authored elsewhere are always listed.
+OWNERS: list[str] = []
 
 # A PR that is not READY and has not moved for this long is STALE: a decision
 # for a person (close or revive), never something the tool settles.
@@ -114,11 +121,11 @@ def adversarial_review_recorded(body: str) -> bool:
                and m.group(1).strip(" *`_-")
                for m in SENSITIVE_EVIDENCE.finditer(body or ""))
 
-# Where local clones live (PR_TOOL_CODE_ROOT=a;b prepends). Each is also
-# searched one level down in Web/.
-# EDIT THIS: the folders that hold your clones. Missing folders are skipped;
-# with no local clone the tool makes a throwaway one.
-CODE_ROOTS = ["~/code/GitHub", "~/code", "~/src"]
+# Folders that hold local clones, searched as <root>/<repo> and
+# <root>/Web/<repo>: PR_TOOL_CODE_ROOT=a;b, then `code_roots` in the config
+# file, then these, then the current directory and its parent. With no clone
+# found the tool works in a temporary one.
+CODE_ROOTS: list[str] = []
 
 # --------------------------------------------------------------------------
 # plumbing
@@ -127,6 +134,33 @@ CODE_ROOTS = ["~/code/GitHub", "~/code", "~/src"]
 
 class ToolError(RuntimeError):
     pass
+
+
+_CACHE: dict[str, object] = {}
+
+
+def config() -> dict:
+    """The per-machine config file, or {} when there is none. A file that is
+    there but unreadable is an error: silently ignoring it would quietly
+    change whose PRs get merged."""
+    path = Path(os.environ.get("PR_TOOL_CONFIG") or CONFIG_PATH).expanduser()
+    key = f"config:{path}"
+    if key not in _CACHE:
+        if not path.is_file():
+            _CACHE[key] = {}
+        else:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError) as exc:
+                raise ToolError(f"cannot read {path}: {exc}") from exc
+            if not isinstance(data, dict):
+                raise ToolError(f"{path} must hold a JSON object")
+            _CACHE[key] = data
+    return _CACHE[key]  # type: ignore[return-value]
+
+
+def _names(value: object) -> list[str]:
+    return [str(x) for x in value if x] if isinstance(value, list) else []
 
 
 def run(cmd: list[str], cwd: str | Path | None = None, check: bool = True
@@ -665,10 +699,10 @@ NEXT_STEP = {
     "SUPERSEDED": "close it (sweep --apply does)",
     "AUTOFIX": "fold the fix into its source PR, or close it",
     "DRAFT": "finish it or close it",
-    "EXTERNAL": "outside contributor: the repo owner decides",
+    "EXTERNAL": "outside contributor: the owner decides",
     "ELSEWHERE": "your PR in someone else's repo: its owner merges",
 }
-STALE_STEP = "no movement: the repo owner decides, close or revive"
+STALE_STEP = "no movement: the owner decides, close or revive"
 
 
 def classify(pr: PR, now: datetime, trusted: set[str],
@@ -988,9 +1022,13 @@ def prepare_branch(vt, vt_path: Path, wt: Path, base_ref: str, level: str,
 
 def find_clone(repo: str, hint: str | None = None) -> Path | None:
     name = repo.split("/", 1)[1]
+    here = Path.cwd()
     roots = [r for r in os.environ.get("PR_TOOL_CODE_ROOT", "").split(os.pathsep)
-             if r] + CODE_ROOTS
-    candidates = [Path(hint)] if hint else []
+             if r] + _names(config().get("code_roots")) + list(CODE_ROOTS) \
+        + [str(here), str(here.parent)]
+    # The current directory may itself be the clone. Every candidate is still
+    # checked below: only a clone whose origin is this repository is used.
+    candidates = ([Path(hint)] if hint else []) + [here]
     for root in roots:
         base = Path(root).expanduser()
         candidates += [base / name, base / "Web" / name]
@@ -1067,8 +1105,15 @@ class Lock:
 # GitHub actions
 # --------------------------------------------------------------------------
 
+def signed_in() -> str:
+    """The login `gh` is signed in as ('' when it is not), asked once."""
+    if "me" not in _CACHE:
+        _CACHE["me"] = gh("api", "user", "--jq", ".login", check=False).strip()
+    return str(_CACHE["me"])
+
+
 def trusted_authors() -> set[str]:
-    me = gh("api", "user", "--jq", ".login", check=False).strip().lower()
+    me = signed_in().lower()
     return {me} if me else set()
 
 
@@ -1156,6 +1201,7 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
              accept_missing: bool = False, **_: object) -> int:
     repo, number = parse_ref(ref)
     trusted = trusted if trusted is not None else trusted_authors()
+    owners = owners if owners is not None else _owners(None)
     pr = fetch_pr(repo, number)
     print(f"{pr.ref}  {pr.title}")
     if pr.state == "MERGED":
@@ -1384,14 +1430,34 @@ def print_survey(rows: list[tuple[PR, Verdict]]) -> None:
           + ", ".join(f"{k} {n}" for k, n in sorted(counts.items())))
 
 
-def _owners(args_owner: list[str] | None) -> list[str]:
+def _configured_owners(args_owner: list[str] | None) -> list[str]:
     env = [o for o in os.environ.get("PR_TOOL_OWNERS", "").split(",") if o]
-    return args_owner or env or OWNERS
+    return args_owner or env or _names(config().get("owners")) or list(OWNERS)
+
+
+def _owners(args_owner: list[str] | None) -> list[str]:
+    """Whose repositories count as yours; see the POLICY note on OWNERS."""
+    chosen = _configured_owners(args_owner)
+    if chosen:
+        return chosen
+    me = signed_in()
+    return [me] if me else []
+
+
+def _owner_hint(args_owner: list[str] | None, repo: str | None) -> None:
+    """Say so when only the signed-in account is being surveyed: PRs in an
+    organization's repositories are then missing, not absent."""
+    if repo or _configured_owners(args_owner):
+        return
+    print(f"note: surveying {signed_in() or 'no account (gh is not signed in)'} "
+          f"only. To add organizations set \"owners\" in {CONFIG_PATH} or "
+          "PR_TOOL_OWNERS=a,b.", file=sys.stderr)
 
 
 def cmd_status(owner: list[str] | None = None, repo: str | None = None,
                as_json: bool = False, **_: object) -> int:
     trusted = trusted_authors()
+    _owner_hint(owner, repo)
     rows = survey(_owners(owner), repo, trusted)
     if as_json:
         print(json.dumps([{"ref": pr.ref, "state": v.state, "stale": v.stale,
@@ -1410,6 +1476,7 @@ def cmd_sweep(owner: list[str] | None = None, repo: str | None = None,
               apply: bool = False, limit: int = 25, wait: float = 8.0,
               **_: object) -> int:
     trusted = trusted_authors()
+    _owner_hint(owner, repo)
     owners = _owners(owner)
     rows = survey(owners, repo, trusted)
     print_survey(rows)

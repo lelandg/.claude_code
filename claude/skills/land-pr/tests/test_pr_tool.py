@@ -19,12 +19,51 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pr_tool as pt  # noqa: E402
 
-# The shipped OWNERS are placeholders; pin a known set so the tests do not
-# depend on what a user has configured.
-pt.OWNERS = ["octo-user", "Octo-Org"]
-
 NOW = datetime(2026, 11, 11, 15, 0, tzinfo=timezone.utc)
 ME = {"octo-user"}
+
+
+@pytest.fixture(autouse=True)
+def _hermetic(monkeypatch, tmp_path):
+    """No test may depend on this machine's config, environment or sign-in:
+    whose repositories count as "yours" is fixed here for every test."""
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(tmp_path / "no-such-config.json"))
+    monkeypatch.delenv("PR_TOOL_OWNERS", raising=False)
+    monkeypatch.delenv("PR_TOOL_CODE_ROOT", raising=False)
+    monkeypatch.setattr(pt, "OWNERS", ["octo-user", "Octo-Org"])
+    monkeypatch.setattr(pt, "_CACHE", {"me": "octo-user"})
+
+
+def test_owners_come_from_flag_then_env_then_config_then_sign_in(monkeypatch, tmp_path):
+    monkeypatch.setattr(pt, "OWNERS", [])            # as the tool ships
+    assert pt._owners(None) == ["octo-user"]           # the signed-in account
+    cfg = tmp_path / "land-pr.json"
+    cfg.write_text('{"owners": ["me", "my-org"], "code_roots": ["~/code"]}',
+                   encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    assert pt._owners(None) == ["me", "my-org"]
+    monkeypatch.setenv("PR_TOOL_OWNERS", "acme,beta")
+    assert pt._owners(None) == ["acme", "beta"]
+    assert pt._owners(["flag"]) == ["flag"]
+    # Not signed in and nothing configured: nobody's repositories are "yours",
+    # so nothing can be classified READY.
+    monkeypatch.delenv("PR_TOOL_OWNERS")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(tmp_path / "absent.json"))
+    monkeypatch.setattr(pt, "_CACHE", {"me": ""})
+    assert pt._owners(None) == []
+    assert pt.classify(make(), NOW, ME).label == "ELSEWHERE"
+
+
+def test_a_broken_config_file_is_an_error_not_a_silent_default(monkeypatch, tmp_path):
+    cfg = tmp_path / "land-pr.json"
+    cfg.write_text('{"owners": ["me",', encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    with pytest.raises(pt.ToolError):
+        pt._owners(None)
+    cfg.write_text('["me"]', encoding="utf-8")
+    monkeypatch.setattr(pt, "_CACHE", {"me": "octo-user"})
+    with pytest.raises(pt.ToolError):
+        pt.config()
 
 
 def make(**kw) -> pt.PR:
@@ -663,6 +702,29 @@ def repo(tmp_path: Path):
     sh(work, "push", "origin", "HEAD:main")
     sh(work, "checkout", "-b", "feature")
     return work
+
+
+def test_find_clone_uses_config_roots_and_the_current_directory(repo, monkeypatch, tmp_path):
+    # `repo` is tmp_path/work with origin tmp_path/origin.git; give it a
+    # GitHub-shaped origin URL so it reads as a clone of o/work.
+    sh(repo, "remote", "set-url", "origin", "https://github.com/o/work.git")
+    elsewhere = tmp_path / "far" / "away"      # not beside the clone
+    elsewhere.mkdir(parents=True)
+    monkeypatch.chdir(elsewhere)
+    assert pt.find_clone("o/work") is None           # nothing points at it
+    cfg = tmp_path / "land-pr.json"
+    cfg.write_text(json.dumps({"code_roots": [str(tmp_path)]}), encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    monkeypatch.setattr(pt, "_CACHE", {"me": "octo-user"})
+    assert pt.find_clone("o/work") == tmp_path / "work"
+    # With no config: found from inside the clone, and from beside it.
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(tmp_path / "absent.json"))
+    monkeypatch.chdir(repo)
+    assert pt.find_clone("o/work").resolve() == repo.resolve()
+    monkeypatch.chdir(tmp_path)
+    assert pt.find_clone("o/work").resolve() == repo.resolve()
+    # A clone of something else in the same place is never used.
+    assert pt.find_clone("o/other") is None
 
 
 def test_merge_is_clean_only_for_an_untouched_merge_of_the_base(repo, monkeypatch):

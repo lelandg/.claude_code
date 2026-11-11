@@ -14,8 +14,6 @@ for any PR.
 - **Rules it implements:** "Landing" and "Versioning & changelog" in
   `~/.config/agents/AGENTS.md`
 - Read-only until `--apply`. On Windows use `python` and a Windows path.
-- **First run:** set `OWNERS` (your GitHub login and orgs) and `CODE_ROOTS`
-  (where your clones live) at the top of `pr_tool.py`.
 
 ## Verbs
 
@@ -94,9 +92,27 @@ a PR title or a file; the lander assigns it at merge.
 Everything else it lists and leaves. Report the `STALE`, `EXTERNAL` and
 `ELSEWHERE` rows to the user as decisions; do not close a feature PR yourself.
 
+## Who you are lives in a config file
+
+Which accounts' repositories count as yours, and where your clones are, is
+per machine, so it is not in the tool. Put it in `~/.claude/land-pr.json`
+(`PR_TOOL_CONFIG` points elsewhere):
+
+```json
+{"owners": ["your-login", "your-org"], "code_roots": ["~/code"]}
+```
+
+Owners are taken from `--owner`, then `PR_TOOL_OWNERS=a,b`, then the config
+file, then the account `gh` is signed in as. With nothing set, `status` says
+it is surveying only the signed-in account: PRs in an organization's
+repositories then show as ELSEWHERE and are never merged. Clones are looked
+for under `PR_TOOL_CODE_ROOT`, then `code_roots`, then the current directory
+and its parent; with none found the tool works in a temporary clone. A config
+file that exists but cannot be parsed is an error, not a silent default.
+
 ## Policy lives at the top of the tool
 
-`OWNERS`, `STALE_DAYS`, `REVIEW_GRACE_MIN`, `SETTLE_MIN`, `MISSING_CHECK_MIN`,
+`STALE_DAYS`, `REVIEW_GRACE_MIN`, `SETTLE_MIN`, `MISSING_CHECK_MIN`,
 `REVIEWER_BOTS`, `REVIEWER_CHECKS`, `SHIPS_NOTHING` (paths that need no
 version bump) and `SENSITIVE` (paths that need the adversarial review) are
 constants at the top of `pr_tool.py`. Change behavior there, not in the logic
