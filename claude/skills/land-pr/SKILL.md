@@ -84,6 +84,7 @@ a PR title or a file; the lander assigns it at merge.
 | `SUPERSEDED` | autofix draft whose source PR merged or closed | `sweep --apply` closes it |
 | `AUTOFIX` | autofix draft, source still open | fold into the source, or close |
 | `DRAFT` | draft PR | finish or close |
+| `STACKED` | based on another PR's branch, not the default branch | land the PR underneath; GitHub retargets this one, then `land` |
 | `EXTERNAL` | outside contributor | the user |
 | `ELSEWHERE` | your PR in someone else's repo | that repo's owner |
 | `STALE(...)` | any of the above, idle 14+ days | the user: close or revive |

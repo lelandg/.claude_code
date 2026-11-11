@@ -154,6 +154,71 @@ def test_check_seen_on_an_earlier_commit_must_report_on_the_head():
         assert v.state in ("WAITING", "FAILING") and "security" in v.reasons[0]
 
 
+def test_a_pr_based_on_another_prs_branch_is_never_landed_by_itself():
+    # plugins#10, 2026-11-11: green, reviewed, and based on #9's branch.
+    # Merging it would fold it into #9 behind that PR's back.
+    stacked = make(base="fix/version-manager-sync", default_branch="main")
+    v = pt.classify(stacked, NOW, ME)
+    assert v.state == "STACKED"
+    assert v.reasons == ["based on fix/version-manager-sync, not main"]
+    assert pt.classify(make(base="main", default_branch="main"), NOW, ME).state == "READY"
+    assert pt.classify(make(base="master", default_branch="master"), NOW, ME).state == "READY"
+    # The default branch is read from the repository node.
+    t0 = NOW - timedelta(hours=3)
+    node = _node([("a1", "fix: thing", t0)], rollup=["ci", "CodeRabbit"],
+                 tail=[("a1", t0, ["ci", "CodeRabbit"])])
+    node["pullRequest"]["baseRefName"] = "feat/parent"
+    pr = pt.pr_from_node("octo-user/r", {"pullRequest": node["pullRequest"],
+                                       "defaultBranchRef": {"name": "main"}})
+    assert pr.default_branch == "main" and pt.classify(pr, NOW, ME).state == "STACKED"
+
+
+def test_land_refuses_a_stacked_pr(monkeypatch, capsys):
+    calls = _land_env(monkeypatch, [make(base="feat/parent", default_branch="main",
+                                         files=CI_ONLY)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 1
+    assert calls == [] and "STACKED" in capsys.readouterr().out
+
+
+def test_a_newer_run_of_the_same_workflow_replaces_a_dead_one():
+    # plugins#9, 2026-11-11: runs created during an Actions outage stayed
+    # queued for good and could not be cancelled; re-firing the event gave
+    # the same commit a second, successful run of each workflow.
+    t0 = NOW - timedelta(hours=2)
+
+    def suite(minutes_ago, workflow, status, conclusion=None, event="pull_request"):
+        return {"createdAt": (NOW - timedelta(minutes=minutes_ago)).isoformat(),
+                "status": status, "conclusion": conclusion,
+                "workflowRun": {"event": event, "workflow": {"name": workflow}}}
+
+    def running(*suites):
+        node = _node([("a1", "fix: thing", t0)], rollup=["ci", "CodeRabbit"],
+                     tail=[("a1", t0, ["ci", "CodeRabbit"])])
+        node["pullRequest"]["tail"]["nodes"][-1]["commit"]["checkSuites"] = {
+            "nodes": list(suites)}
+        return _pr(node).running_workflows
+
+    dead = [suite(60, "security", "QUEUED"), suite(60, "validate", "QUEUED")]
+    assert running(*dead) == ["security", "validate"]
+    rerun = [suite(20, "security", "COMPLETED", "SUCCESS"),
+             suite(20, "validate", "COMPLETED", "SUCCESS")]
+    assert running(*dead, *rerun) == []
+    assert running(*rerun, *dead) == []                  # order does not matter
+    # Only the workflow that was re-run is cleared.
+    assert running(*dead, rerun[0]) == ["validate"]
+    # The newest run being the unfinished one still blocks: that is a re-run
+    # in progress, not a ghost.
+    assert running(suite(60, "security", "COMPLETED", "SUCCESS"),
+                   suite(5, "security", "IN_PROGRESS")) == ["security"]
+    # A run for a different event does not vouch for this one.
+    assert running(suite(60, "security", "QUEUED", event="pull_request"),
+                   suite(20, "security", "COMPLETED", "SUCCESS", event="push")) \
+        == ["security"]
+    # Same instant: the unfinished one is believed.
+    assert running(suite(20, "security", "COMPLETED", "SUCCESS"),
+                   suite(20, "security", "QUEUED")) == ["security"]
+
+
 def _node(commits, *, reviews=(), comments=(), rollup=(), tail=None):
     """A minimal GraphQL pullRequest node; commits are (oid, subject, when)."""
     def run(name, conclusion="SUCCESS"):

@@ -233,6 +233,7 @@ PR_QUERY = """
 query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){
     squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed
+    defaultBranchRef{name}
     pullRequest(number:$number){
       number title body state isDraft url createdAt updatedAt
       isCrossRepository mergeable mergeStateStatus
@@ -244,7 +245,7 @@ query($owner:String!,$name:String!,$number:Int!){
         parents(first:3){nodes{oid}}}}}
       tail:commits(last:20){nodes{commit{oid
         checkSuites(first:50){nodes{createdAt status conclusion
-          workflowRun{workflow{name}}}}
+          workflowRun{event workflow{name}}}}
         statusCheckRollup{contexts(first:100){nodes{__typename
           ... on CheckRun{name status conclusion}
           ... on StatusContext{context state}}}}}}}
@@ -296,6 +297,7 @@ class PR:
     merge_commit: str | None = None
     methods: list[str] = field(default_factory=lambda: ["squash", "merge"])
     autofix_source_state: str | None = None
+    default_branch: str = ""               # '' when not known
 
     def __post_init__(self) -> None:
         if self.head_pushed is None:
@@ -479,16 +481,29 @@ def head_facts(n: dict, commits: list[dict],
         .get("nodes", [])
     suites = [_when(s["createdAt"]) for s in suite_nodes if s.get("createdAt")]
     pushed = max(committed, min(suites)) if suites else committed
-    running: list[str] = []
-    for s in suite_nodes:
-        if not s.get("workflowRun"):
-            continue    # other apps leave a suite queued forever; ignore
+    def unfinished(s: dict) -> bool:
         # A conclusion wins over a stale status, as in check_bucket.
-        if s.get("status") == "COMPLETED" or s.get("conclusion"):
-            continue
-        name = ((s["workflowRun"].get("workflow") or {}).get("name")
-                or "workflow")
-        if name not in running:
+        return not (s.get("status") == "COMPLETED" or s.get("conclusion"))
+
+    # Only the NEWEST run of each workflow, per triggering event, speaks for
+    # the head. A run can be left queued for good (seen 2026-11-11: runs
+    # created during an Actions outage could not start or be cancelled), and
+    # a later run of the same workflow for the same event on the same commit
+    # replaces it. At equal times the unfinished one is kept.
+    newest: dict[tuple[str, str], dict] = {}
+    for s in suite_nodes:
+        wf = s.get("workflowRun")
+        if not wf:
+            continue    # other apps leave a suite queued forever; ignore
+        key = ((wf.get("workflow") or {}).get("name") or "workflow",
+               wf.get("event") or "")
+        rank = (s.get("createdAt") or "", unfinished(s))
+        if key not in newest or rank > (newest[key].get("createdAt") or "",
+                                        unfinished(newest[key])):
+            newest[key] = s
+    running: list[str] = []
+    for (name, _event), s in newest.items():
+        if unfinished(s) and name not in running:
             running.append(name)
 
     # Walk back over the lander's own commits to the last one with real code.
@@ -595,6 +610,7 @@ def pr_from_node(repo: str, repo_node: dict,
         running_workflows=head["running"], unverifiable=unverifiable,
         merge_commit=(n.get("mergeCommit") or {}).get("oid"),
         methods=methods or ["merge"],
+        default_branch=(repo_node.get("defaultBranchRef") or {}).get("name") or "",
     )
 
 
@@ -699,6 +715,8 @@ NEXT_STEP = {
     "SUPERSEDED": "close it (sweep --apply does)",
     "AUTOFIX": "fold the fix into its source PR, or close it",
     "DRAFT": "finish it or close it",
+    "STACKED": "land the PR it is based on first; GitHub then retargets this "
+               "one to the default branch and it can land",
     "EXTERNAL": "outside contributor: the owner decides",
     "ELSEWHERE": "your PR in someone else's repo: its owner merges",
 }
@@ -738,6 +756,11 @@ def classify(pr: PR, now: datetime, trusted: set[str],
         return verdict("DRAFT")
     if pr.unverifiable:
         return verdict("BLOCKED", *(f"cannot verify: {u}" for u in pr.unverifiable))
+    if pr.default_branch and pr.base != pr.default_branch:
+        # Landing means reaching the default branch. Merging this one would
+        # only fold it into another PR's branch, behind that PR's back, and
+        # version or tag nothing real. It waits for the PR underneath it.
+        return verdict("STACKED", f"based on {pr.base}, not {pr.default_branch}")
     if pr.mergeable == "CONFLICTING":
         return verdict("CONFLICT", f"conflicts with {pr.base}")
     failing = [n for n, b in pr.checks if b == "fail"]
@@ -1396,7 +1419,8 @@ def collect(owners: list[str], repo: str | None) -> list[tuple[str, int]]:
 
 
 ORDER = ["READY", "SUPERSEDED", "THREADS", "FAILING", "CONFLICT", "REVIEW",
-         "BLOCKED", "WAITING", "AUTOFIX", "DRAFT", "EXTERNAL", "ELSEWHERE"]
+         "BLOCKED", "WAITING", "STACKED", "AUTOFIX", "DRAFT", "EXTERNAL",
+         "ELSEWHERE"]
 
 
 def survey(owners: list[str], repo: str | None, trusted: set[str]
