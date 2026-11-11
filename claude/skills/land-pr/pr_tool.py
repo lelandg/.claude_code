@@ -1434,8 +1434,10 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
             finally:
                 ws.close()
 
+        # No --delete-branch here: the branch is deleted in after_merge, and
+        # only once any PR stacked on it has been moved off it.
         args = ["pr", "merge", str(number), "-R", repo, f"--{method}",
-                "--delete-branch", "--match-head-commit", pr.head_oid]
+                "--match-head-commit", pr.head_oid]
         if method == "squash":
             args += ["--subject", squash_subject(pr.title, number, version)]
         gh(*args)
@@ -1496,9 +1498,29 @@ def after_merge(pr: PR, version: str | None) -> int:
         tip = gh("api", f"repos/{pr.repo}/git/ref/heads/{pr.head}",
                  "--jq", ".object.sha", check=False).strip()
         if tip and tip == pr.head_oid:
-            gh("api", "-X", "DELETE",
-               f"repos/{pr.repo}/git/refs/heads/{pr.head}", check=False)
-            print(f"  deleted branch {pr.head}")
+            # GitHub retargets PRs stacked on a branch only when IT deletes
+            # the branch (the merge button). A deletion through the API
+            # CLOSES them instead (plugins#10, 2026-11-11). So move every
+            # dependent to this PR's base first, and keep the branch if any
+            # of them could not be moved.
+            dependents = gh("pr", "list", "-R", pr.repo, "--state", "open",
+                            "--base", pr.head, "--json", "number",
+                            "--jq", ".[].number", check=False).split()
+            stranded = []
+            for n in dependents:
+                try:
+                    gh("pr", "edit", n, "-R", pr.repo, "--base", pr.base)
+                    print(f"  retargeted #{n} from {pr.head} to {pr.base}")
+                except ToolError as exc:
+                    stranded.append(n)
+                    print(f"  could not retarget #{n} to {pr.base}: {exc}")
+            if stranded:
+                print(f"  kept branch {pr.head}: #{', #'.join(stranded)} "
+                      "still based on it; deleting it would close them")
+            else:
+                gh("api", "-X", "DELETE",
+                   f"repos/{pr.repo}/git/refs/heads/{pr.head}", check=False)
+                print(f"  deleted branch {pr.head}")
     leftovers = gh("pr", "list", "-R", pr.repo, "--state", "open", "--head",
                    f"autofix/pr-{pr.number}", "--json", "number",
                    "--jq", ".[].number", check=False).split()
