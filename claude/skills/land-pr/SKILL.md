@@ -117,6 +117,19 @@ below.
   re-trigger it. For a workflow that is path-filtered and will never run on
   this head, `land <ref> --apply --accept-missing` says so explicitly; `sweep`
   never implies it.
+- **`land` on a merged PR finishes it.** If a run died after the merge, or the
+  tag was refused, run the same command again: it tags the merge commit if
+  the version is untagged, deletes the branch if it is still as merged, and
+  closes leftover autofix drafts. A failed tag exits `1`, never "LANDED".
+- **Merged means GitHub says merged.** With a merge queue `gh pr merge` only
+  enqueues; the tool then reports NOT MERGED YET, exits `3`, and tags nothing.
+- **A conflict from a stale bump is repaired, any other is refused.** On a
+  CONFLICT PR that ships something, `land --apply` checks the branch for a
+  stale version bump, drops it, merges the base and re-cuts. If that is not
+  the cause, nothing is pushed and the PR stays CONFLICT.
+- **A PR too big to read in one page is `BLOCKED`,** not passed on the part
+  that was read (over 100 review threads or checks). Changed files are read
+  in full; if some still cannot be seen the PR counts as sensitive.
 - **The lander's own commits carry the earlier review.** A release bump or a
   clean merge of the base adds no code, so the review of the commit before
   them still covers the head. A merge made by hand does not get this.

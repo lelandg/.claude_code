@@ -197,10 +197,10 @@ query($owner:String!,$name:String!,$number:Int!){
         statusCheckRollup{contexts(first:100){nodes{__typename
           ... on CheckRun{name status conclusion}
           ... on StatusContext{context state}}}}}}}
-      statusCheckRollup{contexts(first:100){nodes{__typename
+      statusCheckRollup{contexts(first:100){totalCount nodes{__typename
         ... on CheckRun{name status conclusion}
         ... on StatusContext{context state}}}}
-      reviewThreads(first:100){nodes{id isResolved isOutdated path line
+      reviewThreads(first:100){totalCount nodes{id isResolved isOutdated path line
         comments(first:1){nodes{author{login} body url}}}}
       reviews(last:50){nodes{author{login} commit{oid}}}
       comments(last:50){nodes{author{login} createdAt}}
@@ -241,6 +241,7 @@ class PR:
     reviewed_head: bool = False            # automated review covers the head
     expected_checks: list[str] = field(default_factory=list)  # ran earlier
     running_workflows: list[str] = field(default_factory=list)  # unfinished
+    unverifiable: list[str] = field(default_factory=list)  # truncated reads
     merge_commit: str | None = None
     methods: list[str] = field(default_factory=lambda: ["squash", "merge"])
     autofix_source_state: str | None = None
@@ -388,6 +389,17 @@ def pr_from_node(repo: str, repo_node: dict) -> PR:
             "url": first.get("url", ""),
         })
     head = head_facts(n, commits, [check_bucket(c) for c in rollup])
+    # One page of each list is read. A PR too big for a page must not pass a
+    # gate on the part that was read: say so and let classify refuse it.
+    unverifiable = []
+    seen_threads = (n.get("reviewThreads") or {})
+    if seen_threads.get("totalCount", 0) > len(seen_threads.get("nodes", [])):
+        unverifiable.append(f"{seen_threads['totalCount']} review threads; only "
+                            "the first 100 were read, so not all are known resolved")
+    seen_checks = (n.get("statusCheckRollup") or {}).get("contexts", {})
+    if seen_checks.get("totalCount", 0) > len(rollup):
+        unverifiable.append(f"{seen_checks['totalCount']} checks; only the "
+                            "first 100 were read")
     methods =[m for m, ok in (("squash", repo_node.get("squashMergeAllowed")),
                                ("merge", repo_node.get("mergeCommitAllowed")),
                                ("rebase", repo_node.get("rebaseMergeAllowed")))
@@ -413,10 +425,23 @@ def pr_from_node(repo: str, repo_node: dict) -> PR:
         threads=threads,
         head_pushed=head["pushed"], review_clock=head["review_clock"],
         reviewed_head=head["reviewed"], expected_checks=head["expected"],
-        running_workflows=head["running"],
+        running_workflows=head["running"], unverifiable=unverifiable,
         merge_commit=(n.get("mergeCommit") or {}).get("oid"),
         methods=methods or ["merge"],
     )
+
+
+def all_files(repo: str, number: int) -> list[str]:
+    """Every changed path, for a PR with more than one GraphQL page of them.
+
+    The path gates (SENSITIVE, SHIPS_NOTHING) must see the whole list: a
+    licensing file at position 101 is still a licensing file. REST serves up
+    to 3000; past that `files_total` still exceeds the list and the gates
+    fail closed.
+    """
+    out = gh("api", "--paginate", f"repos/{repo}/pulls/{number}/files?per_page=100",
+             "--jq", ".[].filename", check=False)
+    return [line for line in out.splitlines() if line]
 
 
 def fetch_pr(repo: str, number: int) -> PR:
@@ -427,6 +452,8 @@ def fetch_pr(repo: str, number: int) -> PR:
         time.sleep(2)   # GitHub computes mergeability lazily; ask once more
         data = gql(PR_QUERY, owner=owner, name=name, number=number)
         pr = pr_from_node(repo, data["repository"])
+    if pr.state == "OPEN" and pr.files_total > len(pr.files):
+        pr.files = all_files(repo, number) or pr.files
     src = autofix_source(pr)
     if pr.state == "OPEN" and src:
         pr.autofix_source_state = gh(
@@ -463,6 +490,8 @@ def ships_nothing(pr: PR) -> bool:
 
 
 def is_sensitive(pr: PR) -> bool:
+    if pr.files_total > len(pr.files):
+        return True     # some paths were never seen: assume the worst
     return any(_matches(p.lower(), SENSITIVE) for p in pr.files
                if not _matches(p, SHIPS_NOTHING))
 
@@ -526,6 +555,8 @@ def classify(pr: PR, now: datetime, trusted: set[str],
                        else "autofix PR with no source in its branch name")
     if pr.draft:
         return verdict("DRAFT")
+    if pr.unverifiable:
+        return verdict("BLOCKED", *(f"cannot verify: {u}" for u in pr.unverifiable))
     if pr.mergeable == "CONFLICTING":
         return verdict("CONFLICT", f"conflicts with {pr.base}")
     failing = [n for n, b in pr.checks if b == "fail"]
@@ -966,6 +997,8 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
     trusted = trusted if trusted is not None else trusted_authors()
     pr = fetch_pr(repo, number)
     print(f"{pr.ref}  {pr.title}")
+    if pr.state == "MERGED":
+        return finish_merged(pr, apply)
     if pr.state != "OPEN":
         print(f"  already {pr.state.lower()}; nothing to land")
         return 0
@@ -980,25 +1013,28 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
             return 3
         v = classify(pr, datetime.now(timezone.utc), trusted, owners,
                      accept_missing)
-    if v.state != "READY":
-        print(f"  {v.label}: {'; '.join(v.reasons) or 'not ready'}")
-        print(f"  next: {STALE_STEP if v.stale else NEXT_STEP.get(v.state, '')}")
-        if v.state == "THREADS":
-            print_threads(pr)
-        return 3 if v.state == "WAITING" else 1
-
     plan = release_plan(pr, level, no_bump)
     if pr.cross_repo and plan.level != "none":
         plan = ReleasePlan("none", None, "fork PR: its branch cannot take a bump")
+    # A CONFLICT can be nothing more than a pre-landing bump gone stale: each
+    # merge to the base moves the version and changelog lines it touched.
+    # That one the lander repairs itself, so it gets as far as looking.
+    repair = v.state == "CONFLICT" and plan.level != "none" and not pr.cross_repo
+    if v.state != "READY" and not repair:
+        return refuse(pr, v)
     method = method or detect_method(pr)
     print(f"  release: {plan.level}  ({plan.source})")
     if plan.level != "none":
         print("  notes:   " + ("from the PR body" if plan.notes
                                else "none in the PR body; drafted from commits"))
     print(f"  merge:   {method}, delete branch, tag after merge")
+    if repair:
+        print(f"  CONFLICT with {pr.base}: --apply checks whether a stale version "
+              "bump on the branch is the cause, drops it, merges the base and "
+              "re-cuts. Any other conflict is refused, nothing pushed.")
     if not apply:
         print("  (dry run: pass --apply to land)")
-        return 0
+        return 1 if repair else 0
 
     version: str | None = None
     with Lock(repo):
@@ -1009,6 +1045,8 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
                 base_ref = f"origin/{pr.base}"
                 taken = lambda tag: remote_tag_exists(repo, tag)  # noqa: E731
                 state, head_v = bump_state(vt, ws.wt, base_ref, taken)
+                if repair and state != "stale":
+                    return refuse(pr, v)    # a real conflict: not ours to fix
                 if state == "noversion":
                     print("  NOTE: no version location in this repo; landing "
                           "without a bump. Run version_tool.py backfill here.")
@@ -1038,23 +1076,100 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
         if method == "squash":
             args += ["--subject", squash_subject(pr.title, number, version)]
         gh(*args)
+        # `gh pr merge` succeeding is not the PR being merged: with a merge
+        # queue it only enqueues. Tag and clean up only once GitHub says so.
         merged = fetch_pr(repo, number)
+        for _ in range(MERGE_POLLS):
+            if merged.state == "MERGED":
+                break
+            time.sleep(MERGE_POLL_SECONDS)
+            merged = fetch_pr(repo, number)
+        if merged.state != "MERGED":
+            print(f"  NOT MERGED YET: GitHub took the request but the PR is still "
+                  f"{merged.state.lower()} (a merge queue, or a rule still "
+                  "pending). Nothing was tagged or closed. Run the same "
+                  "command again once it merges.")
+            return 3
         print(f"  merged ({method}) as {(merged.merge_commit or '?')[:9]}")
-        if version and merged.merge_commit:
-            try:
-                print("  " + create_tag(repo, version, merged.merge_commit))
-            except ToolError as exc:
-                print(f"  WARNING: merged, but tagging v{version} failed: {exc}")
+        return after_merge(merged, version)
 
-    leftovers = gh("pr", "list", "-R", repo, "--state", "open", "--head",
-                   f"autofix/pr-{number}", "--json", "number",
+
+MERGE_POLLS = 5
+MERGE_POLL_SECONDS = 4
+RELEASE_COMMIT = re.compile(r"^chore\(release\): v(\d+\.\d+\.\d+[\w.+-]*)$")
+
+
+def refuse(pr: PR, v: Verdict) -> int:
+    print(f"  {v.label}: {'; '.join(v.reasons) or 'not ready'}")
+    print(f"  next: {STALE_STEP if v.stale else NEXT_STEP.get(v.state, '')}")
+    if v.state == "THREADS":
+        print_threads(pr)
+    return 3 if v.state == "WAITING" else 1
+
+
+def landed_version(pr: PR) -> str | None:
+    """The version a PR carries: its last release commit, unless dropped."""
+    for subject in reversed(pr.subjects):
+        if subject.startswith("chore(release): drop pre-landing bump"):
+            return None
+        m = RELEASE_COMMIT.match(subject)
+        if m:
+            return m.group(1)
+    return None
+
+
+def after_merge(pr: PR, version: str | None) -> int:
+    """Everything that follows the merge. Every step is safe to repeat, so a
+    run that died here is finished by running `land` on the merged PR again."""
+    tag_failed = False
+    if version and pr.merge_commit:
+        try:
+            print("  " + create_tag(pr.repo, version, pr.merge_commit))
+        except ToolError as exc:
+            tag_failed = True
+            print(f"  TAG FAILED: merged, but v{version} is not tagged: {exc}")
+    if pr.head and pr.head != pr.base and not pr.cross_repo:
+        # Only the branch as it was merged; one that has moved since is in use.
+        tip = gh("api", f"repos/{pr.repo}/git/ref/heads/{pr.head}",
+                 "--jq", ".object.sha", check=False).strip()
+        if tip and tip == pr.head_oid:
+            gh("api", "-X", "DELETE",
+               f"repos/{pr.repo}/git/refs/heads/{pr.head}", check=False)
+            print(f"  deleted branch {pr.head}")
+    leftovers = gh("pr", "list", "-R", pr.repo, "--state", "open", "--head",
+                   f"autofix/pr-{pr.number}", "--json", "number",
                    "--jq", ".[].number", check=False).split()
     for n in leftovers:
-        close_superseded(repo, int(n), f"Closing: source PR #{number} merged, "
-                         "so this autofix draft is superseded.")
-        print(f"  closed superseded autofix #{n}")
+        try:
+            close_superseded(pr.repo, int(n), f"Closing: source PR #{pr.number} "
+                             "merged, so this autofix draft is superseded.")
+            print(f"  closed superseded autofix #{n}")
+        except ToolError as exc:
+            print(f"  could not close autofix #{n}: {exc}")
+    if tag_failed:
+        print("  Run the same command again to retry the tag.")
+        return 1
     print(f"  LANDED {pr.ref}" + (f" as v{version}" if version else ""))
     return 0
+
+
+def finish_merged(pr: PR, apply: bool) -> int:
+    """`land` on a PR that is already merged: finish a landing that stopped
+    after the merge (tag refused, process killed) instead of calling it done."""
+    version = landed_version(pr)
+    untagged = bool(version and pr.merge_commit
+                    and not remote_tag_exists(pr.repo, f"v{version}"))
+    if not untagged:
+        version = None
+    if not apply:
+        if untagged:
+            print(f"  already merged, but v{version} is not tagged: --apply "
+                  f"tags {pr.merge_commit[:9]}")
+            return 10
+        print("  already merged; nothing to land")
+        return 0
+    print("  already merged; finishing what is left")
+    return after_merge(pr, version)
 
 
 def collect(owners: list[str], repo: str | None) -> list[tuple[str, int]]:

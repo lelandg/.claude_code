@@ -284,6 +284,133 @@ def test_sensitive_paths_need_recorded_adversarial_review():
     assert state(files=["tests/test_auth.py"]) == "READY"
 
 
+# ---- findings from the Codex review, 2026-11-11 ---------------------------
+
+def test_a_pr_too_big_to_read_in_one_page_is_refused_not_passed():
+    t0 = NOW - timedelta(hours=3)
+    node = _node([("a1", "fix: thing", t0)], rollup=["ci", "CodeRabbit"],
+                 tail=[("a1", t0, ["ci", "CodeRabbit"])])
+    assert pt.classify(_pr(node), NOW, ME).state == "READY"
+    node["pullRequest"]["reviewThreads"] = {"totalCount": 140, "nodes": []}
+    v = pt.classify(_pr(node), NOW, ME)
+    assert v.state == "BLOCKED" and "140 review threads" in v.reasons[0]
+    node["pullRequest"]["reviewThreads"] = {"totalCount": 0, "nodes": []}
+    node["pullRequest"]["statusCheckRollup"]["contexts"]["totalCount"] = 250
+    assert pt.classify(_pr(node), NOW, ME).state == "BLOCKED"
+
+
+def test_unseen_files_count_as_sensitive():
+    # 100 harmless paths read out of 180: the other 80 are unknown.
+    partial = make(files=[f"src/f{i}.py" for i in range(100)], files_total=180)
+    assert pt.classify(partial, NOW, ME).state == "REVIEW"
+    whole = make(files=[f"src/f{i}.py" for i in range(180)], files_total=180)
+    assert pt.classify(whole, NOW, ME).state == "READY"
+
+
+def test_landed_version_reads_the_last_release_commit():
+    lv = lambda *s: pt.landed_version(make(subjects=list(s)))  # noqa: E731
+    assert lv("fix: a", "chore(release): v1.2.3") == "1.2.3"
+    assert lv("chore(release): v1.2.3", "fix: review") == "1.2.3"
+    assert lv("chore(release): v1.2.3",
+              "chore(release): drop pre-landing bump (re-cut at landing)") is None
+    assert lv("fix: a") is None
+
+
+class _Calls(list):
+    def __call__(self, *args, **kw):
+        self.append(args)
+        return ""
+
+
+def _land_env(monkeypatch, prs):
+    """Stub the network. fetch_pr hands out `prs` in turn; the last repeats."""
+    seq = list(prs)
+    monkeypatch.setattr(pt, "fetch_pr",
+                        lambda repo, n: seq.pop(0) if len(seq) > 1 else seq[0])
+    calls = _Calls()
+    monkeypatch.setattr(pt, "gh", calls)
+    monkeypatch.setattr(pt, "detect_method", lambda pr: "squash")
+    monkeypatch.setattr(pt, "MERGE_POLL_SECONDS", 0)
+    monkeypatch.setattr(pt.Lock, "__init__", lambda self, repo: None)
+    monkeypatch.setattr(pt.Lock, "__enter__", lambda self: self)
+    monkeypatch.setattr(pt.Lock, "__exit__", lambda self, *a: None)
+    return calls
+
+
+CI_ONLY = [".github/workflows/x.yml"]      # Release: none, so no worktree
+
+
+def test_land_does_not_tag_or_clean_up_until_github_says_merged(monkeypatch, capsys):
+    # A merge queue: `gh pr merge` succeeds and the PR stays open.
+    calls = _land_env(monkeypatch, [make(files=CI_ONLY)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 3
+    assert [c[:2] for c in calls] == [("pr", "merge")]
+    assert "NOT MERGED YET" in capsys.readouterr().out
+    # Merged for real: cleanup runs and it reports LANDED.
+    merged = make(files=CI_ONLY, state="MERGED", merge_commit="c" * 40)
+    calls = _land_env(monkeypatch, [make(files=CI_ONLY), merged])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 0
+    assert ("pr", "list") in [c[:2] for c in calls]
+    assert "LANDED octo-user/r#7" in capsys.readouterr().out
+
+
+def test_land_on_a_merged_pr_finishes_the_tag_it_missed(monkeypatch, capsys):
+    merged = make(state="MERGED", merge_commit="c" * 40,
+                  subjects=["fix: thing", "chore(release): v1.4.2"])
+    tags = ("api", "repos/octo-user/r/git/tags")
+    calls = _land_env(monkeypatch, [merged])
+    monkeypatch.setattr(pt, "remote_tag_exists", lambda repo, tag: False)
+    assert pt.cmd_land("octo-user/r#7", trusted=ME) == 10       # dry run: work pending
+    assert calls == [] and "v1.4.2 is not tagged" in capsys.readouterr().out
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 0
+    assert tags in [c[:2] for c in calls]
+
+    # The tag is refused again: say so and exit non-zero, never "LANDED".
+    def refused(*args, **kw):
+        if args[:2] == tags:
+            raise pt.ToolError("protected tag")
+        return ""
+    monkeypatch.setattr(pt, "gh", refused)
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 1
+    out = capsys.readouterr().out
+    assert "TAG FAILED" in out and "LANDED" not in out.split("TAG FAILED")[1]
+
+    # Already tagged: nothing to do.
+    calls = _land_env(monkeypatch, [merged])
+    monkeypatch.setattr(pt, "remote_tag_exists", lambda repo, tag: True)
+    assert pt.cmd_land("octo-user/r#7", trusted=ME) == 0
+    assert calls == []
+
+
+def test_conflict_is_refused_unless_a_stale_bump_explains_it(monkeypatch, capsys):
+    # Release: none means no bump on the branch to blame.
+    calls = _land_env(monkeypatch, [make(mergeable="CONFLICTING", files=CI_ONLY)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 1
+    assert calls == []
+    # A PR that ships something might carry one; a dry run promises nothing.
+    shipping = make(mergeable="CONFLICTING")
+    _land_env(monkeypatch, [shipping])
+    assert pt.cmd_land("octo-user/r#7", trusted=ME) == 1
+    assert "stale version bump" in capsys.readouterr().out
+
+    # --apply looks, finds no stale bump, and refuses without pushing or merging.
+    class NoWorktree:
+        def __init__(self, pr, clone):
+            self.wt = self.tmp = Path(".")
+
+        def close(self):
+            pass
+    calls = _land_env(monkeypatch, [shipping])
+    monkeypatch.setattr(pt, "Workspace", NoWorktree)
+    monkeypatch.setattr(pt, "load_version_tool", lambda: (None, None))
+    monkeypatch.setattr(pt, "bump_state", lambda *a: ("absent", None))
+    pushed = []
+    monkeypatch.setattr(pt, "git", lambda *a, **k: pushed.append(a) or "")
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 1
+    assert calls == [] and pushed == []
+    assert "CONFLICT: conflicts with main" in capsys.readouterr().out
+
+
 def test_check_bucket_maps_rollup_nodes():
     run = lambda **k: pt.check_bucket({"__typename": "CheckRun", **k})[1]  # noqa: E731
     assert run(status="IN_PROGRESS", conclusion=None) == "pending"
