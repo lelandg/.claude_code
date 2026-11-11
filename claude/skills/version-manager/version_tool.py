@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Version Manager — cross-project version bumping and changelog currency.
 
-Design: ImageAI/Plans/VersionManager-Design.md
 
 Standard library only. Operates on a repository from the outside; adds no
 per-repository config file. Every verb is read-only until it prints its plan;
@@ -108,7 +107,7 @@ PATTERNS: dict[str, re.Pattern[str]] = {
         r"(?P<pre>\"version\"\s*:\s*\")(?P<v>\d+\.\d+\.\d+)(?P<post>\")"),
     "py_const": re.compile(
         r"(?P<pre>^(?:__version__|VERSION)\s*=\s*[\"'])(?P<v>\d+\.\d+\.\d+)(?P<post>[\"'])", re.M),
-    # First line only — RealtyShield's VERSION carries explanatory comments
+    # First line only — some projects put explanatory comments
     # beneath the number, so demanding a bare file misses it entirely.
     "version_file": re.compile(
         r"(?P<pre>\A[ \t]*)(?P<v>\d+\.\d+\.\d+)(?P<post>[ \t]*(?:\r?\n|\Z))"),
@@ -127,7 +126,7 @@ PATTERNS: dict[str, re.Pattern[str]] = {
         r"(?P<v>\d+\.\d+\.\d+)(?P<post>\")"),
 }
 
-# RealtyShield's own files name their canonical source; reading it beats
+# Some projects' own files name their canonical source; reading it beats
 # guessing. Two phrasings occur in that repo alone, so match both:
 #   "The actual version is managed in src/version.py"
 #   'version = "0.2.0"  # See src/version.py for centralized version management'
@@ -146,9 +145,9 @@ def _pointer_target(text: str) -> str | None:
     return m.group("managed") or m.group("see")
 
 # Vendored and generated trees carry their own package.json/version files.
-# QuickStock tracked a generated Prisma client whose bundled package.json says
+# a Next.js app tracked a generated Prisma client whose bundled package.json says
 # "version": "6.19.0" — without this, Prisma's version enters the ledger as a
-# QuickStock release.
+# a Next.js app release.
 SKIP_DIRS = {".git", ".venv", ".venv_linux", "node_modules", "__pycache__",
              "dist", "build", ".next", "venv", "site-packages",
              "generated", "vendor", ".prisma", "out", "coverage", "target",
@@ -343,7 +342,7 @@ class Entry:
 def _history_paths(repo: Path, canonical: Location | None) -> list[Path]:
     """Paths that ever plausibly held a version, including relocated homes.
 
-    ImageAI kept __version__ in main.py before it moved to core/constants.py;
+    Some projects keep __version__ in a main module before it moves to a constants file;
     without walking the old home its 0.3.0-0.6.0 releases are unrecoverable.
     """
     names = {"VERSION", "version.py", "constants.py", "__init__.py",
@@ -380,7 +379,7 @@ def git_ledger(repo: Path, canonical: Location | None) -> list[Entry]:
     """Chronological version changes derived from git history.
 
     One `git log -p` pass over every candidate path at once. Walking each path
-    separately with --follow took over two minutes on RealtyShield; --follow's
+    separately with --follow took over two minutes on a Python service; --follow's
     rename detection is redundant anyway, since relocated homes are probed
     explicitly by _history_paths.
     """
@@ -579,7 +578,7 @@ def is_placeholder(git_entries: list[Entry], changelog_count: int = 0) -> bool:
     """A version set once and never moved is a default, not a record (§5.1).
 
     A changelog declaring several versions IS a record even when the version
-    file never moved — Heimdallr shipped 0.1.0 and 0.2.0 while app/__init__.py
+    file never moved — a small service shipped 0.1.0 and 0.2.0 while app/__init__.py
     sat at 0.1.0. Treating that as a placeholder would synthesize a series
     below what already shipped.
     """
@@ -714,7 +713,7 @@ def cmd_check(repo: Path, **_: object) -> int:
     else:
         print(f"  classification: real record — {len(git_entries)} bumps in history")
 
-    # A shipped changelog ahead of the code is Heimdallr's exact failure.
+    # A shipped changelog ahead of the code is a small service's exact failure.
     if canonical and canonical.value and cl:
         highest = max(cl, key=version_key)
         if version_key(highest) > version_key(canonical.value):
