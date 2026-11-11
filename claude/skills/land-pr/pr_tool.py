@@ -386,7 +386,9 @@ def classify(pr: PR, now: datetime, trusted: set[str],
 
     if not pr.author_is_bot and pr.author.lower() not in trusted:
         return verdict("EXTERNAL", f"author {pr.author or 'unknown'}")
-    home = {o.lower() for o in (owners if owners is not None else OWNERS)}
+    # No explicit list means "whatever this run is configured for", so the
+    # PR_TOOL_OWNERS override reaches every caller, not just the survey query.
+    home = {o.lower() for o in (owners if owners is not None else _owners(None))}
     if pr.repo.split("/", 1)[0].lower() not in home:
         return verdict("ELSEWHERE", "someone else's repository")
     if is_autofix(pr):
@@ -764,7 +766,8 @@ def close_superseded(repo: str, number: int, why: str) -> None:
 
 
 def wait_ready(repo: str, number: int, oid: str, minutes: float,
-               trusted: set[str], had_checks: bool) -> tuple[bool, PR]:
+               trusted: set[str], had_checks: bool,
+               owners: list[str] | None = None) -> tuple[bool, PR]:
     """Poll until the PR is READY at `oid` twice running, or time runs out."""
     deadline = time.time() + minutes * 60
     streak = 0
@@ -775,7 +778,7 @@ def wait_ready(repo: str, number: int, oid: str, minutes: float,
             raise ToolError(f"{pr.ref} is {pr.state.lower()} now")
         if pr.head_oid != oid:
             raise ToolError("someone else pushed to the branch; run again")
-        v = classify(pr, datetime.now(timezone.utc), trusted)
+        v = classify(pr, datetime.now(timezone.utc), trusted, owners)
         settled = v.state == "READY" and (pr.checks or not had_checks)
         if v.state not in ("READY", "WAITING"):
             raise ToolError(f"{pr.ref} is {v.label}: {'; '.join(v.reasons)}")
@@ -806,7 +809,8 @@ def print_threads(pr: PR) -> None:
 def cmd_land(ref: str, apply: bool = False, level: str | None = None,
              no_bump: bool = False, method: str | None = None,
              clone: str | None = None, wait: float = 8.0,
-             trusted: set[str] | None = None, **_: object) -> int:
+             trusted: set[str] | None = None,
+             owners: list[str] | None = None, **_: object) -> int:
     repo, number = parse_ref(ref)
     trusted = trusted if trusted is not None else trusted_authors()
     pr = fetch_pr(repo, number)
@@ -815,15 +819,15 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
         print(f"  already {pr.state.lower()}; nothing to land")
         return 0
 
-    v = classify(pr, datetime.now(timezone.utc), trusted)
+    v = classify(pr, datetime.now(timezone.utc), trusted, owners)
     if v.state == "WAITING" and apply and wait > 0:
         print(f"  waiting up to {wait:g} min: {'; '.join(v.reasons)}")
         ok, pr = wait_ready(repo, number, pr.head_oid, wait, trusted,
-                            bool(pr.checks))
+                            bool(pr.checks), owners)
         if not ok:
             print("  WAITING: still running. Run the same command again.")
             return 3
-        v = classify(pr, datetime.now(timezone.utc), trusted)
+        v = classify(pr, datetime.now(timezone.utc), trusted, owners)
     if v.state != "READY":
         print(f"  {v.label}: {'; '.join(v.reasons) or 'not ready'}")
         print(f"  next: {STALE_STEP if v.stale else NEXT_STEP.get(v.state, '')}")
@@ -927,7 +931,7 @@ def survey(owners: list[str], repo: str | None, trusted: set[str]
     with ThreadPoolExecutor(max_workers=6) as pool:
         prs = list(pool.map(lambda r: fetch_pr(*r), refs))
     now = datetime.now(timezone.utc)
-    rows = [(pr, classify(pr, now, trusted)) for pr in prs]
+    rows = [(pr, classify(pr, now, trusted, owners)) for pr in prs]
     rows.sort(key=lambda row: (row[1].stale, ORDER.index(row[1].state)
                                if row[1].state in ORDER else 99,
                                row[0].repo.lower(), row[0].number))
@@ -978,7 +982,8 @@ def cmd_sweep(owner: list[str] | None = None, repo: str | None = None,
               apply: bool = False, limit: int = 25, wait: float = 8.0,
               **_: object) -> int:
     trusted = trusted_authors()
-    rows = survey(_owners(owner), repo, trusted)
+    owners = _owners(owner)
+    rows = survey(owners, repo, trusted)
     print_survey(rows)
     ready = [pr for pr, v in rows if v.state == "READY" and not v.stale]
     dead = [pr for pr, v in rows if v.state == "SUPERSEDED"]
@@ -1001,7 +1006,8 @@ def cmd_sweep(owner: list[str] | None = None, repo: str | None = None,
     for pr in ready[:limit]:
         print()
         try:
-            code = cmd_land(pr.ref, apply=True, wait=wait, trusted=trusted)
+            code = cmd_land(pr.ref, apply=True, wait=wait, trusted=trusted,
+                            owners=owners)
         except ToolError as exc:
             code = 1
             print(f"  FAILED: {exc}")

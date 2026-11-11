@@ -95,6 +95,24 @@ def test_my_pr_in_someone_elses_repo_is_theirs_to_merge():
     assert state(repo="octo-org/x") == "READY"   # owner match ignores case
 
 
+def test_owner_override_reaches_classification(monkeypatch):
+    # PR_TOOL_OWNERS must change what counts as "home", not only which PRs
+    # the survey query returns: otherwise every row comes back ELSEWHERE.
+    theirs = make(repo="acme/widgets", author="pat")
+    assert pt.classify(theirs, NOW, {"pat"}).label == "ELSEWHERE"
+    monkeypatch.setenv("PR_TOOL_OWNERS", "acme")
+    assert pt.classify(theirs, NOW, {"pat"}).label == "READY"
+    assert pt.classify(make(), NOW, ME).label == "ELSEWHERE"   # octo-user is not home now
+
+
+def test_survey_classifies_with_the_owners_it_was_given(monkeypatch):
+    theirs = make(repo="acme/widgets", author="pat")
+    monkeypatch.setattr(pt, "collect", lambda owners, repo: [("acme/widgets", 7)])
+    monkeypatch.setattr(pt, "fetch_pr", lambda repo, number: theirs)
+    assert [v.label for _, v in pt.survey(["acme"], None, {"pat"})] == ["READY"]
+    assert [v.label for _, v in pt.survey(["octo-user"], None, {"pat"})] == ["ELSEWHERE"]
+
+
 def test_sensitive_paths_need_recorded_adversarial_review():
     files = ["lib/auth/session.ts"]
     assert state(files=files) == "REVIEW"
