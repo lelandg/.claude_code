@@ -280,6 +280,24 @@ def test_sensitive_paths_need_recorded_adversarial_review():
     files = ["lib/auth/session.ts"]
     assert state(files=files) == "REVIEW"
     assert state(files=files, body="Adversarial Codex review: clean") == "READY"
+    ok = ["Adversarial review: clean (codex, gpt-6-astra high)",
+          "- **Adversarial review:** 2 findings, both fixed in abc1234",
+          "## Checks\n\n> Adversarial Codex review: no findings\n\nmore text"]
+    for body in ok:
+        assert state(files=files, body=body) == "READY", body
+    # The word is not the record. Neither is the line without a result.
+    not_ok = ["No adversarial review was run for this change.",
+              "We should do an adversarial review later",
+              "Adversarial review: none",
+              "Adversarial review: not run",
+              "Adversarial review: N/A",
+              "Adversarial review: pending",
+              "Adversarial review:",
+              "**Adversarial review:** TODO"]
+    for body in not_ok:
+        v = pt.classify(make(files=files, body=body), NOW, ME)
+        assert v.state == "REVIEW", body
+    assert "Adversarial review: <result" in v.reasons[0]
     # a test file with 'auth' in its name ships nothing and is not sensitive
     assert state(files=["tests/test_auth.py"]) == "READY"
 

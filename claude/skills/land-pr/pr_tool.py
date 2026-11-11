@@ -96,7 +96,23 @@ SENSITIVE = [
     "*auth*", "*billing*", "*stripe*", "*payment*", "*license*", "*licens*",
     "*/migrations/*", "migrations/*", "*.sql", "*schema.prisma",
 ]
-SENSITIVE_EVIDENCE = re.compile(r"adversarial", re.I)
+# The record is a line of its own with a result after the colon:
+#     Adversarial review: clean (codex, gpt-6-astra high, 2026-11-11)
+# The word alone proves nothing ("no adversarial review was run" has it too),
+# and neither does the line with an empty or negative result.
+SENSITIVE_EVIDENCE = re.compile(
+    r"^[ \t>*-]*\**Adversarial(?:[ \t]+\w+)?[ \t]+review\**[ \t]*:"
+    r"[ \t]*\**[ \t]*(\S.*)$", re.I | re.M)
+EVIDENCE_NEGATION = re.compile(     # "no findings" is a result; "no" is not
+    r"^(none\b|no$|no (review|adversarial)|not\b|n/?a\b|skipped|pending|todo"
+    r"|tbd|to do|later)", re.I)
+EVIDENCE_FORMAT = "Adversarial review: <result and where it ran>"
+
+
+def adversarial_review_recorded(body: str) -> bool:
+    return any(not EVIDENCE_NEGATION.match(m.group(1).strip(" *`_-"))
+               and m.group(1).strip(" *`_-")
+               for m in SENSITIVE_EVIDENCE.finditer(body or ""))
 
 # Where local clones live (PR_TOOL_CODE_ROOT=a;b prepends). Each is also
 # searched one level down in Web/.
@@ -514,7 +530,8 @@ NEXT_STEP = {
     "FAILING": "fix the failing check, push, then land",
     "CONFLICT": "merge the base branch in, resolve, push, then land",
     "BLOCKED": "a branch rule blocks the merge; read `gh pr merge` output",
-    "REVIEW": "run the adversarial review, record it in the PR body, land",
+    "REVIEW": "run the adversarial review, add a line to the PR body "
+              f"(`{EVIDENCE_FORMAT}`), land",
     "SUPERSEDED": "close it (sweep --apply does)",
     "AUTOFIX": "fold the fix into its source PR, or close it",
     "DRAFT": "finish it or close it",
@@ -594,9 +611,13 @@ def classify(pr: PR, now: datetime, trusted: set[str],
         return verdict("WAITING", "GitHub is still computing mergeability")
     if pr.merge_state == "BLOCKED":
         return verdict("BLOCKED", "mergeStateStatus BLOCKED")
-    if is_sensitive(pr) and not SENSITIVE_EVIDENCE.search(pr.body):
-        return verdict("REVIEW", "auth/billing/migration paths and no "
-                       "adversarial review recorded in the PR body")
+    if is_sensitive(pr) and not adversarial_review_recorded(pr.body):
+        what = (f"{pr.files_total - len(pr.files)} changed files could not be "
+                "read, so they count as sensitive"
+                if pr.files_total > len(pr.files)
+                else "auth/billing/migration paths")
+        return verdict("REVIEW", f"{what}, and the PR body has no "
+                       f"`{EVIDENCE_FORMAT}` line")
     since_review = (now - pr.review_clock).total_seconds() / 60
     if not pr.reviewed_head and not pr.author_is_bot \
             and since_review < REVIEW_GRACE_MIN:
