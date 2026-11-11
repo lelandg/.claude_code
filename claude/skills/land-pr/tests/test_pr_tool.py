@@ -33,7 +33,7 @@ def make(**kw) -> pt.PR:
                 head_committed=NOW - timedelta(hours=2),
                 files=["src/app.py"], files_total=1,
                 subjects=["fix: thing"], checks=[("ci", "pass")],
-                reviewer_seen=True)
+                reviewed_head=True)
     base.update(kw)
     return pt.PR(**base)
 
@@ -65,11 +65,174 @@ def test_conflict_and_blocked():
 
 
 def test_review_grace_only_while_no_reviewer_and_fresh_push():
-    fresh = NOW - timedelta(minutes=3)
-    assert state(reviewer_seen=False, head_committed=fresh) == "WAITING"
-    assert state(reviewer_seen=False) == "READY"          # grace expired
-    assert state(reviewer_seen=False, head_committed=fresh,
+    fresh = NOW - timedelta(minutes=6)
+    assert state(reviewed_head=False, head_committed=fresh) == "WAITING"
+    assert state(reviewed_head=False) == "READY"          # grace expired
+    assert state(reviewed_head=False, head_committed=fresh,
                  author="dependabot", author_is_bot=True) == "READY"
+
+
+# ---- the verdict is about the current head --------------------------------
+# Regression: seconds after a push to lelandg/.claude_code#13 (2026-11-11) the
+# head's rollup held one check and the only reviewer activity was on the
+# previous head, and `land` called it READY.
+
+def test_just_pushed_head_is_never_ready_even_with_green_checks():
+    just = NOW - timedelta(seconds=40)
+    v = pt.classify(make(head_committed=just), NOW, ME)
+    assert v.state == "WAITING" and "40s ago" in v.reasons[0]
+    assert state(head_committed=just, author="dependabot",
+                 author_is_bot=True) == "WAITING"        # bots too
+    assert state(head_committed=just, checks=[]) == "WAITING"   # empty != green
+    assert state(head_committed=just, checks=[("ci", "fail")]) == "FAILING"
+
+
+def test_check_seen_on_an_earlier_commit_must_report_on_the_head():
+    ran_before = ["gitleaks", "osv-scanner", "CodeRabbit", "GitGuardian"]
+    partial = [("GitGuardian", "pass")]
+    ten = NOW - timedelta(minutes=10)
+    v = pt.classify(make(head_committed=ten, checks=partial,
+                         expected_checks=ran_before), NOW, ME)
+    assert v.state == "WAITING"
+    assert v.reasons == ["gitleaks has not started on this head",
+                         "osv-scanner has not started on this head",
+                         "CodeRabbit has not started on this head"]
+    # Long after the push it is a failure to act on, never READY.
+    old = pt.classify(make(checks=partial, expected_checks=ran_before), NOW, ME)
+    assert old.state == "FAILING" and "never started" in old.reasons[0]
+    # Every expected check present: ready again.
+    full = [(n, "pass") for n in ran_before]
+    assert state(checks=full, expected_checks=ran_before) == "READY"
+    # The explicit override is per call, for path-filtered workflows.
+    assert pt.classify(make(checks=partial, expected_checks=ran_before),
+                       NOW, ME, accept_missing=True).state == "READY"
+
+
+def _node(commits, *, reviews=(), comments=(), rollup=(), tail=None):
+    """A minimal GraphQL pullRequest node; commits are (oid, subject, when)."""
+    def run(name, conclusion="SUCCESS"):
+        return {"__typename": "CheckRun", "name": name, "status": "COMPLETED",
+                "conclusion": conclusion}
+    cs = [{"commit": {"oid": o, "messageHeadline": s,
+                      "committedDate": w.isoformat()}} for o, s, w in commits]
+    def suites(pushed, queued):
+        if not pushed:
+            return []
+        at = pushed.isoformat()
+        # An app that never reports leaves a suite queued forever; a workflow
+        # run is a suite too, and is queued before any of its jobs exist.
+        return ([{"createdAt": at, "status": "QUEUED", "conclusion": None,
+                  "workflowRun": None}]
+                + [{"createdAt": at, "status": "QUEUED", "conclusion": None,
+                    "workflowRun": {"workflow": {"name": w}}} for w in queued])
+
+    tl = [{"commit": {"oid": t[0],
+                      "checkSuites": {"nodes": suites(t[1], t[3] if len(t) > 3 else ())},
+                      "statusCheckRollup": {"contexts": {"nodes":
+                                                         [run(n) for n in t[2]]}}}}
+          for t in (tail or [])]
+    return {"repository": None, "pullRequest": {
+        "number": 7, "title": "fix: thing", "state": "OPEN",
+        "author": {"login": "octo-user", "__typename": "User"},
+        "headRefName": "fix/thing", "headRefOid": commits[-1][0],
+        "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+        "updatedAt": NOW.isoformat(), "createdAt": NOW.isoformat(),
+        "commits": {"nodes": cs}, "tail": {"nodes": tl},
+        "statusCheckRollup": {"contexts": {"nodes": [run(n) for n in rollup]}},
+        "reviews": {"nodes": [{"author": {"login": a}, "commit": {"oid": o}}
+                              for a, o in reviews]},
+        "comments": {"nodes": [{"author": {"login": a},
+                                "createdAt": w.isoformat()}
+                               for a, w in comments]},
+    }}
+
+
+def _pr(node) -> pt.PR:
+    return pt.pr_from_node("octo-user/r", {"pullRequest": node["pullRequest"],
+                                         "squashMergeAllowed": True})
+
+
+def test_review_of_an_earlier_head_does_not_cover_the_new_one():
+    t0, t1 = NOW - timedelta(minutes=30), NOW - timedelta(minutes=5)
+    pr = _pr(_node(
+        [("a1", "fix: thing", t0), ("b2", "fix: address review", t1)],
+        reviews=[("coderabbitai", "a1")],
+        comments=[("coderabbitai", t0 + timedelta(minutes=3))],
+        rollup=["GitGuardian"],
+        tail=[("a1", t0, ["gitleaks", "CodeRabbit", "GitGuardian",
+                          ".github/dependabot.yml"]),
+              ("b2", t1, ["GitGuardian"], ["security"])]))
+    assert pr.reviewed_head is False
+    # Only the reviewer check is expected by name: Dependabot's config check
+    # ran earlier because that commit touched its file, not because it must.
+    assert pr.expected_checks == ["CodeRabbit"]
+    # The workflow run exists on the head but none of its jobs do yet.
+    assert pr.running_workflows == ["security"]
+    v = pt.classify(pr, NOW, ME)
+    assert v.state == "WAITING"
+    assert v.reasons == ["workflow security has not finished on this head",
+                         "CodeRabbit has not started on this head"]
+
+
+def test_queued_suite_of_an_app_that_never_reports_does_not_block():
+    t0 = NOW - timedelta(hours=3)
+    pr = _pr(_node([("a1", "fix: thing", t0)], rollup=["ci", "CodeRabbit"],
+                   tail=[("a1", t0, ["ci", "CodeRabbit"])]))
+    assert pr.running_workflows == [] and pr.expected_checks == []
+    assert pt.classify(pr, NOW, ME).state == "READY"
+    # A workflow run still unfinished long after the push is a failure to act on.
+    stuck = _pr(_node([("a1", "fix: thing", t0)], rollup=["CodeRabbit"],
+                      tail=[("a1", t0, ["CodeRabbit"], ["security"])]))
+    v = pt.classify(stuck, NOW, ME)
+    assert v.state == "FAILING"
+    assert v.reasons == ["workflow security never finished on this head"]
+
+
+def test_push_time_comes_from_the_heads_first_check_suite():
+    # Committed an hour ago, pushed 30 seconds ago: the push is what counts.
+    committed, pushed = NOW - timedelta(hours=1), NOW - timedelta(seconds=30)
+    pr = _pr(_node([("a1", "fix: thing", committed)], rollup=["ci"],
+                   tail=[("a1", pushed, ["ci"])]))
+    assert pr.head_pushed == pushed
+    assert pt.classify(pr, NOW, ME).state == "WAITING"
+
+
+def test_reviewer_evidence_on_the_head_counts_three_ways():
+    t0, t1 = NOW - timedelta(minutes=40), NOW - timedelta(minutes=20)
+    commits = [("a1", "fix: thing", t0), ("b2", "fix: more", t1)]
+    tail = [("a1", t0, ["ci"]), ("b2", t1, ["ci"])]
+    by_review = _pr(_node(commits, reviews=[("greptile-apps", "b2")],
+                          rollup=["ci"], tail=tail))
+    by_check = _pr(_node(commits, rollup=["ci", "CodeRabbit"], tail=tail))
+    by_comment = _pr(_node(commits, comments=[("claude", t1 + timedelta(minutes=4))],
+                           rollup=["ci"], tail=tail))
+    stale_comment = _pr(_node(commits, comments=[("claude", t0 + timedelta(minutes=4))],
+                              rollup=["ci"], tail=tail))
+    assert [p.reviewed_head for p in (by_review, by_check, by_comment,
+                                      stale_comment)] == [True, True, True, False]
+
+
+def test_landers_own_commits_keep_the_review_of_the_code_before_them():
+    t0, t1, t2 = (NOW - timedelta(minutes=m) for m in (60, 10, 9))
+    commits = [("a1", "fix: thing", t0),
+               ("m2", "Merge remote-tracking branch 'origin/main' into HEAD", t1),
+               ("r3", "chore(release): v1.4.2", t2)]
+    pr = _pr(_node(commits, reviews=[("greptile-apps", "a1")],
+                   rollup=["ci", "CodeRabbit"],
+                   tail=[("a1", t0, ["ci", "CodeRabbit", "Greptile Review"]),
+                         ("m2", t1, []), ("r3", t2, ["ci", "CodeRabbit"])]))
+    assert pr.reviewed_head is True
+    # The code was reviewed, and the bump adds none: reviewer checks are not
+    # required again on it (GrepTile never re-reviews a push; CodeRabbit shows
+    # as pending if it does).
+    assert pr.expected_checks == []
+    assert pt.classify(pr, NOW, ME).state == "READY"
+    # A hand-made merge may carry conflict resolutions: it is NOT mechanical.
+    hand = [("a1", "fix: thing", t0),
+            ("m2", "Merge remote-tracking branch 'origin/main' into fix/thing", t1)]
+    pr = _pr(_node(hand, reviews=[("greptile-apps", "a1")], rollup=["ci"],
+                   tail=[("a1", t0, ["ci"]), ("m2", t1, ["ci"])]))
+    assert pr.reviewed_head is False
 
 
 def test_outside_contributor_is_never_ready():

@@ -50,12 +50,32 @@ OWNERS = ["your-github-username", "your-org"]
 # for a person (close or revive), never something the tool settles.
 STALE_DAYS = 14
 
-# With no reviewer bot seen on a PR, wait this long after the last push before
-# treating it as "this repo has no automated reviewer".
+# With no automated review on the CURRENT head, wait this long after it was
+# pushed before treating the repo as having no automated reviewer.
 REVIEW_GRACE_MIN = 15
+
+# A head pushed less than this long ago is never READY: checks and reviewers
+# register seconds to minutes after a push, and until they do an empty check
+# list looks exactly like a green one.
+SETTLE_MIN = 3
+
+# Two things must be in on the head before it can be READY: every workflow
+# run GitHub has created for it has finished, and every reviewer check that
+# ran on an earlier commit of the PR has reported on it. Until this long
+# after the push a missing one is WAITING; after that it is FAILING (re-run
+# it or push again), never READY.
+MISSING_CHECK_MIN = 30
 
 REVIEWER_BOTS = {"coderabbitai", "greptile-apps",
                  "copilot-pull-request-reviewer", "claude"}
+# Check names that ARE an automated review (matched case-insensitively).
+REVIEWER_CHECKS = ["coderabbit*", "greptile*"]
+
+# Commits the lander itself adds. They carry no new code to review, so review
+# evidence on the last commit before them still counts for the head.
+MECHANICAL_COMMIT = re.compile(
+    r"^chore\(release\): (v\d|drop pre-landing bump)"
+    r"|^Merge remote-tracking branch 'origin/[^']+' into HEAD$")
 
 # A PR whose every changed path matches one of these changes nothing the
 # product ships, so it lands with no version bump (`Release: none`).
@@ -170,14 +190,20 @@ query($owner:String!,$name:String!,$number:Int!){
       baseRefName headRefName headRefOid
       mergeCommit{oid}
       files(first:100){totalCount nodes{path}}
-      commits(last:100){nodes{commit{messageHeadline committedDate}}}
+      commits(last:100){nodes{commit{oid messageHeadline committedDate}}}
+      tail:commits(last:6){nodes{commit{oid
+        checkSuites(first:50){nodes{createdAt status conclusion
+          workflowRun{workflow{name}}}}
+        statusCheckRollup{contexts(first:100){nodes{__typename
+          ... on CheckRun{name status conclusion}
+          ... on StatusContext{context state}}}}}}}
       statusCheckRollup{contexts(first:100){nodes{__typename
         ... on CheckRun{name status conclusion}
         ... on StatusContext{context state}}}}
       reviewThreads(first:100){nodes{id isResolved isOutdated path line
         comments(first:1){nodes{author{login} body url}}}}
-      reviews(last:50){nodes{author{login}}}
-      comments(last:50){nodes{author{login}}}
+      reviews(last:50){nodes{author{login} commit{oid}}}
+      comments(last:50){nodes{author{login} createdAt}}
     }}}
 """
 
@@ -208,10 +234,22 @@ class PR:
     subjects: list[str] = field(default_factory=list)
     checks: list[tuple[str, str]] = field(default_factory=list)  # (name, bucket)
     threads: list[dict] = field(default_factory=list)            # unresolved
-    reviewer_seen: bool = False
+    # Everything below is about the CURRENT head, never the PR as a whole: a
+    # verdict about an earlier commit says nothing about what would merge.
+    head_pushed: datetime | None = None    # None: same as head_committed
+    review_clock: datetime | None = None   # None: same as head_pushed
+    reviewed_head: bool = False            # automated review covers the head
+    expected_checks: list[str] = field(default_factory=list)  # ran earlier
+    running_workflows: list[str] = field(default_factory=list)  # unfinished
     merge_commit: str | None = None
     methods: list[str] = field(default_factory=lambda: ["squash", "merge"])
     autofix_source_state: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.head_pushed is None:
+            self.head_pushed = self.head_committed
+        if self.review_clock is None:
+            self.review_clock = self.head_pushed
 
     @property
     def ref(self) -> str:
@@ -243,6 +281,93 @@ def check_bucket(node: dict) -> tuple[str, str]:
     return name, "fail"
 
 
+def is_reviewer_check(name: str) -> bool:
+    return any(fnmatchcase(name.lower(), p) for p in REVIEWER_CHECKS)
+
+
+def head_facts(n: dict, commits: list[dict],
+               head_checks: list[tuple[str, str]]) -> dict:
+    """What is known about the PR's CURRENT head, as opposed to the PR.
+
+    pushed        when the head reached GitHub: its first check suite's
+                  creation time (suites appear seconds after a push), else
+                  the commit date.
+    running       workflows GitHub has created a run for on the head that
+                  have not finished. The run exists (queued) before any of
+                  its jobs do, so this catches the gap right after a push
+                  when the check list is still empty.
+    expected      reviewer checks (REVIEWER_CHECKS) that ran on an earlier
+                  commit of this PR and so must report on the head too. Only
+                  reviewer checks: other apps' checks can be conditional on
+                  the paths a commit touches (Dependabot's config check).
+    reviewed      an automated review covers the head: a reviewer bot's
+                  review of it, a passing reviewer check on it, or a reviewer
+                  bot comment written after it was pushed.
+    review_clock  when the wait for a review starts.
+
+    The lander's own commits (release bump, clean merge of the base) carry no
+    new code, so a review of the last commit before them still covers the
+    head, and reviewers that do not re-review a push are not expected on them.
+    """
+    tail = [c["commit"] for c in (n.get("tail") or {}).get("nodes", [])]
+
+    def buckets(commit: dict) -> list[tuple[str, str]]:
+        nodes = (commit.get("statusCheckRollup") or {}) \
+            .get("contexts", {}).get("nodes", [])
+        return [check_bucket(x) for x in nodes]
+
+    committed = _when(commits[-1]["committedDate"]) if commits \
+        else _when(n.get("updatedAt"))
+    suite_nodes = ((tail[-1] if tail else {}).get("checkSuites") or {}) \
+        .get("nodes", [])
+    suites = [_when(s["createdAt"]) for s in suite_nodes if s.get("createdAt")]
+    pushed = max(committed, min(suites)) if suites else committed
+    running: list[str] = []
+    for s in suite_nodes:
+        if not s.get("workflowRun"):
+            continue    # other apps leave a suite queued forever; ignore
+        # A conclusion wins over a stale status, as in check_bucket.
+        if s.get("status") == "COMPLETED" or s.get("conclusion"):
+            continue
+        name = ((s["workflowRun"].get("workflow") or {}).get("name")
+                or "workflow")
+        if name not in running:
+            running.append(name)
+
+    # Walk back over the lander's own commits to the last one with real code.
+    i = len(commits) - 1
+    while i > 0 and MECHANICAL_COMMIT.match(commits[i].get("messageHeadline") or ""):
+        i -= 1
+    mechanical_head = bool(commits) and i < len(commits) - 1
+    covered = {c.get("oid") for c in commits[i:]} if commits else set()
+
+    def bot(x: dict) -> bool:
+        return ((x.get("author") or {}).get("login") or "").lower() in REVIEWER_BOTS
+
+    by_review = any(bot(r) and (r.get("commit") or {}).get("oid") in covered
+                    for r in (n.get("reviews") or {}).get("nodes", []))
+    by_check = any(is_reviewer_check(name) and b == "pass"
+                   for name, b in head_checks) or any(
+        is_reviewer_check(name) and b == "pass"
+        for c in tail if c.get("oid") in covered for name, b in buckets(c))
+    by_comment = any(bot(c) and c.get("createdAt")
+                     and _when(c["createdAt"]) >= pushed
+                     for c in (n.get("comments") or {}).get("nodes", []))
+    reviewed = by_review or by_check or by_comment
+
+    expected: list[str] = []
+    if not (mechanical_head and (by_review or by_check)):
+        for c in tail[:-1]:
+            for name, _ in buckets(c):
+                if is_reviewer_check(name) and name not in expected:
+                    expected.append(name)
+
+    return {"pushed": pushed, "expected": expected, "reviewed": reviewed,
+            "running": running,
+            "review_clock": _when(commits[i]["committedDate"])
+            if mechanical_head else pushed}
+
+
 def pr_from_node(repo: str, repo_node: dict) -> PR:
     n = repo_node["pullRequest"]
     if n is None:
@@ -262,10 +387,8 @@ def pr_from_node(repo: str, repo_node: dict) -> PR:
             "body": (first.get("body") or "").strip(),
             "url": first.get("url", ""),
         })
-    voices = [(x.get("author") or {}).get("login", "")
-              for key in ("reviews", "comments")
-              for x in (n.get(key) or {}).get("nodes", [])]
-    methods = [m for m, ok in (("squash", repo_node.get("squashMergeAllowed")),
+    head = head_facts(n, commits, [check_bucket(c) for c in rollup])
+    methods =[m for m, ok in (("squash", repo_node.get("squashMergeAllowed")),
                                ("merge", repo_node.get("mergeCommitAllowed")),
                                ("rebase", repo_node.get("rebaseMergeAllowed")))
                if ok]
@@ -288,7 +411,9 @@ def pr_from_node(repo: str, repo_node: dict) -> PR:
         subjects=[c["messageHeadline"] for c in commits],
         checks=[check_bucket(c) for c in rollup],
         threads=threads,
-        reviewer_seen=any(v.lower() in REVIEWER_BOTS for v in voices),
+        head_pushed=head["pushed"], review_clock=head["review_clock"],
+        reviewed_head=head["reviewed"], expected_checks=head["expected"],
+        running_workflows=head["running"],
         merge_commit=(n.get("mergeCommit") or {}).get("oid"),
         methods=methods or ["merge"],
     )
@@ -371,7 +496,8 @@ STALE_STEP = "no movement: the repo owner decides, close or revive"
 
 
 def classify(pr: PR, now: datetime, trusted: set[str],
-             owners: list[str] | None = None) -> Verdict:
+             owners: list[str] | None = None,
+             accept_missing: bool = False) -> Verdict:
     if pr.state != "OPEN":
         return Verdict(pr.state)
     idle_days = (now - pr.updated).days
@@ -405,9 +531,31 @@ def classify(pr: PR, now: datetime, trusted: set[str],
     failing = [n for n, b in pr.checks if b == "fail"]
     if failing:
         return verdict("FAILING", *failing)
+    # From here on a missing signal must never read as a good one. Right after
+    # a push the head's check list is empty or partial, and "nothing failed,
+    # nothing pending" is true of an empty list.
+    since_push = (now - pr.head_pushed).total_seconds() / 60
+    if since_push < SETTLE_MIN:
+        return verdict("WAITING", f"head pushed {max(0, int(since_push * 60))}s "
+                       "ago; checks and review may not have registered yet")
     pending = [n for n, b in pr.checks if b == "pending"]
     if pending:
         return verdict("WAITING", *(f"{n} running" for n in pending))
+    have = {n for n, _ in pr.checks}
+    missing = [n for n in pr.expected_checks if n not in have]
+    if (pr.running_workflows or missing) and not accept_missing:
+        if since_push < MISSING_CHECK_MIN:
+            return verdict(
+                "WAITING",
+                *(f"workflow {w} has not finished on this head"
+                  for w in pr.running_workflows),
+                *(f"{n} has not started on this head" for n in missing))
+        return verdict(
+            "FAILING",
+            *(f"workflow {w} never finished on this head"
+              for w in pr.running_workflows),
+            *(f"{n} ran on an earlier commit but never started on this head"
+              for n in missing))
     if pr.threads:
         return verdict("THREADS", f"{len(pr.threads)} unresolved review "
                        f"thread{'s' if len(pr.threads) != 1 else ''}")
@@ -418,10 +566,10 @@ def classify(pr: PR, now: datetime, trusted: set[str],
     if is_sensitive(pr) and not SENSITIVE_EVIDENCE.search(pr.body):
         return verdict("REVIEW", "auth/billing/migration paths and no "
                        "adversarial review recorded in the PR body")
-    since_push = (now - pr.head_committed).total_seconds() / 60
-    if not pr.reviewer_seen and not pr.author_is_bot \
-            and since_push < REVIEW_GRACE_MIN:
-        return verdict("WAITING", "automated review has not arrived yet")
+    since_review = (now - pr.review_clock).total_seconds() / 60
+    if not pr.reviewed_head and not pr.author_is_bot \
+            and since_review < REVIEW_GRACE_MIN:
+        return verdict("WAITING", "no automated review of this head yet")
     return verdict("READY")
 
 
@@ -767,7 +915,8 @@ def close_superseded(repo: str, number: int, why: str) -> None:
 
 def wait_ready(repo: str, number: int, oid: str, minutes: float,
                trusted: set[str], had_checks: bool,
-               owners: list[str] | None = None) -> tuple[bool, PR]:
+               owners: list[str] | None = None,
+               accept_missing: bool = False) -> tuple[bool, PR]:
     """Poll until the PR is READY at `oid` twice running, or time runs out."""
     deadline = time.time() + minutes * 60
     streak = 0
@@ -778,7 +927,8 @@ def wait_ready(repo: str, number: int, oid: str, minutes: float,
             raise ToolError(f"{pr.ref} is {pr.state.lower()} now")
         if pr.head_oid != oid:
             raise ToolError("someone else pushed to the branch; run again")
-        v = classify(pr, datetime.now(timezone.utc), trusted, owners)
+        v = classify(pr, datetime.now(timezone.utc), trusted, owners,
+                     accept_missing)
         settled = v.state == "READY" and (pr.checks or not had_checks)
         if v.state not in ("READY", "WAITING"):
             raise ToolError(f"{pr.ref} is {v.label}: {'; '.join(v.reasons)}")
@@ -810,7 +960,8 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
              no_bump: bool = False, method: str | None = None,
              clone: str | None = None, wait: float = 8.0,
              trusted: set[str] | None = None,
-             owners: list[str] | None = None, **_: object) -> int:
+             owners: list[str] | None = None,
+             accept_missing: bool = False, **_: object) -> int:
     repo, number = parse_ref(ref)
     trusted = trusted if trusted is not None else trusted_authors()
     pr = fetch_pr(repo, number)
@@ -819,15 +970,16 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
         print(f"  already {pr.state.lower()}; nothing to land")
         return 0
 
-    v = classify(pr, datetime.now(timezone.utc), trusted, owners)
+    v = classify(pr, datetime.now(timezone.utc), trusted, owners, accept_missing)
     if v.state == "WAITING" and apply and wait > 0:
         print(f"  waiting up to {wait:g} min: {'; '.join(v.reasons)}")
         ok, pr = wait_ready(repo, number, pr.head_oid, wait, trusted,
-                            bool(pr.checks), owners)
+                            bool(pr.checks), owners, accept_missing)
         if not ok:
             print("  WAITING: still running. Run the same command again.")
             return 3
-        v = classify(pr, datetime.now(timezone.utc), trusted, owners)
+        v = classify(pr, datetime.now(timezone.utc), trusted, owners,
+                     accept_missing)
     if v.state != "READY":
         print(f"  {v.label}: {'; '.join(v.reasons) or 'not ready'}")
         print(f"  next: {STALE_STEP if v.stale else NEXT_STEP.get(v.state, '')}")
@@ -873,7 +1025,7 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
                     oid = git(ws.wt, "rev-parse", "HEAD").strip()
                     print(f"  pushed bump v{version} ({oid[:9]}); waiting on checks")
                     ok, pr = wait_ready(repo, number, oid, wait, trusted,
-                                        bool(pr.checks))
+                                        bool(pr.checks), owners, accept_missing)
                     if not ok:
                         print("  WAITING: checks on the bump commit are still "
                               "running. Run the same command again.")
@@ -1059,6 +1211,10 @@ def main(argv: list[str] | None = None) -> int:
     la.add_argument("--clone", help="local clone to work from")
     la.add_argument("--wait", type=float, default=8.0,
                     help="minutes to wait on checks before exiting 3 (default 8)")
+    la.add_argument("--accept-missing", action="store_true",
+                    help="land although a check that ran on an earlier commit "
+                         "has not reported on the head (path-filtered or "
+                         "removed workflows); never implied, never in sweep")
 
     sw = sub.add_parser("sweep", help="close superseded, land everything READY")
     scope(sw)

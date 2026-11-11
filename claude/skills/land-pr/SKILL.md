@@ -76,10 +76,10 @@ a PR title or a file; the lander assigns it at merge.
 
 | State | Meaning | Who moves it |
 |---|---|---|
-| `READY` | green, reviewed, every thread resolved, mergeable | `land` |
-| `WAITING` | checks or the automated review still running | time; re-run |
+| `READY` | the current head is green and reviewed, every thread resolved, mergeable | `land` |
+| `WAITING` | head pushed under 3 min ago, or checks, a workflow run or the automated review not in yet on it | time; re-run |
 | `THREADS` | unresolved review threads | fix or answer each, then resolve it |
-| `FAILING` | a check failed | fix and push |
+| `FAILING` | a check failed, or one never reported on the head within 30 min | fix and push, or re-run it |
 | `CONFLICT` | conflicts with the base branch | merge base in, resolve |
 | `REVIEW` | auth / billing / migration paths, no adversarial review recorded | run it, note "adversarial" in the PR body |
 | `BLOCKED` | a branch rule refuses the merge | read `gh pr merge` output |
@@ -96,12 +96,30 @@ Everything else it lists and leaves. Report the `STALE`, `EXTERNAL` and
 
 ## Policy lives at the top of the tool
 
-`OWNERS`, `STALE_DAYS`, `REVIEW_GRACE_MIN`, `REVIEWER_BOTS`, `SHIPS_NOTHING`
-(paths that need no version bump) and `SENSITIVE` (paths that need the
-adversarial review) are constants at the top of `pr_tool.py`. Change behavior
-there, not in the logic below.
+`OWNERS`, `STALE_DAYS`, `REVIEW_GRACE_MIN`, `SETTLE_MIN`, `MISSING_CHECK_MIN`,
+`REVIEWER_BOTS`, `REVIEWER_CHECKS`, `SHIPS_NOTHING` (paths that need no
+version bump) and `SENSITIVE` (paths that need the adversarial review) are
+constants at the top of `pr_tool.py`. Change behavior there, not in the logic
+below.
 
 ## Gotchas
+
+- **Every verdict is about the current head, not the PR.** Right after a push
+  the head's check list is empty or partial, and an empty list has nothing
+  failing in it. So a head is never READY in its first 3 minutes, while a
+  workflow run GitHub has created for it is unfinished, or while a reviewer
+  check that ran on an earlier commit has not reported on it. A review counts
+  only if it is of the head: the bot's review of that commit, a passing
+  reviewer check on it, or a bot comment written after the push. It is safe to
+  run `land --apply` straight after pushing a fix; it waits.
+- **A check that never arrives becomes `FAILING` after 30 minutes**, not
+  READY. Re-run it or push again. GrepTile does not re-review a push, so
+  re-trigger it. For a workflow that is path-filtered and will never run on
+  this head, `land <ref> --apply --accept-missing` says so explicitly; `sweep`
+  never implies it.
+- **The lander's own commits carry the earlier review.** A release bump or a
+  clean merge of the base adds no code, so the review of the commit before
+  them still covers the head. A merge made by hand does not get this.
 
 - **Unresolved means unresolved.** An outdated thread still blocks. Reply in
   the thread, then `threads --resolve`. Never resolve without a fix or reply.
