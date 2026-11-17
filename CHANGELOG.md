@@ -3,6 +3,12 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.12.1] - 2026-11-17
+
+- Runbook: failed autosaves are retried before Submit or a tick, reopening is never blocked, item ids are never reused, env-var style secrets are refused, the processor runs with a command allowlist instead of unrestricted Bash, and WSL gets a real `runbook` command.
+- land-pr: safer local branch cleanup (untracked files always seen, only the validated tip deleted, branch config removed), and CRLF PR bodies keep their release notes.
+- yt-transcript keeps a summary you already wrote; the local-review rule names the `/code-review` base range.
+
 ## [0.12.0] - 2026-11-17
 
 - New central-runbook tool (`tools/runbook/`) and the house rule that sends every step waiting on you there (`runbook-standards.md`, "Where pending steps go").
