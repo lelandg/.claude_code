@@ -111,6 +111,7 @@ const TOKEN = "{{TOKEN}}";
 let S = null;                       // latest state from the server
 const drafts = new Map();           // key -> unsaved text
 const timers = new Map();           // key -> {t, run}
+const senders = new Map();          // key -> run; outlives a failed save so it can be retried
 const openKeys = new Set();         // <details> the user has opened ("!key" = closed on purpose)
 let queue = Promise.resolve();
 let submitting = null;              // {prevAt, started}
@@ -232,6 +233,7 @@ function autosaveField(key, initial, send) {
       updateHeader();
     }
   };
+  senders.set(key, run);
   return {
     value,
     onInput(text) {
@@ -244,11 +246,48 @@ function autosaveField(key, initial, send) {
   };
 }
 
+// Autosaved drafts not yet stored. The "new note" box is sent by hand, has no
+// sender, and never counts: an unsent note must not block Submit or a tick.
+// Nor does a draft whose item left the list (verified, dismissed): its save can
+// only 404. Its text stays in drafts (the unload warning still sees it) and is
+// shown once in a toast and the console so it can be copied.
+const orphansShown = new Set();
+function isOrphan(key) {
+  if (key === "notes_self" || !S || !S.items) return false;
+  const id = key.slice(0, key.lastIndexOf(":"));
+  return !S.items.some((i) => i.id === id);
+}
+function unsaved() {
+  return Array.from(drafts.keys()).filter((k) => {
+    if (!senders.has(k)) return false;
+    if (!isOrphan(k)) return true;
+    if (!orphansShown.has(k)) {
+      orphansShown.add(k);
+      console.warn("Unsaved text for " + k + " (the item left the list):\n" + drafts.get(k));
+      toast("Kept your unsaved text for " + k + " (item left the list); copy it from the browser console.");
+    }
+    return false;
+  });
+}
+
+// Send every unsaved draft, including one whose earlier save failed (its timer
+// is gone, the draft is not). Resolves true only when nothing is left unsaved.
 async function flushAll() {
-  const jobs = [];
-  for (const [, x] of Array.from(timers)) { clearTimeout(x.t); jobs.push(x.run()); }
-  await Promise.all(jobs);
+  for (const [, x] of Array.from(timers)) clearTimeout(x.t);
+  timers.clear();
+  await Promise.all(unsaved().map((k) => senders.get(k)()));
   await queue;
+  return unsaved().length === 0;
+}
+
+// Run fn only once every edit is stored, so a tick or Submit never outruns lost text.
+// A recovery action (reopening an item) still runs: a draft on an item another tab
+// closed is refused (423) until it is reopened, so waiting for it would deadlock.
+function afterFlush(fn, recovery) {
+  return flushAll().then((saved) => {
+    if (!saved && !recovery) { toast("Not done: " + unsaved().length + " edit(s) did not save. Try again."); return null; }
+    return fn();
+  });
 }
 
 // ---------------------------------------------------------------- rendering
@@ -345,7 +384,7 @@ function itemEl(item) {
     cb.checked = isDone;
     cb.addEventListener("change", () => {
       const want = cb.checked ? "done" : "open";
-      flushAll().then(() => patchItem(item.id, { state: want }, true)).then(() => renderAll());
+      afterFlush(() => patchItem(item.id, { state: want }, true), want === "open").then(() => renderAll());
     });
     row.append(cb);
   } else {
@@ -372,7 +411,7 @@ function itemEl(item) {
       const r = el("input", { type: "radio", name: "dec-" + item.id, id, "data-fk": id, disabled: locked });
       r.checked = item.chosen === o.label;
       r.addEventListener("change", () => {
-        if (r.checked) flushAll().then(() => patchItem(item.id, { chosen: o.label }, true)).then(() => renderAll());
+        if (r.checked) afterFlush(() => patchItem(item.id, { chosen: o.label }, true)).then(() => renderAll());
       });
       fs.append(el("div", { class: "opt" }, r, el("label", { for: id },
         el("strong", { text: o.label + (o.recommended ? " ★" : "") }),
@@ -397,13 +436,13 @@ function itemEl(item) {
     const acts = el("div", { class: "actions" });
     if (item.state === "problem") {
       acts.append(el("button", { type: "button", text: "Back to open", "data-fk": item.id + ":open",
-        onclick: () => flushAll().then(() => patchItem(item.id, { state: "open" }, true)).then(() => renderAll()) }));
+        onclick: () => afterFlush(() => patchItem(item.id, { state: "open" }, true), true).then(() => renderAll()) }));
     } else if (!isDone) {
       acts.append(el("button", { type: "button", text: "Problem", disabled: gate.length > 0,
         "data-fk": item.id + ":problem",
         onclick: () => {
           openKeys.add(item.id + ":out"); openKeys.delete("!" + item.id + ":out");
-          flushAll().then(() => patchItem(item.id, { state: "problem" }, true)).then(() => renderAll());
+          afterFlush(() => patchItem(item.id, { state: "problem" }, true)).then(() => renderAll());
         } }));
     }
     body.append(acts);
@@ -411,7 +450,7 @@ function itemEl(item) {
   if ((item.tags || []).includes("found-by-sweep")) {
     body.append(el("div", { class: "actions" }, el("button", { type: "button", class: "danger", text: "Dismiss",
       "data-fk": item.id + ":dismiss",
-      onclick: () => flushAll().then(() => write("POST", "/api/items/" + encodeURIComponent(item.id) + "/dismiss", {}, true))
+      onclick: () => afterFlush(() => write("POST", "/api/items/" + encodeURIComponent(item.id) + "/dismiss", {}, true))
         .then(() => renderAll()) })));
   }
   art.append(body);
@@ -524,7 +563,12 @@ function renderAll() {
 async function submit() {
   const btn = $("submit"), status = $("submitstatus");
   btn.disabled = true;
-  await flushAll();
+  if (!(await flushAll())) {
+    btn.disabled = false;
+    status.textContent = "";
+    toast("Not submitted: " + unsaved().length + " edit(s) did not save. Try again.");
+    return;
+  }
   const prevAt = S && S.last_run ? S.last_run.at : null;
   const r = await write("POST", "/api/submit", {});
   if (!r) { btn.disabled = false; status.textContent = ""; return; }

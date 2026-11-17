@@ -171,6 +171,23 @@ class Ids(unittest.TestCase):
         self.assertEqual(rblib.next_item_id(e), "rb-0001")
         self.assertEqual(rblib.next_note_id(e), "n-1")
 
+    def test_pruned_id_is_never_reused(self):
+        now = datetime(2026, 11, 1, 12, 0, 0)
+        s = rblib.empty_state()
+        s["items"] = [{"id": "rb-0001"}]
+        s["done_log"] = [{"id": "rb-0002", "removed_at": now.isoformat()}]
+        rblib.prune_done_log(s, now + timedelta(days=31))
+        self.assertEqual(s["done_log"], [])
+        self.assertEqual(rblib.next_item_id(s), "rb-0003")
+        self.assertEqual(rblib.next_item_id(s), "rb-0004")  # allocation advances the counter
+
+    def test_counter_survives_a_state_without_it(self):
+        s = rblib.empty_state()
+        del s["item_seq"]  # state written before the counter existed
+        s["done_log"] = [{"id": "rb-0009"}]
+        self.assertEqual(rblib.next_item_id(s), "rb-0010")
+        self.assertEqual(s["item_seq"], 10)
+
 
 class Scanners(unittest.TestCase):
     def test_find_secrets_kinds(self):
@@ -185,6 +202,20 @@ class Scanners(unittest.TestCase):
         self.assertEqual(rblib.find_secrets("password=" + "hunter2hunter2"), ["assigned-secret"])
         self.assertEqual(rblib.find_secrets("TOKEN=$TOKEN_VALUE_HERE"), [])
         self.assertEqual(rblib.find_secrets("token: <PASTE-TOKEN-HERE>"), [])
+
+    def test_assigned_secret_env_var_names(self):
+        # Names and values are assembled at runtime (as in fakes.py) so no
+        # NAME=value literal is committed for secret scanners to flag.
+        names = ("DB_" + "PASS" + "WORD", "GITHUB_" + "TOK" + "EN",
+                 "STRIPE_" + "API_" + "KEY", "AWS_" + "SEC" + "RET_ACCESS_KEY")
+        for name in names:
+            text = "export " + name + "=" + "q" * 12
+            self.assertEqual(rblib.find_secrets(text), ["assigned-secret"], name)
+        lookalikes = ("max_" + "tokens", "pass" + "wordless", "--" + "secret-id")
+        for text in (names[1] + "=$" + names[1], names[0] + ": <PASTE-VALUE-HERE>",
+                     lookalikes[0] + "=" + "1" * 9, lookalikes[1] + ": " + "on" * 5,
+                     lookalikes[2] + " prod/db/main"):
+            self.assertEqual(rblib.find_secrets(text), [], text)
 
     def test_redact(self):
         self.assertEqual(

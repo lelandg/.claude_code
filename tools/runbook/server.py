@@ -398,15 +398,18 @@ def make_server(port: int, state_path: Path, token: str, inbox_roots: list[Path]
     return srv
 
 
-def default_spawn(reason: str) -> None:
+def default_spawn(reason: str, state_path: Path | None = None) -> None:
     exe = Path(sys.executable)
     pyw = exe.with_name("pythonw.exe") if exe.name.lower() == "python.exe" else exe
     py = str(pyw if pyw.exists() else exe)
     flags = 0
     if os.name == "nt":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    cmd = [py, str(ROOT / "process.py"), "--reason", reason]
+    if state_path is not None:
+        cmd += ["--state", str(state_path)]  # the processor must read the state this server serves
     subprocess.Popen(
-        [py, str(ROOT / "process.py"), "--reason", reason],
+        cmd,
         creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, close_fds=True,
     )
@@ -440,7 +443,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--state", type=Path, default=rblib.STATE)
     args = ap.parse_args(argv)
     roots = [rblib.projects_root()]
-    srv = make_server(args.port, args.state, _read_token(ROOT / ".token"), roots, default_spawn)
+    srv = make_server(args.port, args.state, _read_token(ROOT / ".token"), roots,
+                      lambda reason: default_spawn(reason, args.state))
     stop = threading.Event()
     threading.Thread(target=_sweep_loop, args=(args.state, roots, stop), daemon=True).start()
     log(f"runbook listening on http://127.0.0.1:{srv.server_address[1]}/")
