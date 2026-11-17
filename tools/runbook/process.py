@@ -179,7 +179,8 @@ def _subprocess_runner(reason: str, now: datetime, logs: Path | None = None,
                        state_path: Path | None = None) -> Runner:
     # The model changes state only through runbook.py, which reads RUNBOOK_STATE,
     # so a non-default --state reaches the CLI calls it makes.
-    env = dict(os.environ, RUNBOOK_STATE=str(state_path)) if state_path else None
+    # Absolute: the child runs with cwd=ROOT, so a relative path would name another file.
+    env = dict(os.environ, RUNBOOK_STATE=str(Path(state_path).resolve())) if state_path else None
 
     def runner(cmd: list, cwd: Path) -> tuple:
         d = logs or ROOT / "logs"

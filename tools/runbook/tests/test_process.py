@@ -277,7 +277,14 @@ class StatePath(unittest.TestCase):
             st = Path(d) / "alt.json"
             runner = process._subprocess_runner("submit", datetime.now(timezone.utc), Path(d), st)
             code, out = runner([sys.executable, "-c", "import os; print(os.environ['RUNBOOK_STATE'])"], Path(d))
-        self.assertEqual((code, out.strip()), (0, str(st)))
+        self.assertEqual((code, out.strip()), (0, str(st.resolve())))
+
+    def test_relative_state_reaches_the_child_as_an_absolute_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            runner = process._subprocess_runner("submit", datetime.now(timezone.utc), Path(d),
+                                                Path("alt.json"))
+            code, out = runner([sys.executable, "-c", "import os; print(os.environ['RUNBOOK_STATE'])"], Path(d))
+        self.assertEqual((code, out.strip()), (0, str(Path("alt.json").resolve())))
 
     def test_prompt_content(self):
         text = (Path(process.__file__).parent / "processor-prompt.md").read_text(encoding="utf-8")

@@ -67,7 +67,10 @@ class PageTests(unittest.TestCase):
             "  ok = true;\n"
             "  const r2 = await flushAll();\n"
             "  let ran2 = false; await afterFlush(() => { ran2 = true; });\n"
-            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, r2, ran2, sent, left: drafts.size, toasts: toasts.length }));\n"
+            "  drafts.set('new_note', 'typed but not sent');  // sent by hand: no sender\n"
+            "  const r3 = await flushAll();\n"
+            "  drafts.delete('new_note');\n"
+            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, r2, ran2, r3, sent, left: drafts.size, toasts: toasts.length }));\n"
             "})();\n"
         )
         r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=60)
@@ -79,6 +82,7 @@ class PageTests(unittest.TestCase):
         self.assertTrue(got["r2"])        # the failed draft is resent once the service answers
         self.assertTrue(got["ran2"])
         self.assertEqual(got["left"], 0)
+        self.assertTrue(got["r3"])        # an unsent note to Claude never blocks Submit
         self.assertGreaterEqual(len(got["sent"]), 4)  # initial save + 3 retries
 
     def test_demo_fixture_loads(self):

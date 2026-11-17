@@ -246,25 +246,24 @@ function autosaveField(key, initial, send) {
   };
 }
 
+// Autosaved drafts not yet stored. The "new note" box is sent by hand, has no
+// sender, and never counts: an unsent note must not block Submit or a tick.
+function unsaved() { return Array.from(drafts.keys()).filter((k) => senders.has(k)); }
+
 // Send every unsaved draft, including one whose earlier save failed (its timer
 // is gone, the draft is not). Resolves true only when nothing is left unsaved.
 async function flushAll() {
   for (const [, x] of Array.from(timers)) clearTimeout(x.t);
   timers.clear();
-  const jobs = [];
-  for (const key of Array.from(drafts.keys())) {
-    const run = senders.get(key);
-    if (run) jobs.push(run());
-  }
-  await Promise.all(jobs);
+  await Promise.all(unsaved().map((k) => senders.get(k)()));
   await queue;
-  return drafts.size === 0;
+  return unsaved().length === 0;
 }
 
 // Run fn only once every edit is stored, so a tick or Submit never outruns lost text.
 function afterFlush(fn) {
   return flushAll().then((saved) => {
-    if (!saved) { toast("Not done: " + drafts.size + " edit(s) did not save. Try again."); return null; }
+    if (!saved) { toast("Not done: " + unsaved().length + " edit(s) did not save. Try again."); return null; }
     return fn();
   });
 }
@@ -545,7 +544,7 @@ async function submit() {
   if (!(await flushAll())) {
     btn.disabled = false;
     status.textContent = "";
-    toast("Not submitted: " + drafts.size + " edit(s) did not save. Try again.");
+    toast("Not submitted: " + unsaved().length + " edit(s) did not save. Try again.");
     return;
   }
   const prevAt = S && S.last_run ? S.last_run.at : null;
