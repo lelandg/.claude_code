@@ -405,4 +405,5 @@ def main(argv: list[str], state_path: Path = rblib.STATE, cwd: Path | None = Non
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    # process.py sets RUNBOOK_STATE when it runs against a non-default state file.
+    sys.exit(main(sys.argv[1:], Path(os.environ.get("RUNBOOK_STATE") or rblib.STATE)))

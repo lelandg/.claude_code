@@ -970,10 +970,13 @@ class ReleasePlan:
 
 
 def release_notes(body: str) -> str | None:
+    # Normalize first: on a CRLF body `[ \t]*$` cannot step over the "\r", so
+    # the heading itself would never match.
+    body = body.replace("\r\n", "\n")
     m = NOTES_HEADING.search(body)
     if not m:
         return None
-    rest = body[m.end():].replace("\r\n", "\n")
+    rest = body[m.end():]
     depth = len(m.group(1))
     end = re.search(rf"^(?:#{{1,{depth}}}[ \t]|{NOTES_END})", rest, re.M)
     text = rest[:end.start()] if end else rest
@@ -1568,7 +1571,10 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
         elif _inside(wt):
             kept.append(f"{wt} (this process is running inside it; run "
                         "`land` again from elsewhere to remove it)")
-        elif git(wt, "status", "--porcelain", check=False).strip():
+        # --untracked-files=all: status.showUntrackedFiles=no would otherwise
+        # hide them, and the non-forced `worktree remove` honours it too.
+        elif git(wt, "status", "--porcelain", "--untracked-files=all",
+                 check=False).strip():
             kept.append(f"{wt} (uncommitted or untracked files)")
         else:
             proc = run(["git", "-C", str(clone), "worktree", "remove", str(wt)],
@@ -1582,10 +1588,17 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
             print(f"  kept local worktree {item}")
         print(f"  kept local branch {pr.head}: still checked out")
         return
-    proc = run(["git", "-C", str(clone), "branch", "-D", pr.head], check=False)
+    if _branch_worktrees(clone, pr.head):  # checked out again meanwhile
+        print(f"  kept local branch {pr.head}: still checked out")
+        return
+    # Delete only the tip validated above: update-ref with the expected old
+    # value fails if anything moved the branch since, where `branch -D`
+    # would drop the new commits (and the reflog) unchecked.
+    proc = run(["git", "-C", str(clone), "update-ref", "-d", ref, tip],
+               check=False)
     print(f"  deleted local branch {pr.head}" if proc.returncode == 0 else
-          f"  could not delete local branch {pr.head}: "
-          f"{(proc.stderr or proc.stdout).strip()}")
+          f"  kept local branch {pr.head}: it moved after it was checked "
+          f"({(proc.stderr or proc.stdout).strip()})")
 
 
 def after_merge(pr: PR, version: str | None) -> int:

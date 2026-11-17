@@ -1,4 +1,7 @@
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -37,6 +40,46 @@ class PageTests(unittest.TestCase):
         self.assertTrue(dismiss and dismiss.group(1), "Dismiss does not retry on stale")
         # Submit is not idempotent, so it never retries.
         self.assertIsNone(re.search(r'"/api/submit", \{[^)]*\}, true\)', PAGE))
+
+    def test_submit_and_ticks_wait_for_every_edit_to_save(self):
+        self.assertIn("if (!(await flushAll()))", PAGE)
+        # afterFlush is the one caller; every click goes through it.
+        self.assertEqual(PAGE.count("flushAll().then("), 1)
+        self.assertGreaterEqual(PAGE.count("afterFlush(() =>"), 5)
+
+    @unittest.skipUnless(shutil.which("node"), "node not found")
+    def test_failed_autosave_is_retried_before_submit(self):
+        start = PAGE.index("// ---------------------------------------------------------------- autosave")
+        end = PAGE.index("// ---------------------------------------------------------------- rendering")
+        harness = (
+            "const drafts = new Map(), timers = new Map(), senders = new Map();\n"
+            "let queue = Promise.resolve(); const toasts = [];\n"
+            "function toast(m) { toasts.push(m); } function updateHeader() {}\n"
+            + PAGE[start:end] +
+            "\n(async () => {\n"
+            "  const tick = () => new Promise((r) => setTimeout(r, 20));\n"
+            "  let ok = false; const sent = [];\n"
+            "  const a = autosaveField('k', '', async (t) => { sent.push(t); return ok ? {} : null; });\n"
+            "  a.onInput('hello'); a.onBlur(); await tick();\n"
+            "  const failedTimerGone = !timers.has('k') && drafts.has('k');\n"
+            "  const r1 = await flushAll();\n"
+            "  let ran = false; await afterFlush(() => { ran = true; });\n"
+            "  ok = true;\n"
+            "  const r2 = await flushAll();\n"
+            "  let ran2 = false; await afterFlush(() => { ran2 = true; });\n"
+            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, r2, ran2, sent, left: drafts.size, toasts: toasts.length }));\n"
+            "})();\n"
+        )
+        r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertTrue(got["failedTimerGone"])
+        self.assertFalse(got["r1"])       # still failing: not saved, so not submitted
+        self.assertFalse(got["ran"])
+        self.assertTrue(got["r2"])        # the failed draft is resent once the service answers
+        self.assertTrue(got["ran2"])
+        self.assertEqual(got["left"], 0)
+        self.assertGreaterEqual(len(got["sent"]), 4)  # initial save + 3 retries
 
     def test_demo_fixture_loads(self):
         st = rblib.load(DEMO)

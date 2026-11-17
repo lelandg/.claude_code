@@ -111,6 +111,7 @@ const TOKEN = "{{TOKEN}}";
 let S = null;                       // latest state from the server
 const drafts = new Map();           // key -> unsaved text
 const timers = new Map();           // key -> {t, run}
+const senders = new Map();          // key -> run; outlives a failed save so it can be retried
 const openKeys = new Set();         // <details> the user has opened ("!key" = closed on purpose)
 let queue = Promise.resolve();
 let submitting = null;              // {prevAt, started}
@@ -232,6 +233,7 @@ function autosaveField(key, initial, send) {
       updateHeader();
     }
   };
+  senders.set(key, run);
   return {
     value,
     onInput(text) {
@@ -244,11 +246,27 @@ function autosaveField(key, initial, send) {
   };
 }
 
+// Send every unsaved draft, including one whose earlier save failed (its timer
+// is gone, the draft is not). Resolves true only when nothing is left unsaved.
 async function flushAll() {
+  for (const [, x] of Array.from(timers)) clearTimeout(x.t);
+  timers.clear();
   const jobs = [];
-  for (const [, x] of Array.from(timers)) { clearTimeout(x.t); jobs.push(x.run()); }
+  for (const key of Array.from(drafts.keys())) {
+    const run = senders.get(key);
+    if (run) jobs.push(run());
+  }
   await Promise.all(jobs);
   await queue;
+  return drafts.size === 0;
+}
+
+// Run fn only once every edit is stored, so a tick or Submit never outruns lost text.
+function afterFlush(fn) {
+  return flushAll().then((saved) => {
+    if (!saved) { toast("Not done: " + drafts.size + " edit(s) did not save. Try again."); return null; }
+    return fn();
+  });
 }
 
 // ---------------------------------------------------------------- rendering
@@ -345,7 +363,7 @@ function itemEl(item) {
     cb.checked = isDone;
     cb.addEventListener("change", () => {
       const want = cb.checked ? "done" : "open";
-      flushAll().then(() => patchItem(item.id, { state: want }, true)).then(() => renderAll());
+      afterFlush(() => patchItem(item.id, { state: want }, true)).then(() => renderAll());
     });
     row.append(cb);
   } else {
@@ -372,7 +390,7 @@ function itemEl(item) {
       const r = el("input", { type: "radio", name: "dec-" + item.id, id, "data-fk": id, disabled: locked });
       r.checked = item.chosen === o.label;
       r.addEventListener("change", () => {
-        if (r.checked) flushAll().then(() => patchItem(item.id, { chosen: o.label }, true)).then(() => renderAll());
+        if (r.checked) afterFlush(() => patchItem(item.id, { chosen: o.label }, true)).then(() => renderAll());
       });
       fs.append(el("div", { class: "opt" }, r, el("label", { for: id },
         el("strong", { text: o.label + (o.recommended ? " ★" : "") }),
@@ -397,13 +415,13 @@ function itemEl(item) {
     const acts = el("div", { class: "actions" });
     if (item.state === "problem") {
       acts.append(el("button", { type: "button", text: "Back to open", "data-fk": item.id + ":open",
-        onclick: () => flushAll().then(() => patchItem(item.id, { state: "open" }, true)).then(() => renderAll()) }));
+        onclick: () => afterFlush(() => patchItem(item.id, { state: "open" }, true)).then(() => renderAll()) }));
     } else if (!isDone) {
       acts.append(el("button", { type: "button", text: "Problem", disabled: gate.length > 0,
         "data-fk": item.id + ":problem",
         onclick: () => {
           openKeys.add(item.id + ":out"); openKeys.delete("!" + item.id + ":out");
-          flushAll().then(() => patchItem(item.id, { state: "problem" }, true)).then(() => renderAll());
+          afterFlush(() => patchItem(item.id, { state: "problem" }, true)).then(() => renderAll());
         } }));
     }
     body.append(acts);
@@ -411,7 +429,7 @@ function itemEl(item) {
   if ((item.tags || []).includes("found-by-sweep")) {
     body.append(el("div", { class: "actions" }, el("button", { type: "button", class: "danger", text: "Dismiss",
       "data-fk": item.id + ":dismiss",
-      onclick: () => flushAll().then(() => write("POST", "/api/items/" + encodeURIComponent(item.id) + "/dismiss", {}, true))
+      onclick: () => afterFlush(() => write("POST", "/api/items/" + encodeURIComponent(item.id) + "/dismiss", {}, true))
         .then(() => renderAll()) })));
   }
   art.append(body);
@@ -524,7 +542,12 @@ function renderAll() {
 async function submit() {
   const btn = $("submit"), status = $("submitstatus");
   btn.disabled = true;
-  await flushAll();
+  if (!(await flushAll())) {
+    btn.disabled = false;
+    status.textContent = "";
+    toast("Not submitted: " + drafts.size + " edit(s) did not save. Try again.");
+    return;
+  }
   const prevAt = S && S.last_run ? S.last_run.at : null;
   const r = await write("POST", "/api/submit", {});
   if (!r) { btn.disabled = false; status.textContent = ""; return; }
