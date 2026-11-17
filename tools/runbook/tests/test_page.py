@@ -46,6 +46,9 @@ class PageTests(unittest.TestCase):
         # afterFlush is the one caller; every click goes through it.
         self.assertEqual(PAGE.count("flushAll().then("), 1)
         self.assertGreaterEqual(PAGE.count("afterFlush(() =>"), 5)
+        # Reopening (Back to open, un-ticking) is a recovery action and is never gated.
+        self.assertIn('afterFlush(() => patchItem(item.id, { state: "open" }, true), true)', PAGE)
+        self.assertIn('{ state: want }, true), want === "open")', PAGE)
 
     @unittest.skipUnless(shutil.which("node"), "node not found")
     def test_failed_autosave_is_retried_before_submit(self):
@@ -64,13 +67,14 @@ class PageTests(unittest.TestCase):
             "  const failedTimerGone = !timers.has('k') && drafts.has('k');\n"
             "  const r1 = await flushAll();\n"
             "  let ran = false; await afterFlush(() => { ran = true; });\n"
+            "  let reopened = false; await afterFlush(() => { reopened = true; }, true);\n"
             "  ok = true;\n"
             "  const r2 = await flushAll();\n"
             "  let ran2 = false; await afterFlush(() => { ran2 = true; });\n"
             "  drafts.set('new_note', 'typed but not sent');  // sent by hand: no sender\n"
             "  const r3 = await flushAll();\n"
             "  drafts.delete('new_note');\n"
-            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, r2, ran2, r3, sent, left: drafts.size, toasts: toasts.length }));\n"
+            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, reopened, r2, ran2, r3, sent, left: drafts.size, toasts: toasts.length }));\n"
             "})();\n"
         )
         r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=60)
@@ -79,11 +83,12 @@ class PageTests(unittest.TestCase):
         self.assertTrue(got["failedTimerGone"])
         self.assertFalse(got["r1"])       # still failing: not saved, so not submitted
         self.assertFalse(got["ran"])
+        self.assertTrue(got["reopened"])  # reopening is how a locked item's draft becomes savable
         self.assertTrue(got["r2"])        # the failed draft is resent once the service answers
         self.assertTrue(got["ran2"])
         self.assertEqual(got["left"], 0)
         self.assertTrue(got["r3"])        # an unsent note to Claude never blocks Submit
-        self.assertGreaterEqual(len(got["sent"]), 4)  # initial save + 3 retries
+        self.assertGreaterEqual(len(got["sent"]), 5)  # initial save + 4 retries
 
     def test_demo_fixture_loads(self):
         st = rblib.load(DEMO)

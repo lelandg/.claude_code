@@ -261,9 +261,11 @@ async function flushAll() {
 }
 
 // Run fn only once every edit is stored, so a tick or Submit never outruns lost text.
-function afterFlush(fn) {
+// A recovery action (reopening an item) still runs: a draft on an item another tab
+// closed is refused (423) until it is reopened, so waiting for it would deadlock.
+function afterFlush(fn, recovery) {
   return flushAll().then((saved) => {
-    if (!saved) { toast("Not done: " + unsaved().length + " edit(s) did not save. Try again."); return null; }
+    if (!saved && !recovery) { toast("Not done: " + unsaved().length + " edit(s) did not save. Try again."); return null; }
     return fn();
   });
 }
@@ -362,7 +364,7 @@ function itemEl(item) {
     cb.checked = isDone;
     cb.addEventListener("change", () => {
       const want = cb.checked ? "done" : "open";
-      afterFlush(() => patchItem(item.id, { state: want }, true)).then(() => renderAll());
+      afterFlush(() => patchItem(item.id, { state: want }, true), want === "open").then(() => renderAll());
     });
     row.append(cb);
   } else {
@@ -414,7 +416,7 @@ function itemEl(item) {
     const acts = el("div", { class: "actions" });
     if (item.state === "problem") {
       acts.append(el("button", { type: "button", text: "Back to open", "data-fk": item.id + ":open",
-        onclick: () => afterFlush(() => patchItem(item.id, { state: "open" }, true)).then(() => renderAll()) }));
+        onclick: () => afterFlush(() => patchItem(item.id, { state: "open" }, true), true).then(() => renderAll()) }));
     } else if (!isDone) {
       acts.append(el("button", { type: "button", text: "Problem", disabled: gate.length > 0,
         "data-fk": item.id + ":problem",
