@@ -1304,7 +1304,11 @@ def _landed_branch(repo: Path, tmp_path: Path, name: str = "feature"):
 
 def test_merged_clean_worktree_and_local_branch_are_removed(repo, tmp_path, capsys):
     wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "branch", "--set-upstream-to=origin/feature", "feature")
     pt.clean_local_branch(pr, repo)
+    # its branch.feature.* config goes with it, as `branch -D` did
+    assert subprocess.run(["git", "-C", str(repo), "config", "--get-regexp", r"^branch\.feature\."],
+                          capture_output=True).returncode == 1
     assert not wt.exists()
     assert sh(repo, "branch", "--list", "feature") == ""
     out = capsys.readouterr().out

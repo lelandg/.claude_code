@@ -1596,9 +1596,15 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
     # would drop the new commits (and the reflog) unchecked.
     proc = run(["git", "-C", str(clone), "update-ref", "-d", ref, tip],
                check=False)
-    print(f"  deleted local branch {pr.head}" if proc.returncode == 0 else
-          f"  kept local branch {pr.head}: it moved after it was checked "
-          f"({(proc.stderr or proc.stdout).strip()})")
+    if proc.returncode != 0:
+        print(f"  kept local branch {pr.head}: it moved after it was checked "
+              f"({(proc.stderr or proc.stdout).strip()})")
+        return
+    # update-ref leaves branch.<name>.* behind (`branch -D` removed it); a
+    # branch recreated under the same name would inherit the old upstream.
+    run(["git", "-C", str(clone), "config", "--remove-section",
+         f"branch.{pr.head}"], check=False)
+    print(f"  deleted local branch {pr.head}")
 
 
 def after_merge(pr: PR, version: str | None) -> int:
