@@ -254,9 +254,12 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
         re.compile(
             # Env-var style names count too (DB_PASSWORD=, GITHUB_TOKEN=,
             # AWS_SECRET_ACCESS_KEY=): \b would not split "_" from a letter.
-            r"""(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*"""
-            r"""(password|passwd|secret|token|api[_-]?key)(?:_[A-Za-z0-9]+)*"""
-            r"""\s*[=:]\s*['"]?(?!\$|<PASTE-)[^\s'"]{8,}"""
+            # Linear on long pastes: one start per identifier (the lookbehind
+            # excludes "_"), a lookahead that walks whole "_"/"-" components
+            # to a keyword component, then a possessive identifier match.
+            r"""(?i)(?<![A-Za-z0-9_-])"""
+            r"""(?=(?:[A-Za-z0-9]+[_-])*(password|passwd|secret|token|api[_-]?key)(?![A-Za-z0-9]))"""
+            r"""[A-Za-z0-9_-]++\s*[=:]\s*['"]?(?!\$|<PASTE-)[^\s'"]{8,}"""
         ),
     ),
 )
