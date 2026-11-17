@@ -257,10 +257,12 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
             # CLI options too (--password=, --api-key=). The keyword must END
             # the name: SECRET_ID, TOKEN_ENDPOINT, PASSWORD_FILE are metadata.
             # Linear on long pastes: one start per token (the lookbehind
-            # excludes "_" and "-"), a lookahead that skips leading dashes and
-            # walks whole "_"/"-" components, then a possessive match.
+            # excludes "_" and "-"), a lookahead that walks "_"/"-"-terminated
+            # components (empty ones too: --opt, _DB__PASSWORD; each alnum run
+            # must reach its separator, so there is one way to split), then a
+            # possessive match.
             r"""(?i)(?<![A-Za-z0-9_-])"""
-            r"""(?=-*(?:[A-Za-z0-9]+[_-])*"""
+            r"""(?=(?:[A-Za-z0-9]*[_-])*"""
             r"""(password|passwd|secret|token|api[_-]?key|secret[_-]access[_-]key)(?![A-Za-z0-9_-]))"""
             r"""[A-Za-z0-9_-]++\s*[=:]\s*['"]?(?!\$|<PASTE-)[^\s'"]{8,}"""
         ),

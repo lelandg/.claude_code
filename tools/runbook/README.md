@@ -79,6 +79,8 @@ The Python is cross-platform (`process.py` kills process groups on POSIX), but
 there is no installer: `install.ps1` is Windows-only. Set it up by hand:
 
     mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec python3 "/path/to/projects/_runbook/runbook.py" "$@"\n' > ~/.local/bin/runbook && chmod +x ~/.local/bin/runbook
+    # if ~/.local/bin is not on PATH yet, add to ~/.profile:
+    #   export PATH="$HOME/.local/bin:$PATH"
     python3 /path/to/projects/_runbook/server.py &      # writes .token on first start
     # hourly processor, e.g. crontab:
     0 * * * * python3 /path/to/projects/_runbook/process.py --reason hourly

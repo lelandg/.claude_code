@@ -1546,8 +1546,10 @@ def _branch_in_operation(clone: Path, branch: str) -> str | None:
     dirs = [Path(common)]
     try:
         dirs += [d for d in (Path(common) / "worktrees").iterdir() if d.is_dir()]
-    except OSError:
+    except FileNotFoundError:
         pass  # no linked worktrees
+    except OSError:
+        return "unreadable state"  # cannot see them, so cannot rule them out
     for gd in dirs:
         for sub in ("rebase-merge", "rebase-apply"):
             op = gd / sub

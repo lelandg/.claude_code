@@ -224,6 +224,12 @@ class Scanners(unittest.TestCase):
             red, kinds = rblib.redact(text)
             self.assertEqual((red, kinds), ("tool [REDACTED:assigned-secret]", ["assigned-secret"]), opt)
 
+    def test_assigned_secret_leading_and_repeated_underscores(self):
+        for name in ("DB__" + "PASS" + "WORD", "_DB_" + "PASS" + "WORD", "__" + "TOK" + "EN"):
+            text = name + "=" + "q" * 12
+            self.assertEqual(rblib.find_secrets(text), ["assigned-secret"], name)
+            self.assertEqual(rblib.redact(text), ("[REDACTED:assigned-secret]", ["assigned-secret"]), name)
+
     def test_names_that_only_qualify_a_keyword_are_not_secrets(self):
         for name in ("SEC" + "RET_ID", "TOK" + "EN_ENDPOINT", "PASS" + "WORD_FILE", "--sec" + "ret-id"):
             for text in (name + "=" + "production/database", name + "=" + "/home/user/.pgpass"):
@@ -238,6 +244,8 @@ class Scanners(unittest.TestCase):
         rblib.redact(name + "=" + "q" * 12)
         rblib.find_secrets(name + " " + name)
         rblib.redact("--" + ("a" + "-") * 6000 + "x")
+        rblib.redact("-" * 6000 + "x")
+        rblib.redact(("_" + "-") * 6000 + "x")
         self.assertLess(time.monotonic() - t0, 1.0)
 
     def test_redact(self):

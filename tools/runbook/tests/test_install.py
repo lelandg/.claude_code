@@ -31,7 +31,8 @@ class InstallScriptText(unittest.TestCase):
         # the script path is one single-quoted word (spaces survive), and a failed
         # write never reaches mv
         self.assertIn(r"""Replace("'", "'\''")""", text)
-        self.assertIn("set -e`ntrap 'rm -f ~/.local/bin/runbook.tmp' EXIT", text)
+        self.assertIn("set -e`nmkdir -p ~/.local/bin`ntmp=`$(mktemp ~/.local/bin/.runbook.XXXXXX)`n", text)
+        self.assertIn("trap 'rm -f `\"`$tmp`\"' EXIT", text)
 
 
 if __name__ == "__main__":

@@ -1392,6 +1392,23 @@ def test_branch_reserved_by_update_refs_rebase_is_kept(repo, tmp_path, capsys):
     assert "a rebase in progress uses it" in capsys.readouterr().out
 
 
+def test_unreadable_worktree_list_keeps_the_branch(repo, tmp_path, monkeypatch, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    real_iterdir = Path.iterdir
+
+    def denied(self):
+        if self.name == "worktrees":
+            raise PermissionError(13, "denied", str(self))
+        return real_iterdir(self)
+
+    (Path(sh(repo, "rev-parse", "--absolute-git-dir")) / "worktrees").mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "iterdir", denied)
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "branch", "--list", "feature")
+    assert "could not be read" in capsys.readouterr().out
+
+
 def test_symbolic_branch_never_deletes_its_target(repo, tmp_path, capsys):
     wt, pr = _landed_branch(repo, tmp_path)
     sh(repo, "worktree", "remove", str(wt))
