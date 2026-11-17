@@ -249,6 +249,45 @@ class Command(unittest.TestCase):
         self.assertNotIn("--dangerously-skip-permissions", cmd)
         self.assertEqual(cmd[-2:], ["--output-format", "json"])
 
+    def test_unattended_run_gets_no_bare_bash(self):
+        cmd = process.build_command({"model": "opus", "effort": "medium"})
+        self.assertNotIn("Bash", cmd)
+        bash = [t for t in cmd if t.startswith("Bash(")]
+        self.assertTrue(bash)
+        self.assertTrue(all(t.endswith(":*)") and len(t) > len("Bash(:*)") for t in bash), bash)
+        self.assertIn(f"Bash(RUNBOOK_AGENT=processor python {process.ROOT.as_posix()}/runbook.py:*)", cmd)
+
+    def test_allowed_tools_config_replaces_list_but_never_bare_bash(self):
+        cmd = process.build_command({"model": "m", "effort": "e", "allowed_tools": ["Read", "Bash(gh:*)"]})
+        i = cmd.index("--allowedTools")
+        self.assertEqual(cmd[i + 1:i + 3], ["Read", "Bash(gh:*)"])
+        with self.assertRaises(ValueError):
+            process.build_command({"model": "m", "effort": "e", "allowed_tools": ["Bash"]})
+        with self.assertRaises(ValueError):  # empty is not "use the defaults"
+            process.build_command({"model": "m", "effort": "e", "allowed_tools": []})
+
+
+class StatePath(unittest.TestCase):
+    def test_main_runs_against_the_given_state(self):
+        with mock.patch.object(process, "run", return_value="no changes") as run, \
+                mock.patch("builtins.print"):
+            self.assertEqual(process.main(["--reason", "submit", "--state", "X:/other/runbook.json"]), 0)
+        self.assertEqual(run.call_args.args[1], Path("X:/other/runbook.json"))
+
+    def test_runner_hands_the_state_path_to_the_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = Path(d) / "alt.json"
+            runner = process._subprocess_runner("submit", datetime.now(timezone.utc), Path(d), st)
+            code, out = runner([sys.executable, "-c", "import os; print(os.environ['RUNBOOK_STATE'])"], Path(d))
+        self.assertEqual((code, out.strip()), (0, str(st.resolve())))
+
+    def test_relative_state_reaches_the_child_as_an_absolute_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            runner = process._subprocess_runner("submit", datetime.now(timezone.utc), Path(d),
+                                                Path("alt.json"))
+            code, out = runner([sys.executable, "-c", "import os; print(os.environ['RUNBOOK_STATE'])"], Path(d))
+        self.assertEqual((code, out.strip()), (0, str(Path("alt.json").resolve())))
+
     def test_prompt_content(self):
         text = (Path(process.__file__).parent / "processor-prompt.md").read_text(encoding="utf-8")
         self.assertIn("notes_self", text)

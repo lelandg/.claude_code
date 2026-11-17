@@ -467,3 +467,20 @@ class TestInbox(CliCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateFromEnv(unittest.TestCase):
+    def test_script_honours_runbook_state(self):
+        # process.py points the model's CLI calls at a non-default state this way.
+        with tempfile.TemporaryDirectory() as d:
+            st = Path(d) / "alt.json"
+            s = rblib.empty_state()
+            s["items"] = [{"id": "rb-0042", "repo": "CL", "title": "only-in-alt", "state": "open"}]
+            rblib.save(s, st)
+            r = subprocess.run(
+                [sys.executable, str(Path(runbook.__file__)), "list"],
+                capture_output=True, text=True, timeout=60,
+                env=dict(os.environ, RUNBOOK_STATE=str(st), RUNBOOK_AGENT="tester"),
+            )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("rb-0042", r.stdout)

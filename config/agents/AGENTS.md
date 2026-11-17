@@ -548,8 +548,12 @@ and any autofix PR by the procedure in
 before push; it does not replace the wait for the automated review. On a repo
 with no automated reviewer configured, a local Claude review of the committed
 diff stands in for it — the repo's own pre-PR reviewer where it has one,
-otherwise Claude Code's built-in `/code-review`: implement → tests green →
-commit → Codex + Claude review → reconcile/fix → push → PR → land.
+otherwise Claude Code's built-in `/code-review` given the PR's base range,
+`/code-review origin/main...HEAD` (`origin/master` where that is the base). A
+bare `/code-review` reviews only the commits ahead of the branch's upstream
+plus uncommitted edits, so once the branch is pushed it skips the PR's earlier
+commits. Sequence: implement → tests green → commit → Codex + Claude review →
+reconcile/fix → push → PR → land.
 
 **Which reviewer that is varies by repo, so read the repo's own `AGENTS.md`
 rather than assuming.** Two properties decide which one you actually gate on,

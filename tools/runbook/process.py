@@ -25,6 +25,20 @@ TRAILERS = ("Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>", "AI-Model
 Runner = Callable[[list, Path], tuple]
 
 
+def default_allowed_tools() -> list:
+    """The unattended run reads third-party text (PR bodies, issue text, pasted
+    output), so it gets no bare "Bash": only the command prefixes its procedure
+    needs. config.json "allowed_tools" replaces this list wholesale; add your
+    cloud admin tool's prefix there."""
+    land = (Path.home() / ".claude" / "skills" / "land-pr" / "pr_tool.py").as_posix()
+    tools = ["Read", "Edit", "Write", "Glob", "Grep", "Agent"]
+    for py in ("python", "python3"):
+        tools.append(f"Bash(RUNBOOK_AGENT=processor {py} {ROOT.as_posix()}/runbook.py:*)")
+        tools.append(f"Bash({py} {land}:*)")
+    tools += ["Bash(git -C:*)", "Bash(gh:*)", "Bash(aws:*)", "Bash(codex:*)", "Bash(npm:*)"]
+    return tools
+
+
 def load_config(state_dir: Path) -> dict:
     cfg = {"model": "opus", "effort": "medium", "daily_cap": 30}
     for p in (ROOT / "config.json", state_dir / "config.json"):
@@ -43,11 +57,16 @@ def render_prompt() -> str:
 
 
 def build_command(cfg: dict) -> list:
+    tools = [str(t) for t in cfg.get("allowed_tools", default_allowed_tools())]
+    if not tools:  # an empty list means nothing, never "use the defaults"
+        raise ValueError("allowed_tools is empty; list the tools the processor may use")
+    if "Bash" in tools:
+        raise ValueError("allowed_tools must not grant bare Bash; list Bash(<prefix>:*) rules")
     return [
         shutil.which("claude") or "claude", "-p", render_prompt(),
         "--model", cfg["model"], "--effort", cfg["effort"],
         "--permission-mode", "acceptEdits",
-        "--allowedTools", "Bash", "Read", "Edit", "Write", "Glob", "Grep", "Agent",
+        "--allowedTools", *tools,
         "--add-dir", rblib.projects_root().as_posix(), "--output-format", "json",
     ]
 
@@ -158,7 +177,13 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             proc.kill()
 
 
-def _subprocess_runner(reason: str, now: datetime, logs: Path | None = None) -> Runner:
+def _subprocess_runner(reason: str, now: datetime, logs: Path | None = None,
+                       state_path: Path | None = None) -> Runner:
+    # The model changes state only through runbook.py, which reads RUNBOOK_STATE,
+    # so a non-default --state reaches the CLI calls it makes.
+    # Absolute: the child runs with cwd=ROOT, so a relative path would name another file.
+    env = dict(os.environ, RUNBOOK_STATE=str(Path(state_path).resolve())) if state_path else None
+
     def runner(cmd: list, cwd: Path) -> tuple:
         d = logs or ROOT / "logs"
         d.mkdir(exist_ok=True)
@@ -167,7 +192,8 @@ def _subprocess_runner(reason: str, now: datetime, logs: Path | None = None) -> 
         with open(log, "wb") as fo, open(err, "wb") as fe:
             try:
                 proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=fo,
-                                        stderr=fe, start_new_session=(os.name != "nt"))
+                                        stderr=fe, start_new_session=(os.name != "nt"),
+                                        env=env)
             except OSError as e:
                 return 127, str(e)
             try:
@@ -184,9 +210,11 @@ def _subprocess_runner(reason: str, now: datetime, logs: Path | None = None) -> 
 def main(argv: list | None = None) -> int:
     ap = argparse.ArgumentParser(prog="process")
     ap.add_argument("--reason", choices=("hourly", "submit"), required=True)
+    ap.add_argument("--state", type=Path, default=rblib.STATE)
     args = ap.parse_args(argv)
     now = datetime.now(timezone.utc)
-    result = run(args.reason, rblib.STATE, now, _subprocess_runner(args.reason, now))
+    runner = _subprocess_runner(args.reason, now, state_path=args.state)
+    result = run(args.reason, args.state, now, runner)
     print(result)
     return 1 if result.startswith("error") else 0
 
