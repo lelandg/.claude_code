@@ -62,6 +62,7 @@ def empty_state() -> dict:
         "last_run": None,
         "runs_today": {"date": None, "count": 0},
         "items": [],
+        "item_seq": 0,
         "done_log": [],
         "notes_self": "",
         "notes_claude": [],
@@ -220,9 +221,20 @@ def _max_num(ids, prefix: str) -> int:
     return top
 
 
-def next_item_id(state: dict) -> str:
+def _item_high_water(state: dict) -> int:
     ids = [i.get("id") for i in state.get("items", []) + state.get("done_log", [])]
-    return f"rb-{_max_num(ids, 'rb-') + 1:04d}"
+    return max(_max_num(ids, "rb-"), int(state.get("item_seq") or 0))
+
+
+def next_item_id(state: dict) -> str:
+    """Allocate the next item id and record it in item_seq (caller saves).
+
+    item_seq is a persistent high-water mark: an id that has been pruned out of
+    the done log is never handed out again.
+    """
+    n = _item_high_water(state) + 1
+    state["item_seq"] = n
+    return f"rb-{n:04d}"
 
 
 def next_note_id(state: dict) -> str:
@@ -240,7 +252,19 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
     (
         "assigned-secret",
         re.compile(
-            r"""(?i)\b(password|passwd|secret|token|api[_-]?key)\s*[=:]\s*['"]?(?!\$|<PASTE-)[^\s'"]{8,}"""
+            # Env-var style names count too (DB_PASSWORD=, GITHUB_TOKEN=,
+            # AWS_SECRET_ACCESS_KEY=): \b would not split "_" from a letter.
+            # CLI options too (--password=, --api-key=). The keyword must END
+            # the name: SECRET_ID, TOKEN_ENDPOINT, PASSWORD_FILE are metadata.
+            # Linear on long pastes: one start per token (the lookbehind
+            # excludes "_" and "-"), a lookahead that walks "_"/"-"-terminated
+            # components (empty ones too: --opt, _DB__PASSWORD; each alnum run
+            # must reach its separator, so there is one way to split), then a
+            # possessive match.
+            r"""(?i)(?<![A-Za-z0-9_-])"""
+            r"""(?=(?:[A-Za-z0-9]*[_-])*"""
+            r"""(password|passwd|secret|token|api[_-]?key|secret[_-]access[_-]key)(?![A-Za-z0-9_-]))"""
+            r"""[A-Za-z0-9_-]++\s*[=:]\s*['"]?(?!\$|<PASTE-)[^\s'"]{8,}"""
         ),
     ),
 )
@@ -312,6 +336,8 @@ def restore_from_done_log(state: dict, item_id: str) -> dict:
 
 
 def prune_done_log(state: dict, now: datetime) -> int:
+    # Remember the highest id before any entry leaves, so it is never reused.
+    state["item_seq"] = _item_high_water(state)
     cutoff = now - timedelta(days=DONE_LOG_DAYS)
     keep = [
         e for e in state["done_log"]

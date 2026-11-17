@@ -970,10 +970,13 @@ class ReleasePlan:
 
 
 def release_notes(body: str) -> str | None:
+    # Normalize first: on a CRLF body `[ \t]*$` cannot step over the "\r", so
+    # the heading itself would never match.
+    body = body.replace("\r\n", "\n")
     m = NOTES_HEADING.search(body)
     if not m:
         return None
-    rest = body[m.end():].replace("\r\n", "\n")
+    rest = body[m.end():]
     depth = len(m.group(1))
     end = re.search(rf"^(?:#{{1,{depth}}}[ \t]|{NOTES_END})", rest, re.M)
     text = rest[:end.start()] if end else rest
@@ -1528,6 +1531,48 @@ def _branch_worktrees(clone: Path, branch: str) -> list[Path]:
     return found
 
 
+def _branch_in_operation(clone: Path, branch: str) -> str | None:
+    """'rebase', 'bisect', or 'unreadable state' when a worktree of `clone` is
+    mid-operation on `branch` (or may be). Its HEAD is detached then, so
+    _branch_worktrees misses it; `branch -D` used to refuse and update-ref
+    does not check, so we do. The metadata is read from the common git dir
+    (`<common>` and `<common>/worktrees/*`), never through a worktree, so an
+    unreachable worktree cannot hide it."""
+    ref = f"refs/heads/{branch}"
+    common = git(clone, "rev-parse", "--path-format=absolute",
+                 "--git-common-dir", check=False).strip()
+    if not common:
+        return "unreadable state"
+    dirs = [Path(common)]
+    try:
+        dirs += [d for d in (Path(common) / "worktrees").iterdir() if d.is_dir()]
+    except FileNotFoundError:
+        pass  # no linked worktrees
+    except OSError:
+        return "unreadable state"  # cannot see them, so cannot rule them out
+    for gd in dirs:
+        for sub in ("rebase-merge", "rebase-apply"):
+            op = gd / sub
+            if not op.is_dir():
+                continue
+            try:
+                if (op / "head-name").read_text(encoding="utf-8").strip() == ref:
+                    return "rebase"
+                upd = op / "update-refs"  # refs a --update-refs rebase will move
+                if upd.exists() and ref in upd.read_text(encoding="utf-8").split():
+                    return "rebase"
+            except OSError:
+                return "unreadable state"
+        bisect = gd / "BISECT_START"
+        if bisect.exists():
+            try:
+                if bisect.read_text(encoding="utf-8").strip() in (branch, ref):
+                    return "bisect"
+            except OSError:
+                return "unreadable state"
+    return None
+
+
 def _inside(path: Path) -> bool:
     try:
         Path.cwd().resolve().relative_to(path.resolve())
@@ -1549,6 +1594,12 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
               check=False).strip()
     if not tip:
         return
+    # A symbolic branch resolves to its target, so every check below would
+    # vet (and update-ref would delete) the target, e.g. main. Leave it.
+    if run(["git", "-C", str(clone), "symbolic-ref", "-q", ref],
+           check=False).returncode == 0:
+        print(f"  kept local branch {pr.head}: it is a symbolic ref")
+        return
     # The merged head may only exist on the server now; pull/N/head keeps it.
     if run(["git", "-C", str(clone), "cat-file", "-e", pr.head_oid],
            check=False).returncode != 0:
@@ -1568,7 +1619,10 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
         elif _inside(wt):
             kept.append(f"{wt} (this process is running inside it; run "
                         "`land` again from elsewhere to remove it)")
-        elif git(wt, "status", "--porcelain", check=False).strip():
+        # --untracked-files=all: status.showUntrackedFiles=no would otherwise
+        # hide them, and the non-forced `worktree remove` honours it too.
+        elif git(wt, "status", "--porcelain", "--untracked-files=all",
+                 check=False).strip():
             kept.append(f"{wt} (uncommitted or untracked files)")
         else:
             proc = run(["git", "-C", str(clone), "worktree", "remove", str(wt)],
@@ -1582,10 +1636,35 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
             print(f"  kept local worktree {item}")
         print(f"  kept local branch {pr.head}: still checked out")
         return
-    proc = run(["git", "-C", str(clone), "branch", "-D", pr.head], check=False)
-    print(f"  deleted local branch {pr.head}" if proc.returncode == 0 else
-          f"  could not delete local branch {pr.head}: "
-          f"{(proc.stderr or proc.stdout).strip()}")
+    if _branch_worktrees(clone, pr.head):  # checked out again meanwhile
+        print(f"  kept local branch {pr.head}: still checked out")
+        return
+    busy = _branch_in_operation(clone, pr.head)
+    if busy:
+        print(f"  kept local branch {pr.head}: "
+              + ("its operation state could not be read" if busy == "unreadable state"
+                 else f"a {busy} in progress uses it"))
+        return
+    # Delete only the tip validated above: update-ref with the expected old
+    # value fails if anything moved the branch since, where `branch -D`
+    # would drop the new commits (and the reflog) unchecked.
+    proc = run(["git", "-C", str(clone), "update-ref", "--no-deref", "-d",
+                ref, tip], check=False)
+    if proc.returncode != 0:
+        print(f"  kept local branch {pr.head}: it moved after it was checked "
+              f"({(proc.stderr or proc.stdout).strip()})")
+        return
+    # update-ref leaves branch.<name>.* behind (`branch -D` removed it); a
+    # branch recreated under the same name would inherit the old upstream.
+    cfg = run(["git", "-C", str(clone), "config", "--remove-section",
+               f"branch.{pr.head}"], check=False)
+    print(f"  deleted local branch {pr.head}")
+    leftover = run(["git", "-C", str(clone), "config", "--get-regexp",
+                    rf"^branch\.{re.escape(pr.head)}\."], check=False)
+    if cfg.returncode != 0 and leftover.returncode == 0:  # absent = nothing to do
+        print(f"  WARNING: branch.{pr.head} config was not removed "
+              f"({(cfg.stderr or cfg.stdout).strip()}); run: git -C "
+              f"\"{clone}\" config --remove-section branch.{pr.head}")
 
 
 def after_merge(pr: PR, version: str | None) -> int:

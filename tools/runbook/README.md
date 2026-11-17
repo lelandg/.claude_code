@@ -37,12 +37,16 @@ in your `AGENTS.md`), agents will not know the tool exists.
 |---|---|---|
 | `RUNBOOK_PROJECTS_ROOT` env var, else `"projects_root"` in `config.json` | the parent of this folder | `server.py` scans `<root>/*/.runbook/inbox/` and `<root>/*/*/.runbook/inbox/`; `process.py` passes it to `claude --add-dir` and the prompt |
 | `RUNBOOK_AGENT` env var | `unknown` | `runbook.py` records it as `added_by` |
+| `"allowed_tools"` in `config.json` | `process.default_allowed_tools()`: Read/Edit/Write/Glob/Grep/Agent plus `Bash(<prefix>:*)` rules for the runbook CLI, `git -C`, `gh`, the landing tool, `aws`, `codex`, `npm` | the unattended `claude -p` run's `--allowedTools`; replaces the list, and bare `Bash` is refused. Add your cloud admin tool's prefix here |
+| `RUNBOOK_STATE` env var | unset | `runbook.py` reads it as its state file; `process.py --state` sets it for the model's CLI calls |
 | `--port` (server) | `8765` | `server.py` |
 | `--state` (server) | `./runbook.json` | `server.py` |
-| `-WslRoot` (installer) | derived with `wslpath` | `install.ps1` alias line |
+| `-WslRoot` (installer) | derived with `wslpath` | `install.ps1` WSL shim |
 
 The tool's own location is always taken from the script path, so the folder
-can live anywhere, for example `/path/to/projects/_runbook`. Since the service
+can live anywhere, for example `/path/to/projects/_runbook`, as long as that
+path has no spaces: the processor's prompt and its `Bash(...)` allowlist rule
+name the runbook CLI by its unquoted path. (The WSL shim quotes it.) Since the service
 is launched at login, prefer `projects_root` in `config.json` over an env var.
 
 ## Install
@@ -58,7 +62,9 @@ Idempotent and user-scope (never elevated); it prints `exists:`, `created:`,
 - `runbook-server.cmd` in your Startup folder, launching `pythonw server.py` at login.
 - The hourly scheduled task `Runbook\Processor` (`process.py --reason hourly`).
 - `%USERPROFILE%\.local\bin\runbook.cmd` (warns if that is not on your PATH) and,
-  when WSL is present, `alias runbook=...` in WSL `~/.bashrc`.
+  when WSL is present, the executable shim `~/.local/bin/runbook` in WSL. A shim,
+  not a `~/.bashrc` alias: aliases exist only in interactive shells, so
+  `wsl.exe bash -lc 'runbook ...'` and agent shells would never find one.
 - A `.runbook/` line in your global git ignore (Windows and WSL).
 - A commit tracking `runbook.json`, but only when this folder is its own git
   repo and the file is not ignored. Inside this mirror it is skipped.
@@ -72,7 +78,9 @@ Start the service now (it also starts at login):
 The Python is cross-platform (`process.py` kills process groups on POSIX), but
 there is no installer: `install.ps1` is Windows-only. Set it up by hand:
 
-    alias runbook='python3 /path/to/projects/_runbook/runbook.py'
+    mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec python3 "/path/to/projects/_runbook/runbook.py" "$@"\n' > ~/.local/bin/runbook && chmod +x ~/.local/bin/runbook
+    # if ~/.local/bin is not on PATH yet, add to ~/.profile:
+    #   export PATH="$HOME/.local/bin:$PATH"
     python3 /path/to/projects/_runbook/server.py &      # writes .token on first start
     # hourly processor, e.g. crontab:
     0 * * * * python3 /path/to/projects/_runbook/process.py --reason hourly
@@ -113,6 +121,7 @@ build them in `tests/fakes.py`.
     Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\runbook-server.cmd"
     schtasks /delete /tn "Runbook\Processor" /f
     Remove-Item "$env:USERPROFILE\.local\bin\runbook.cmd"
-    wsl.exe bash -lc "sed -i '/^alias runbook=/d' ~/.bashrc"
+    wsl.exe bash -lc "rm -f ~/.local/bin/runbook"
+    wsl.exe bash -lc "sed -i '/^alias runbook=/d' ~/.bashrc"   # installs from before the shim
 
 then remove the `.runbook/` line from your global git ignore if you want.

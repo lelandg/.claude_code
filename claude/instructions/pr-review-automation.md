@@ -10,8 +10,13 @@ Claude Code GitHub App is the reviewer configured on that repo. The autofix
 behaviour below is specific to that App.
 
 - **No automated reviewer configured:** use the local-review sequence in
-  AGENTS.md instead (the built-in `/code-review`, or the repo's own pre-PR
-  reviewer, before push).
+  AGENTS.md instead (the repo's own pre-PR reviewer, or the built-in
+  `/code-review <remote>/<base>...HEAD`, `<base>` being the PR's actual base
+  branch and `<remote>` the remote that hosts it (`origin`, or `upstream` in
+  a fork workflow; fetch it first), over the PR's whole range, before push). Never a bare
+  `/code-review`: it reviews only the commits ahead of the
+  branch's upstream plus uncommitted edits, which on a pushed branch omits the
+  PR's earlier commits.
 - **A different automated reviewer:** the procedure below does not transfer.
   Establish the two things AGENTS.md calls out before you gate on it — whether
   it re-reviews a push, and whether a passing check means "no findings" — and

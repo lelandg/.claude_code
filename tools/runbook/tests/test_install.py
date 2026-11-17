@@ -18,8 +18,21 @@ class InstallWhatIfCase(unittest.TestCase):
         self.assertEqual(r.returncode, 0, out)
         for needle in ("token", "Startup", "Runbook\\Processor", "runbook.cmd", ".runbook/"):
             self.assertIn(needle, out)
-        self.assertTrue(".bashrc" in out or "skipped: wsl" in out, out)
+        self.assertTrue("WSL shim ~/.local/bin/runbook" in out or "skipped: wsl" in out, out)
         self.assertIsNone(re.search(r"[0-9a-f]{64}", out), "output must not contain a token-shaped run")
+
+
+class InstallScriptText(unittest.TestCase):
+    def test_wsl_gets_a_path_shim_not_an_alias(self):
+        # A ~/.bashrc alias is invisible to non-interactive shells (wsl.exe bash -lc, agents).
+        text = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("alias runbook=", text)
+        self.assertIn('exec python3 __PY__ "$@"', text)
+        # the script path is one single-quoted word (spaces survive), and a failed
+        # write never reaches mv
+        self.assertIn(r"""Replace("'", "'\''")""", text)
+        self.assertIn("set -e`nmkdir -p ~/.local/bin`ntmp=`$(mktemp ~/.local/bin/.runbook.XXXXXX)`n", text)
+        self.assertIn("trap 'rm -f `\"`$tmp`\"' EXIT", text)
 
 
 if __name__ == "__main__":

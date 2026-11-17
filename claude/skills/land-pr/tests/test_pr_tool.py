@@ -1021,6 +1021,14 @@ def test_release_line_and_notes_come_from_the_body():
     assert "Verification" not in plan.notes and "Release:" not in plan.notes
 
 
+def test_crlf_body_keeps_its_notes():
+    # GitHub stores bodies edited in the web UI with CRLF line endings.
+    body = "## Release notes\r\n\r\nRelease: patch\r\n\r\n- one\r\n- two\r\n\r\n## Test plan\r\n- x\r\n"
+    assert pt.release_notes(body) == "- one\n- two"
+    plan = pt.release_plan(make(body=BODY.replace("\n", "\r\n")))
+    assert plan.level == "minor" and plan.notes.startswith("### Added")
+
+
 def test_notes_stop_at_reviewer_markers():
     body = "## Release notes\n- one\n\n<!-- bot -->\n## Summary by CodeRabbit\n- x"
     assert pt.release_notes(body) == "- one"
@@ -1296,7 +1304,11 @@ def _landed_branch(repo: Path, tmp_path: Path, name: str = "feature"):
 
 def test_merged_clean_worktree_and_local_branch_are_removed(repo, tmp_path, capsys):
     wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "branch", "--set-upstream-to=origin/feature", "feature")
     pt.clean_local_branch(pr, repo)
+    # its branch.feature.* config goes with it, as `branch -D` did
+    assert subprocess.run(["git", "-C", str(repo), "config", "--get-regexp", r"^branch\.feature\."],
+                          capture_output=True).returncode == 1
     assert not wt.exists()
     assert sh(repo, "branch", "--list", "feature") == ""
     out = capsys.readouterr().out
@@ -1320,6 +1332,92 @@ def test_worktree_with_uncommitted_files_is_kept(repo, tmp_path, capsys):
     pt.clean_local_branch(pr, repo)
     assert wt.exists() and sh(repo, "branch", "--list", "feature")
     assert "uncommitted or untracked" in capsys.readouterr().out
+
+
+def test_untracked_files_count_even_when_status_hides_them(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "config", "status.showUntrackedFiles", "no")
+    (wt / "scratch.txt").write_text("wip")
+    pt.clean_local_branch(pr, repo)
+    assert (wt / "scratch.txt").exists()
+    assert "uncommitted or untracked" in capsys.readouterr().out
+
+
+def test_branch_that_moves_after_the_check_is_not_deleted(repo, tmp_path, monkeypatch, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    tip = pr.head_oid
+    newer = sh(repo, "commit-tree", f"{tip}^{{tree}}", "-p", tip, "-m", "work done meanwhile")
+    real_run = pt.run
+
+    def racing_run(cmd, *a, **kw):
+        if "update-ref" in cmd or "-D" in cmd:  # another git process lands first
+            real_run(["git", "-C", str(repo), "update-ref", "refs/heads/feature", newer], check=True)
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(pt, "run", racing_run)
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "rev-parse", "refs/heads/feature") == newer
+    assert "kept local branch feature" in capsys.readouterr().out
+
+
+def test_branch_a_paused_rebase_uses_is_kept(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    gd = Path(sh(repo, "rev-parse", "--absolute-git-dir"))
+    (gd / "rebase-merge").mkdir()
+    (gd / "rebase-merge" / "head-name").write_text("refs/heads/feature\n")
+    try:
+        pt.clean_local_branch(pr, repo)
+    finally:
+        (gd / "rebase-merge" / "head-name").unlink()
+        (gd / "rebase-merge").rmdir()
+    assert sh(repo, "branch", "--list", "feature")
+    assert "a rebase in progress uses it" in capsys.readouterr().out
+
+
+def test_branch_reserved_by_update_refs_rebase_is_kept(repo, tmp_path, capsys):
+    # another worktree's paused `rebase --update-refs` will move feature too;
+    # its metadata lives in the common dir, readable even if that worktree is not
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    other = tmp_path / "wt-other"
+    sh(repo, "worktree", "add", "-q", "--detach", str(other), "main")
+    gd = Path(sh(other, "rev-parse", "--absolute-git-dir"))
+    (gd / "rebase-merge").mkdir()
+    (gd / "rebase-merge" / "head-name").write_text("refs/heads/topic\n")
+    (gd / "rebase-merge" / "update-refs").write_text(
+        f"refs/heads/feature\n{pr.head_oid}\n{pr.head_oid}\n")
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "branch", "--list", "feature")
+    assert "a rebase in progress uses it" in capsys.readouterr().out
+
+
+def test_unreadable_worktree_list_keeps_the_branch(repo, tmp_path, monkeypatch, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    real_iterdir = Path.iterdir
+
+    def denied(self):
+        if self.name == "worktrees":
+            raise PermissionError(13, "denied", str(self))
+        return real_iterdir(self)
+
+    (Path(sh(repo, "rev-parse", "--absolute-git-dir")) / "worktrees").mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "iterdir", denied)
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "branch", "--list", "feature")
+    assert "could not be read" in capsys.readouterr().out
+
+
+def test_symbolic_branch_never_deletes_its_target(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    sh(repo, "update-ref", "refs/heads/target", pr.head_oid)
+    sh(repo, "update-ref", "-d", "refs/heads/feature")
+    sh(repo, "symbolic-ref", "refs/heads/feature", "refs/heads/target")
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "rev-parse", "refs/heads/target") == pr.head_oid
+    assert "symbolic ref" in capsys.readouterr().out
 
 
 def test_branch_with_unmerged_commits_is_kept(repo, tmp_path, capsys):

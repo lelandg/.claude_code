@@ -17,6 +17,27 @@ from tests.fakes import FAKE_AWS  # noqa: E402
 TOKEN = "t0ken-for-tests"
 
 
+class DefaultSpawn(unittest.TestCase):
+    def test_passes_the_served_state_to_the_processor(self):
+        with mock.patch.object(server.subprocess, "Popen") as popen:
+            server.default_spawn("submit", Path("X:/alt/runbook.json"))
+        argv = popen.call_args.args[0]
+        self.assertEqual(argv[-4:], ["--reason", "submit", "--state", str(Path("X:/alt/runbook.json"))])
+
+    def test_main_wires_its_state_into_spawn(self):
+        with mock.patch.object(server, "make_server") as ms, \
+                mock.patch.object(server, "_read_token", return_value="t"), \
+                mock.patch.object(server.threading, "Thread"), \
+                mock.patch.object(server, "default_spawn") as ds, \
+                mock.patch.object(server, "log"):
+            ms.return_value.serve_forever.side_effect = KeyboardInterrupt
+            ms.return_value.server_address = ("127.0.0.1", 1)
+            server.main(["--port", "1", "--state", "X:/alt/runbook.json"])
+            spawn = ms.call_args.args[4]
+            spawn("submit")
+        ds.assert_called_once_with("submit", Path("X:/alt/runbook.json"))
+
+
 def item(**kw):
     base = {"repo": "r", "title": "t", "why": "w", "steps": [
         {"shell": "wsl", "cmd": "echo hi", "expect": "hi", "prompts": ""}], "verify": "v"}

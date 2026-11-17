@@ -122,24 +122,39 @@ function Invoke-Wsl([string]$Script) {
     } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
 }
 
-# --- 4. WSL alias ------------------------------------------------------------
+# --- 4. WSL shim -------------------------------------------------------------
 if ($WslOk -and -not $WslRoot) { $WslRoot = ConvertTo-WslPath $Root }
-$aliasLine = "alias runbook='python3 $WslRoot/runbook.py'"
+# An executable on PATH, not a ~/.bashrc alias: aliases exist only in interactive
+# shells, so `wsl.exe bash -lc 'runbook ...'` and agent shells never saw one.
+$wslShimBody = @'
+#!/bin/sh
+exec python3 __PY__ "$@"
+'@
+# One single-quoted shell word, so a path with spaces stays one argument.
+$wslShimBody = $wslShimBody.Replace('__PY__', "'" + "$WslRoot/runbook.py".Replace("'", "'\''") + "'")
+$wslShimHeredoc = "<<'RUNBOOK_SHIM'`n$wslShimBody`nRUNBOOK_SHIM"
 if (-not $WslOk) {
-    Say 'skipped' 'wsl (not available): ~/.bashrc alias'
+    Say 'skipped' 'wsl (not available): ~/.local/bin/runbook shim'
 } else {
-    if ((Invoke-Wsl 'grep -qE "^alias runbook=" ~/.bashrc 2>/dev/null') -eq 0) {
-        Say 'exists' 'WSL ~/.bashrc alias runbook'
+    $check = "want=`$(mktemp)`ncat > `"`$want`" $wslShimHeredoc`ncmp -s `"`$want`" ~/.local/bin/runbook && [ -x ~/.local/bin/runbook ]; rc=`$?; rm -f `"`$want`"; exit `$rc"
+    $have = (Invoke-Wsl $check) -eq 0
+    if ($have) {
+        Say 'exists' 'WSL shim ~/.local/bin/runbook'
     } else {
+        $existed = (Invoke-Wsl 'test -e ~/.local/bin/runbook') -eq 0
         if (-not $WhatIf) {
-            $s = @"
-touch ~/.bashrc
-if [ -n "`$(tail -c1 ~/.bashrc)" ]; then echo >> ~/.bashrc; fi
-grep -qE '^alias runbook=' ~/.bashrc || echo "$aliasLine" >> ~/.bashrc
-"@
-            if ((Invoke-Wsl $s) -ne 0) { throw 'failed to append alias to WSL ~/.bashrc' }
+            # set -e: a failed step stops before mv, so a working shim is never
+            # replaced by a partial one. A mktemp name per run, so two installers
+            # never share one temp file; the trap removes it either way.
+            $s = "set -e`nmkdir -p ~/.local/bin`ntmp=`$(mktemp ~/.local/bin/.runbook.XXXXXX)`ntrap 'rm -f `"`$tmp`"' EXIT`ncat > `"`$tmp`" $wslShimHeredoc`nchmod +x `"`$tmp`"`nmv -f `"`$tmp`" ~/.local/bin/runbook"
+            if ((Invoke-Wsl $s) -ne 0) { throw 'failed to write WSL ~/.local/bin/runbook' }
         }
-        Say 'created' 'WSL ~/.bashrc alias runbook'
+        $tag = 'created'
+        if ($existed) { $tag = 'updated' }
+        Say $tag 'WSL shim ~/.local/bin/runbook'
+    }
+    if ((Invoke-Wsl 'case ":$PATH:" in *":$HOME/.local/bin:"*) exit 0;; esac; exit 1') -ne 0) {
+        Write-Host 'WARNING: ~/.local/bin is not on the WSL login-shell PATH; add it in ~/.profile (PATH not modified).'
     }
 }
 
