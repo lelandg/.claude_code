@@ -79,7 +79,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │   ├── package-min-age.md         # Vuln fixes beat the 7-day age floor: per-manager config
 │   │   ├── plan-templates.md          # Implementation plan format
 │   │   ├── pr-review-automation.md    # GitHub App PR review + autofix inspection procedure
-│   │   └── runbook-standards.md       # Fully-specified runbooks (zero-inference steps)
+│   │   └── runbook-standards.md       # Central runbook + fully-specified (zero-inference) steps
 │   ├── hookify-rules/                 # Hookify guard rules (symlink into a project's .claude/)
 │   │   ├── hookify.block-unpinned-codex-rescue.local.md  # Blocks Codex rescue/exec pinned to
 │   │   │                              #   Sol or the bare gpt-5.6 alias (Sol lockdown)
@@ -125,10 +125,13 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── update-code-map/           # CodeMap maintenance skill
 │       ├── update-hermes/             # Backup-first Hermes Agent updater
 │       ├── version-manager/           # Standardized version bumps + changelog currency
-│       └── yt-transcript/             # Download YouTube transcripts
+│       └── yt-transcript/             # YouTube video → Notes (summary, chapters, transcript,
+│                                      #   screenshots); cross-platform launcher
 ├── tools/                             # Standalone tooling, installed separately
 │   ├── agent-config-sync/             # Report/reconcile agent-config drift between runtimes
-│   └── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
+│   ├── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
+│   └── runbook/                       # Central runbook: one local page for every step
+│                                      #   waiting on you, across all repos (stdlib Python)
 ├── Docs/
 │   ├── SETUP_GUIDE.md                 # Full setup & configuration guide
 │   ├── install-guide.html             # Beginner-friendly visual install guide
@@ -363,6 +366,18 @@ per-CLI copies of `AGENTS.md` (Codex, Copilot, Gemini).
 
 Skill: `agent-config-sync`. Operator guide: `Docs/agent-config-sync.md`.
 
+### Central runbook — every step waiting on you, in one place
+
+`tools/runbook/` is a small local tool (standard-library Python) that gives
+every agent one place to put a step only you can do — typing a secret, a
+console setting, a DNS go-ahead, a decision. Agents add items with the
+`runbook add` / `runbook add-decision` CLI; you work them from one page at
+`http://127.0.0.1:8765`, and a processor verifies finished items and clears
+them. The house rule that sends agents there is the first section of
+`instructions/runbook-standards.md` ("Where pending steps go"): **if it is not
+on the page, nothing is waiting on you.** Install and configuration:
+`tools/runbook/README.md`.
+
 ### CodeMap System
 The CodeMap is a structured documentation file (`Docs/CodeMap.md`) that provides:
 - Line-number-accurate class/method inventory
@@ -377,6 +392,7 @@ On-demand reference files that Claude Code reads only when needed (reduces conte
 - **file-operations.md** - Absolute path conventions and parallel search patterns
 - **plan-templates.md** - Implementation checklist format with status markers
 - **pr-review-automation.md** - Waiting for and inspecting the GitHub App review and autofix PRs
+- **runbook-standards.md** - Where pending steps go (the central runbook) and how to write steps that run exactly as written
 
 ### Cross-Provider Model Delegation (Claude + Codex: GPT-6 Astra / GPT-5.6)
 `instructions/model-delegation.md` is a full routing guide for pairing Claude with OpenAI's Codex through the official `openai-codex` Claude Code plugin: per-model routing scores (quota/intelligence/taste), a reasoning-effort ladder with quota impact, and the shipping loop — *write with Claude, audit with Codex, reconcile the findings*. Since 2026-09-22 the standing default is **`gpt-6-astra` at `high`** (preferred over Terra for every task, including reviews), and Astra may run write-capable `/codex:rescue` jobs on a committed tree. It keeps a hard safety policy: **`gpt-5.6-sol` is review-only** and reachable only by editing `~/.codex/config.toml`; it never runs on the rescue path. `hookify-rules/hookify.block-unpinned-codex-rescue.local.md` enforces that mechanically — it denies any Bash invocation of the Codex rescue/exec path pinned to Sol or the bare `gpt-5.6` alias (symlink it into a project's `.claude/` to arm it; `test-codex-guard.sh` verifies all 10 allow/deny cases). The Sol rule itself lives in `CLAUDE.md` § "Codex delegation"; the compact routing rule is in `AGENTS.md` § "Model delegation & cross-provider review", and the auth-expiry procedure (prompt for `codex login`, wait for confirm or a reason to skip) is in the guide.

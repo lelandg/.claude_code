@@ -3,6 +3,21 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.12.0] - 2026-11-17
+
+### Changed
+- ci(security): check action advisories zizmor cannot see
+- ci(security): reject action names not spelled as GitHub spells the repository
+- ci(security): reject case-variant manifests; pin the scan working directory
+- ci(security): close lockfile, parallel-step and yq-option gaps in the pin checks
+- ci(security): count rejected action pins once; escape annotation file names
+- ci(security): reject uppercase SHA pins; keep zizmor's online audits on
+- ci(security): detect vulnerable actions with zizmor
+- sync(config): central runbook, landing rules 7-8, CLI adversarial review
+- Merge pull request #16 from lelandg/ci/d25-action-advisories
+- Merge pull request #15 from lelandg/ci/zizmor-repo-name-case
+- Merge pull request #14 from lelandg/ci/zizmor-actions-check
+
 ## [0.11.0] - 2026-11-11
 
 - New `land-pr` skill: finishes pull requests by cutting the version bump at merge time, waiting for checks, merging, tagging the merge commit and closing leftover autofix drafts.

@@ -25,7 +25,7 @@ sh tools/githooks/install.sh /mnt/c/Users/$USER/.githooks
 ```
 
 Git for Windows is a separate install with its own global config, and it cannot
-reach a path on the WSL filesystem — `/home/you/.githooks` has no drive-letter
+reach a path on the WSL filesystem — `/home/user/.githooks` has no drive-letter
 spelling. The default destination therefore guards WSL only, and the installer
 says so rather than pointing Windows git at a path it cannot read: that would
 find no hooks and skip the scan silently, which is the worst of the three

@@ -52,7 +52,7 @@ printf 'git:     core.hooksPath = %s\n' "$(git config --global --get core.hooksP
 # install leaves every commit made from Windows unguarded. Set both.
 #
 # But only when the destination is reachable from Windows. A path under the WSL
-# filesystem (/home/you/.githooks) has no drive-letter spelling, so pointing
+# filesystem (/home/user/.githooks) has no drive-letter spelling, so pointing
 # Windows git at it sets a path Windows cannot resolve -- git then finds no hooks
 # and commits silently skip the secret scan, while the installer reports success.
 # A loud warning beats that every time.
