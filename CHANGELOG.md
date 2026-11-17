@@ -5,18 +5,10 @@ A plain-English history of what changed in this repository and why. Newest first
 
 ## [0.12.0] - 2026-11-17
 
-### Changed
-- ci(security): check action advisories zizmor cannot see
-- ci(security): reject action names not spelled as GitHub spells the repository
-- ci(security): reject case-variant manifests; pin the scan working directory
-- ci(security): close lockfile, parallel-step and yq-option gaps in the pin checks
-- ci(security): count rejected action pins once; escape annotation file names
-- ci(security): reject uppercase SHA pins; keep zizmor's online audits on
-- ci(security): detect vulnerable actions with zizmor
-- sync(config): central runbook, landing rules 7-8, CLI adversarial review
-- Merge pull request #16 from lelandg/ci/d25-action-advisories
-- Merge pull request #15 from lelandg/ci/zizmor-repo-name-case
-- Merge pull request #14 from lelandg/ci/zizmor-actions-check
+- New central-runbook tool (`tools/runbook/`) and the house rule that sends every step waiting on you there (`runbook-standards.md`, "Where pending steps go").
+- Landing rules 7–8: a conflict or failure is work, never a status; a scheduled routine adopts orphaned PRs. Adversarial Codex reviews run through the `codex` CLI, and the built-in `/code-review` is the local-review fallback.
+- `land-pr` removes a merged PR's local worktree and branch; `version-manager` tracks multi-plugin catalogs by `metadata.version` and bumps single plugins with `release --plugin`; `yt-transcript` has a cross-platform launcher.
+- CI: zizmor scans the workflows for vulnerable actions, with stricter action-pin checks (#14–#16).
 
 ## [0.11.0] - 2026-11-11
 
