@@ -248,7 +248,27 @@ function autosaveField(key, initial, send) {
 
 // Autosaved drafts not yet stored. The "new note" box is sent by hand, has no
 // sender, and never counts: an unsent note must not block Submit or a tick.
-function unsaved() { return Array.from(drafts.keys()).filter((k) => senders.has(k)); }
+// Nor does a draft whose item left the list (verified, dismissed): its save can
+// only 404. Its text stays in drafts (the unload warning still sees it) and is
+// shown once in a toast and the console so it can be copied.
+const orphansShown = new Set();
+function isOrphan(key) {
+  if (key === "notes_self" || !S || !S.items) return false;
+  const id = key.slice(0, key.lastIndexOf(":"));
+  return !S.items.some((i) => i.id === id);
+}
+function unsaved() {
+  return Array.from(drafts.keys()).filter((k) => {
+    if (!senders.has(k)) return false;
+    if (!isOrphan(k)) return true;
+    if (!orphansShown.has(k)) {
+      orphansShown.add(k);
+      console.warn("Unsaved text for " + k + " (the item left the list):\n" + drafts.get(k));
+      toast("Kept your unsaved text for " + k + " (item left the list); copy it from the browser console.");
+    }
+    return false;
+  });
+}
 
 // Send every unsaved draft, including one whose earlier save failed (its timer
 // is gone, the draft is not). Resolves true only when nothing is left unsaved.

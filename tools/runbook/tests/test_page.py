@@ -56,15 +56,16 @@ class PageTests(unittest.TestCase):
         end = PAGE.index("// ---------------------------------------------------------------- rendering")
         harness = (
             "const drafts = new Map(), timers = new Map(), senders = new Map();\n"
+            "let S = { items: [{ id: 'k' }] };\n"
             "let queue = Promise.resolve(); const toasts = [];\n"
             "function toast(m) { toasts.push(m); } function updateHeader() {}\n"
             + PAGE[start:end] +
             "\n(async () => {\n"
             "  const tick = () => new Promise((r) => setTimeout(r, 20));\n"
             "  let ok = false; const sent = [];\n"
-            "  const a = autosaveField('k', '', async (t) => { sent.push(t); return ok ? {} : null; });\n"
+            "  const a = autosaveField('k:output', '', async (t) => { sent.push(t); return ok ? {} : null; });\n"
             "  a.onInput('hello'); a.onBlur(); await tick();\n"
-            "  const failedTimerGone = !timers.has('k') && drafts.has('k');\n"
+            "  const failedTimerGone = !timers.has('k:output') && drafts.has('k:output');\n"
             "  const r1 = await flushAll();\n"
             "  let ran = false; await afterFlush(() => { ran = true; });\n"
             "  let reopened = false; await afterFlush(() => { reopened = true; }, true);\n"
@@ -74,7 +75,12 @@ class PageTests(unittest.TestCase):
             "  drafts.set('new_note', 'typed but not sent');  // sent by hand: no sender\n"
             "  const r3 = await flushAll();\n"
             "  drafts.delete('new_note');\n"
-            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, reopened, r2, ran2, r3, sent, left: drafts.size, toasts: toasts.length }));\n"
+            "  S = { items: [] };  // the item behind 'k:output' left the list\n"
+            "  ok = false; a.onInput('orphaned'); a.onBlur(); await tick();\n"
+            "  const r4 = await flushAll();\n"
+            "  const keptOrphan = drafts.get('k:output') === 'orphaned';\n"
+            "  drafts.delete('k:output');\n"
+            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, reopened, r2, ran2, r3, r4, keptOrphan, sent, left: drafts.size, toasts: toasts.length }));\n"
             "})();\n"
         )
         r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=60)
@@ -88,6 +94,8 @@ class PageTests(unittest.TestCase):
         self.assertTrue(got["ran2"])
         self.assertEqual(got["left"], 0)
         self.assertTrue(got["r3"])        # an unsent note to Claude never blocks Submit
+        self.assertTrue(got["r4"])        # nor does a draft whose item left the list...
+        self.assertTrue(got["keptOrphan"])  # ...and its text is kept, not dropped
         self.assertGreaterEqual(len(got["sent"]), 5)  # initial save + 4 retries
 
     def test_demo_fixture_loads(self):

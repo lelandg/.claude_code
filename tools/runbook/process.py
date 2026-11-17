@@ -57,7 +57,9 @@ def render_prompt() -> str:
 
 
 def build_command(cfg: dict) -> list:
-    tools = [str(t) for t in cfg.get("allowed_tools") or default_allowed_tools()]
+    tools = [str(t) for t in cfg.get("allowed_tools", default_allowed_tools())]
+    if not tools:  # an empty list means nothing, never "use the defaults"
+        raise ValueError("allowed_tools is empty; list the tools the processor may use")
     if "Bash" in tools:
         raise ValueError("allowed_tools must not grant bare Bash; list Bash(<prefix>:*) rules")
     return [

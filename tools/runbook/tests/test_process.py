@@ -263,6 +263,8 @@ class Command(unittest.TestCase):
         self.assertEqual(cmd[i + 1:i + 3], ["Read", "Bash(gh:*)"])
         with self.assertRaises(ValueError):
             process.build_command({"model": "m", "effort": "e", "allowed_tools": ["Bash"]})
+        with self.assertRaises(ValueError):  # empty is not "use the defaults"
+            process.build_command({"model": "m", "effort": "e", "allowed_tools": []})
 
 
 class StatePath(unittest.TestCase):
