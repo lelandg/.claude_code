@@ -224,6 +224,12 @@ class Scanners(unittest.TestCase):
             red, kinds = rblib.redact(text)
             self.assertEqual((red, kinds), ("tool [REDACTED:assigned-secret]", ["assigned-secret"]), opt)
 
+    def test_names_that_only_qualify_a_keyword_are_not_secrets(self):
+        for name in ("SEC" + "RET_ID", "TOK" + "EN_ENDPOINT", "PASS" + "WORD_FILE", "--sec" + "ret-id"):
+            for text in (name + "=" + "production/database", name + "=" + "/home/user/.pgpass"):
+                self.assertEqual(rblib.find_secrets(text), [], text)
+                self.assertEqual(rblib.redact(text), (text, []), text)
+
     def test_assigned_secret_is_linear_on_long_identifiers(self):
         # A pasted run of keyword components must not backtrack (was ~7 s).
         name = ("tok" + "en_") * 2000
