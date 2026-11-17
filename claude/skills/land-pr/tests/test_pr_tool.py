@@ -1375,6 +1375,23 @@ def test_branch_a_paused_rebase_uses_is_kept(repo, tmp_path, capsys):
     assert "a rebase in progress uses it" in capsys.readouterr().out
 
 
+def test_branch_reserved_by_update_refs_rebase_is_kept(repo, tmp_path, capsys):
+    # another worktree's paused `rebase --update-refs` will move feature too;
+    # its metadata lives in the common dir, readable even if that worktree is not
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    other = tmp_path / "wt-other"
+    sh(repo, "worktree", "add", "-q", "--detach", str(other), "main")
+    gd = Path(sh(other, "rev-parse", "--absolute-git-dir"))
+    (gd / "rebase-merge").mkdir()
+    (gd / "rebase-merge" / "head-name").write_text("refs/heads/topic\n")
+    (gd / "rebase-merge" / "update-refs").write_text(
+        f"refs/heads/feature\n{pr.head_oid}\n{pr.head_oid}\n")
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "branch", "--list", "feature")
+    assert "a rebase in progress uses it" in capsys.readouterr().out
+
+
 def test_symbolic_branch_never_deletes_its_target(repo, tmp_path, capsys):
     wt, pr = _landed_branch(repo, tmp_path)
     sh(repo, "worktree", "remove", str(wt))

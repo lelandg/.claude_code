@@ -1532,32 +1532,42 @@ def _branch_worktrees(clone: Path, branch: str) -> list[Path]:
 
 
 def _branch_in_operation(clone: Path, branch: str) -> str | None:
-    """'rebase' or 'bisect' when a worktree of `clone` is mid-operation on
-    `branch`. Its HEAD is detached then, so _branch_worktrees misses it, and
-    `branch -D` used to refuse; update-ref does not check, so we do."""
+    """'rebase', 'bisect', or 'unreadable state' when a worktree of `clone` is
+    mid-operation on `branch` (or may be). Its HEAD is detached then, so
+    _branch_worktrees misses it; `branch -D` used to refuse and update-ref
+    does not check, so we do. The metadata is read from the common git dir
+    (`<common>` and `<common>/worktrees/*`), never through a worktree, so an
+    unreachable worktree cannot hide it."""
     ref = f"refs/heads/{branch}"
-    for line in git(clone, "worktree", "list", "--porcelain",
-                    check=False).splitlines():
-        if not line.startswith("worktree "):
-            continue
-        wt = line[len("worktree "):]
-        gd = git(Path(wt), "rev-parse", "--absolute-git-dir",
-                 check=False).strip()
-        if not gd:
-            continue
-        for sub, kind in (("rebase-merge", "rebase"), ("rebase-apply", "rebase")):
+    common = git(clone, "rev-parse", "--path-format=absolute",
+                 "--git-common-dir", check=False).strip()
+    if not common:
+        return "unreadable state"
+    dirs = [Path(common)]
+    try:
+        dirs += [d for d in (Path(common) / "worktrees").iterdir() if d.is_dir()]
+    except OSError:
+        pass  # no linked worktrees
+    for gd in dirs:
+        for sub in ("rebase-merge", "rebase-apply"):
+            op = gd / sub
+            if not op.is_dir():
+                continue
             try:
-                if (Path(gd) / sub / "head-name").read_text(
-                        encoding="utf-8").strip() == ref:
-                    return kind
+                if (op / "head-name").read_text(encoding="utf-8").strip() == ref:
+                    return "rebase"
+                upd = op / "update-refs"  # refs a --update-refs rebase will move
+                if upd.exists() and ref in upd.read_text(encoding="utf-8").split():
+                    return "rebase"
             except OSError:
-                pass
-        try:
-            if (Path(gd) / "BISECT_START").read_text(
-                    encoding="utf-8").strip() in (branch, ref):
-                return "bisect"
-        except OSError:
-            pass
+                return "unreadable state"
+        bisect = gd / "BISECT_START"
+        if bisect.exists():
+            try:
+                if bisect.read_text(encoding="utf-8").strip() in (branch, ref):
+                    return "bisect"
+            except OSError:
+                return "unreadable state"
     return None
 
 
@@ -1629,7 +1639,9 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
         return
     busy = _branch_in_operation(clone, pr.head)
     if busy:
-        print(f"  kept local branch {pr.head}: a {busy} in progress uses it")
+        print(f"  kept local branch {pr.head}: "
+              + ("its operation state could not be read" if busy == "unreadable state"
+                 else f"a {busy} in progress uses it"))
         return
     # Delete only the tip validated above: update-ref with the expected old
     # value fails if anything moved the branch since, where `branch -D`
