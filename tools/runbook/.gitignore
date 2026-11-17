@@ -1,0 +1,9 @@
+# Live state and per-install secrets: never commit these.
+runbook.json
+runbook.json.*
+.token
+*.lock
+*.tmp
+logs/
+__pycache__/
+.superpowers/

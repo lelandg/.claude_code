@@ -123,8 +123,9 @@ Practical defaults (**always prefer Astra over Terra**):
 - User-facing UI, copy, or API design: taste ≥ 8 for the final pass — Fable
   or Astra as author, Astra or Sol as reviewer.
 - Important plans/implementations: Claude review **plus** an independent Codex
-  review (Astra by default). For auth, billing, or data migration: adversarial
-  review (`/codex:adversarial-review`) and reconcile disagreements explicitly.
+  review (Astra by default). For auth, billing, or data migration: an
+  adversarial review through the `codex` CLI (below) and reconcile
+  disagreements explicitly.
 - The **Claude-side spawned-agent ladder is unchanged** (Haiku = fully-specified
   mechanical implementers, Sonnet = integration/low-risk review, Fable/Opus =
   prod-gating reviews + orchestration). Haiku stays fine for fully-specified
@@ -152,7 +153,16 @@ custom shell code.
 - `/codex:review [--base <ref>] [--scope auto|working-tree|branch]` —
   read-only native review of local git state; inherits the config model.
 - `/codex:adversarial-review [focus ...]` — challenge review (assumptions,
-  design, tradeoffs); same scope flags plus focus text.
+  design, tradeoffs); same scope flags plus focus text. User-only: the plugin
+  sets `disable-model-invocation`, so agents use the CLI form below.
+- **Adversarial review through the CLI** — the agent runs it itself. Commit
+  first, write the prompt to a file (`<role>` adversarial, `<target>` branch
+  and base, `<focus>`, `<output>` severity + file:line + scenario + fix), then
+  run it in the background:
+  `codex exec -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C <repo> --ephemeral -o <result.md> - < <prompt.md>`
+  Always `-s read-only` and a pinned `-m gpt-6-astra` (never Sol: `exec` can
+  write without the sandbox flag). Reconcile every finding in the PR body. If
+  the CLI cannot run, it is not a gate: say so in the PR body and go on.
 - `/codex:rescue --model <m> --effort <e> [--background] <task>` —
   investigation / fix delegation. Pin `--model gpt-6-astra`; an unpinned
   call inherits Astra from config, which is allowed. Terra only as a named

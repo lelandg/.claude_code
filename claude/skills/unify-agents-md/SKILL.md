@@ -18,7 +18,7 @@ like Claude does. `CLAUDE.md`/`GEMINI.md` shrink to a one-line `@import` of
   convention is only in `CLAUDE.md`, the other agents won't follow it; that's the
   whole problem this fixes.
 - **CLAUDE.md / GEMINI.md hold only tool-specifics.** Which *skill/agent/command*
-  implements a convention (e.g. "use the `code-reviewer` agent"), plus the
+  implements a convention (e.g. "use the `/code-review` skill"), plus the
   `@import` line that pulls in AGENTS.md. The convention itself goes in AGENTS.md;
   the mechanism stays here.
 - **Coding vs admin is the boundary, not "marketing vs everything."** Coding and

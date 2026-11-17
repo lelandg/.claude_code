@@ -17,8 +17,11 @@ Read it there before writing any date; otherwise run `date '+%Y-%m-%d %H:%M'`
 
 - **Code map:** when I ask to update the code map / CodeMap, use the
   `update-code-map` skill. CodeMap spec: `~/.claude/CLAUDE_CodeMap.md`.
-- **Code review:** when I ask you to review code, use the `code-reviewer` agent
-  (it carries out the structured-review convention from the shared rules).
+- **Code review:** when I ask you to review code, use the built-in `/code-review`
+  skill (it carries out the structured-review convention from the shared
+  rules). Where a repo ships its own pre-PR reviewer, use that before opening
+  a PR. (The `code-reviewer` agent in `claude/agents/` predates the built-in
+  skill and is no longer the default.)
 - **Documentation:** when I ask for docs, use the documentation skills
   (`project-documenter` / `technical-documenter`).
 - **Plans:** when the `writing-plans` or `brainstorming` skill creates a design
@@ -47,8 +50,10 @@ implemented here by the `codex` plugin (full guide:
 - `/codex:review [--base <ref>]` —
   read-only reviews; they inherit the `~/.codex/config.toml` default
   (`gpt-6-astra` at `high`). Commit everything first.
-- `/codex:adversarial-review [focus ...]` — restricted to the user. When the
-  user asks you to, tell them how to run it for the task at hand.
+- `/codex:adversarial-review [focus ...]` — the plugin command is user-only
+  (`disable-model-invocation`). Run adversarial reviews yourself through the
+  `codex` CLI instead; the command is in
+  `~/.claude/instructions/model-delegation.md`.
 - `/codex:rescue --model gpt-6-astra --effort <e> [--background] <task>`
   — pin `--model` explicitly; an unpinned call inherits the config default
   (Astra, allowed). Prefer Astra over Terra; Terra only as a named fallback.
@@ -111,3 +116,8 @@ Code invokes the codex plugin, so it is a Claude mechanism.)
   (`skill: repo-doctor`; tool: `~/.claude/skills/repo-doctor/audit.py`).
   Triage only — dispatches `/unify-agents-md` → `/claude-md-optimizer` →
   `/update-code-map` → `/version-manager` in that dependency order.
+- **Central runbook** (not a skill; a CLI) — every step waiting on you:
+  `python /path/to/projects/_runbook/runbook.py add|add-decision|list|show|verified|reopen|reply|restore`
+  (alias it as `runbook`; install from `tools/runbook/` in the config repo).
+  Page: `http://127.0.0.1:8765`. Rules:
+  `~/.claude/instructions/runbook-standards.md`, first section.

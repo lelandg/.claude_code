@@ -1516,6 +1516,78 @@ def landed_version(pr: PR) -> str | None:
     return None
 
 
+def _branch_worktrees(clone: Path, branch: str) -> list[Path]:
+    """Worktrees of `clone` that have `branch` checked out, main one first."""
+    found, path = [], None
+    for line in git(clone, "worktree", "list", "--porcelain",
+                    check=False).splitlines():
+        if line.startswith("worktree "):
+            path = Path(line[len("worktree "):])
+        elif line == f"branch refs/heads/{branch}" and path is not None:
+            found.append(path)
+    return found
+
+
+def _inside(path: Path) -> bool:
+    try:
+        Path.cwd().resolve().relative_to(path.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def clean_local_branch(pr: PR, clone: Path | None) -> None:
+    """After the merge, remove the PR branch's local worktrees and the local
+    branch from the clone on this machine. Never forced: a worktree with
+    uncommitted or untracked files, a branch holding commits that were not
+    merged, the clone's main checkout, and a worktree this process is running
+    inside are all kept and named. Safe to repeat."""
+    if clone is None or not pr.head or not pr.head_oid:
+        return
+    ref = f"refs/heads/{pr.head}"
+    tip = git(clone, "rev-parse", "--verify", "--quiet", ref,
+              check=False).strip()
+    if not tip:
+        return
+    # The merged head may only exist on the server now; pull/N/head keeps it.
+    if run(["git", "-C", str(clone), "cat-file", "-e", pr.head_oid],
+           check=False).returncode != 0:
+        run(["git", "-C", str(clone), "fetch", "-q", "origin",
+             f"pull/{pr.number}/head"], check=False)
+    if tip != pr.head_oid and run(
+            ["git", "-C", str(clone), "merge-base", "--is-ancestor", tip,
+             pr.head_oid], check=False).returncode != 0:
+        print(f"  kept local branch {pr.head}: it has commits that were not "
+              "merged")
+        return
+    main = Path(git(clone, "rev-parse", "--show-toplevel").strip()).resolve()
+    kept = []
+    for wt in _branch_worktrees(clone, pr.head):
+        if wt.resolve() == main:
+            kept.append(f"{wt} (the clone's main checkout)")
+        elif _inside(wt):
+            kept.append(f"{wt} (this process is running inside it; run "
+                        "`land` again from elsewhere to remove it)")
+        elif git(wt, "status", "--porcelain", check=False).strip():
+            kept.append(f"{wt} (uncommitted or untracked files)")
+        else:
+            proc = run(["git", "-C", str(clone), "worktree", "remove", str(wt)],
+                       check=False)
+            if proc.returncode == 0:
+                print(f"  removed local worktree {wt}")
+            else:
+                kept.append(f"{wt} ({(proc.stderr or proc.stdout).strip()})")
+    if kept:
+        for item in kept:
+            print(f"  kept local worktree {item}")
+        print(f"  kept local branch {pr.head}: still checked out")
+        return
+    proc = run(["git", "-C", str(clone), "branch", "-D", pr.head], check=False)
+    print(f"  deleted local branch {pr.head}" if proc.returncode == 0 else
+          f"  could not delete local branch {pr.head}: "
+          f"{(proc.stderr or proc.stdout).strip()}")
+
+
 def after_merge(pr: PR, version: str | None) -> int:
     """Everything that follows the merge. Every step is safe to repeat, so a
     run that died here is finished by running `land` on the merged PR again."""
@@ -1581,6 +1653,10 @@ def after_merge(pr: PR, version: str | None) -> int:
                     print(f"  deleted branch {pr.head}")
                 except ToolError as exc:
                     print(f"  could not delete branch {pr.head}: {exc}")
+    try:
+        clean_local_branch(pr, find_clone(pr.repo, _CACHE.get("clone_hint")))
+    except ToolError as exc:
+        print(f"  local cleanup skipped: {exc}")
     leftovers = gh("pr", "list", "-R", pr.repo, "--state", "open", "--head",
                    f"autofix/pr-{pr.number}", "--json", "number",
                    "--jq", ".[].number", check=False).split()

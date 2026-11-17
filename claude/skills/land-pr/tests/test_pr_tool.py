@@ -1273,3 +1273,76 @@ def test_local_draft_tag_is_moved_aside_not_deleted(repo, tmp_path):
     tags = sh(repo, "tag").split()
     assert "v1.0.1" not in tags
     assert any(t.startswith("v1.0.1-draft-") for t in tags)
+
+
+# --------------------------------------------------------------------------
+# local cleanup after the merge: worktree + branch, never forced
+# --------------------------------------------------------------------------
+
+def _landed_branch(repo: Path, tmp_path: Path, name: str = "feature"):
+    """`repo` with a pushed `name` branch checked out in a linked worktree;
+    returns (worktree, PR whose merged head is that branch's tip)."""
+    sh(repo, "checkout", "-q", "main")
+    sh(repo, "branch", "-f", name, "main")
+    wt = tmp_path / f"wt-{name}"
+    sh(repo, "worktree", "add", "-q", str(wt), name)
+    (wt / "app.js").write_bytes(b"2\n")
+    sh(wt, "commit", "-qam", "change")
+    sh(wt, "push", "-q", "origin", name)
+    pr = pt.PR(repo="o/r", number=7, head=name,
+               head_oid=sh(wt, "rev-parse", "HEAD"))
+    return wt, pr
+
+
+def test_merged_clean_worktree_and_local_branch_are_removed(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    pt.clean_local_branch(pr, repo)
+    assert not wt.exists()
+    assert sh(repo, "branch", "--list", "feature") == ""
+    out = capsys.readouterr().out
+    assert "removed local worktree" in out and "deleted local branch feature" in out
+
+
+def test_branch_behind_the_merged_head_still_counts_as_merged(repo, tmp_path):
+    # The lander pushes a version bump from its own workspace, so the local
+    # branch is usually one commit behind the head that was merged.
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(wt, "commit", "-q", "--allow-empty", "-m", "chore(release): v1.0.1")
+    pr.head_oid = sh(wt, "rev-parse", "HEAD")
+    sh(wt, "reset", "-q", "--hard", "HEAD~1")
+    pt.clean_local_branch(pr, repo)
+    assert not wt.exists()
+
+
+def test_worktree_with_uncommitted_files_is_kept(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    (wt / "scratch.txt").write_text("wip")
+    pt.clean_local_branch(pr, repo)
+    assert wt.exists() and sh(repo, "branch", "--list", "feature")
+    assert "uncommitted or untracked" in capsys.readouterr().out
+
+
+def test_branch_with_unmerged_commits_is_kept(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    (wt / "app.js").write_bytes(b"3\n")
+    sh(wt, "commit", "-qam", "after the merge")
+    pt.clean_local_branch(pr, repo)
+    assert wt.exists() and sh(repo, "branch", "--list", "feature")
+    assert "not merged" in capsys.readouterr().out
+
+
+def test_worktree_the_process_runs_in_is_kept(repo, tmp_path, monkeypatch, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    monkeypatch.chdir(wt)
+    pt.clean_local_branch(pr, repo)
+    assert wt.exists()
+    assert "running inside it" in capsys.readouterr().out
+
+
+def test_branch_checked_out_in_the_main_clone_is_kept(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    sh(repo, "checkout", "-q", "feature")
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "rev-parse", "--abbrev-ref", "HEAD") == "feature"
+    assert "main checkout" in capsys.readouterr().out

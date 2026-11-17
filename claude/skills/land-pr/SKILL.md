@@ -52,7 +52,16 @@ with `--wait 25` in a background run.
    `--match-head-commit` so nothing unreviewed rides along. A squash subject
    becomes `title (vX.Y.Z) (#N)`.
 6. Tags the merge commit through the API and deletes the branch.
-7. Closes `autofix/pr-N` drafts for the PR it just merged.
+7. Removes the branch's local worktrees and the local branch from the clone
+   on this machine (`clean_local_branch`). Never forced: it keeps, and names,
+   a worktree with uncommitted or untracked files, a branch with commits that
+   were not merged, the clone's main checkout, and a worktree the lander is
+   running inside. To clear one of those, fix the reason and run `land` again
+   from a shell outside it.
+8. Closes `autofix/pr-N` drafts for the PR it just merged.
+
+Run `land` from outside the PR's own worktree (the main clone, or anywhere
+with `git -C`) so step 7 can remove it.
 
 After a merge to a deploying branch, the deploy watch and production smoke
 test in AGENTS.md "Shipping autonomy" are still yours.

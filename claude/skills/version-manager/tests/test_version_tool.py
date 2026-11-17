@@ -134,8 +134,24 @@ def test_marketplace_plugin_version_is_detected(tmp_path):
 
 
 def test_marketplace_with_many_plugins_is_noted_not_tracked(tmp_path):
-    """Chameleon-Labs-LLC/plugins: seven plugins, each with its own version —
-    no single repo version exists, so the tool must not pick plugins[0]."""
+    """A plugins catalog repo with no metadata.version: each plugin has its
+    own version and no single repo version exists, so the tool must not pick
+    plugins[0]."""
+    repo = new_repo(tmp_path)
+    market = json.loads(MARKETPLACE)
+    del market["metadata"]["version"]
+    market["plugins"].append(dict(market["plugins"][0],
+                                  name="second-plugin", version="1.4.0"))
+    commit(repo, "init",
+           {".claude-plugin/marketplace.json": json.dumps(market, indent=2)})
+    canonical, _mirrors, notes = vt.detect(repo)
+    assert canonical is None
+    assert any("2 plugins" in n for n in notes)
+
+
+def test_marketplace_catalog_tracks_metadata_version(tmp_path):
+    """A catalog that declares metadata.version: that is the repo's own
+    series, never plugins[0]'s version."""
     repo = new_repo(tmp_path)
     market = json.loads(MARKETPLACE)
     market["plugins"].append(dict(market["plugins"][0],
@@ -143,7 +159,9 @@ def test_marketplace_with_many_plugins_is_noted_not_tracked(tmp_path):
     commit(repo, "init",
            {".claude-plugin/marketplace.json": json.dumps(market, indent=2)})
     canonical, _mirrors, notes = vt.detect(repo)
-    assert canonical is None
+    assert canonical is not None
+    assert canonical.kind == "marketplace_meta"
+    assert canonical.value == "0.2.0"
     assert any("2 plugins" in n for n in notes)
 
 

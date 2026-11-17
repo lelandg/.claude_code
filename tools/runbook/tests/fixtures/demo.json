@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "processed_hash": "",
+  "last_processed": "2026-11-15T14:00:03Z",
+  "last_run": {"at": "2026-11-15T14:00:03Z", "reason": "schedule", "result": "no changes"},
+  "runs_today": {"date": "2026-11-15", "count": 1},
+  "items": [
+    {"id": "rb-0001", "repo": "my-app", "title": "Turn on spam checks for the forwarder",
+     "why": "The forwarder's AI spam stages stay off until the keys are set.",
+     "kind": "steps", "priority": "urgent", "due": null, "after": [], "tags": [],
+     "steps": [
+       {"shell": "wsl", "cmd": "read -rs -p \"Key: \" KEY && echo ok", "expect": "prints ok", "prompts": "Key: paste it (hidden)"},
+       {"shell": "bash-remote:build-host", "cmd": "systemctl --user status mail-forwarder", "expect": "active (running)", "prompts": ""}
+     ],
+     "verify": "Lambda env key names include the spam flag", "rollback": "set the flag to 0",
+     "source": "my-app/Plans/2026-11-05-email-forwarder-spam-triage.md",
+     "added_by": "claude-code", "added": "2026-11-15T14:10:00Z",
+     "state": "open", "output": "", "chosen": null, "other": "", "agent_note": "", "verified": null},
+    {"id": "rb-0002", "repo": "my-app", "title": "Delete the mail DMARC filter",
+     "why": "The filter swallows legitimate reports.", "kind": "steps", "priority": "normal",
+     "due": null, "after": [], "tags": [],
+     "steps": [{"shell": "powershell", "cmd": "Write-Output 'open mail settings, Filters, delete the DMARC filter'", "expect": "filter gone", "prompts": ""}],
+     "verify": "", "rollback": "", "source": "", "added_by": "claude-code", "added": "2026-11-15T14:11:00Z",
+     "state": "done", "output": "", "chosen": null, "other": "", "agent_note": "", "verified": null},
+    {"id": "rb-0003", "repo": "my-api", "title": "Rotate the service key",
+     "why": "Quarterly rotation.", "kind": "steps", "priority": "normal", "due": null, "after": [], "tags": [],
+     "steps": [{"shell": "wsl", "cmd": "./scripts/env-diff.sh my-api", "expect": "key names only", "prompts": ""}],
+     "verify": "", "rollback": "", "source": "", "added_by": "claude-code", "added": "2026-11-15T14:12:00Z",
+     "state": "problem", "output": "Error: no snapshot found for my-api", "chosen": null, "other": "",
+     "agent_note": "Run ./scripts/env-pull.sh my-api first.", "verified": null},
+    {"id": "rb-0004", "repo": "my-app", "title": "SES virus FAIL versus allowlist",
+     "why": "Which rule wins when both fire?", "kind": "decision", "priority": "normal",
+     "due": null, "after": [], "tags": [], "steps": [], "verify": "", "rollback": "", "source": "",
+     "added_by": "claude-code", "added": "2026-11-15T14:13:00Z",
+     "decision": {"options": [
+       {"label": "allowlist wins", "detail": "Trusted senders always deliver.", "recommended": false},
+       {"label": "quarantine anyway", "detail": "A virus verdict always quarantines.", "recommended": true}]},
+     "state": "open", "output": "", "chosen": null, "other": "", "agent_note": "", "verified": null},
+    {"id": "rb-0005", "repo": "my-worker", "title": "Deploy the Lambda after the key rotates",
+     "why": "Needs the new key first.", "kind": "steps", "priority": "normal", "due": null,
+     "after": ["rb-0003"], "tags": [],
+     "steps": [{"shell": "wsl", "cmd": "./scripts/deploy.sh staging", "expect": "deploy succeeds", "prompts": ""}],
+     "verify": "", "rollback": "", "source": "", "added_by": "claude-code", "added": "2026-11-15T14:14:00Z",
+     "state": "open", "output": "", "chosen": null, "other": "", "agent_note": "", "verified": null},
+    {"id": "rb-0006", "repo": "my-site", "title": "Review the TODO left in the deploy script",
+     "why": "Found by a sweep of the repo inbox.", "kind": "steps", "priority": "normal", "due": null,
+     "after": [], "tags": ["found-by-sweep"],
+     "steps": [{"shell": "wsl", "cmd": "git -C ~/code/my-site status --short", "expect": "clean tree", "prompts": ""}],
+     "verify": "", "rollback": "", "source": "", "added_by": "sweep", "added": "2026-11-15T14:15:00Z",
+     "state": "open", "output": "", "chosen": null, "other": "", "agent_note": "", "verified": null},
+    {"id": "rb-0007", "repo": "my-app", "title": "Renew the domain",
+     "why": "Renewal opens in January.", "kind": "steps", "priority": "later", "due": "2099-01-15",
+     "after": [], "tags": [],
+     "steps": [{"shell": "powershell", "cmd": "Start-Process https://example.test/renew", "expect": "renewal page opens", "prompts": ""}],
+     "verify": "", "rollback": "", "source": "", "added_by": "claude-code", "added": "2026-11-15T14:16:00Z",
+     "state": "open", "output": "", "chosen": null, "other": "", "agent_note": "", "verified": null}
+  ],
+  "done_log": [
+    {"id": "rb-0000", "repo": "my-app", "title": "Enable Dependabot alerts", "kind": "steps",
+     "priority": "normal", "state": "done", "steps": [], "after": [], "tags": [],
+     "removed_at": "2026-11-14T09:00:00", "reason": "verified: alerts are on", "by": "claude-code"}
+  ],
+  "notes_self": "Remember to ask about the SES quota.",
+  "notes_claude": [
+    {"id": "n-1", "text": "Can the forwarder skip newsletters?", "at": "2026-11-15T13:00:00",
+     "status": "answered", "reply": "Yes: add a List-Unsubscribe check; queued as rb-0006."}
+  ]
+}

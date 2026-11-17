@@ -228,7 +228,10 @@ use placeholder times. Timestamps: `YYYY-MM-DD HH:MM`.
   native runtime. Name the remaining boundary.
 - Instructions the user will execute (runbooks, handoffs, PR/issue steps) must
   be executable exactly as written, zero inference:
-  `~/.claude/instructions/runbook-standards.md`.
+  `~/.claude/instructions/runbook-standards.md`. Every step waiting on the
+  user goes on one central runbook (`runbook add`; same file — the config
+  repo ships one under `tools/runbook/`): if it is not on that page, nothing
+  is waiting on them.
 - When a step doesn't need the user's input, keep going. Put status notes in
   the same message as your next action. Stop and ask only when you can't
   continue without the user, or before anything destructive: deleting data,
@@ -329,7 +332,7 @@ and push.
 
 Stop and ask only when something is genuinely blocking: a gate you cannot get
 green, a review finding that needs the user's decision, or a step that needs a
-runbook only they can run. "Still ask first" at the end of this section is
+runbook item only they can run (add it with `runbook add`). "Still ask first" at the end of this section is
 unchanged — it is the one list that always outranks this.
 
 Gates before merge, by the riskiest thing the change touches:
@@ -344,8 +347,11 @@ Gates before merge, by the riskiest thing the change touches:
   committed branch (`--base origin/main`). Fix each finding or answer it in the
   PR body. If substantive commits land afterwards (anything beyond review
   fixes and the version bump), re-run it before merging. Auth, billing, and
-  data-migration PRs also need `/codex:adversarial-review`, which only the
-  user can run — ask them, with the exact command.
+  data-migration PRs also get an adversarial Codex review, which you run
+  yourself through the `codex` CLI, read-only (command in
+  `~/.claude/instructions/model-delegation.md`). Never make a PR wait on a
+  review you cannot run: if the CLI is unavailable, say so in the PR body and
+  go on.
 - **Merge** only when checks are green, the automated PR review has arrived
   and every finding is fixed or answered, the Codex findings are reconciled,
   and no dependency advisory this PR introduced or touched is left open with a
@@ -381,9 +387,12 @@ read-only until `--apply`.
 
 - `land <owner/repo#N> --apply` is the whole finishing sequence: it verifies
   green checks and resolved review threads, cuts the version bump, waits for
-  checks on it, merges, tags the merge commit, deletes the branch, and closes
-  that PR's leftover autofix drafts. Exit `3` means checks are still running:
-  run the same command again. It is resumable from any session.
+  checks on it, merges, tags the merge commit, deletes the branch, removes
+  the branch's local worktree and local branch (never forced; a dirty or
+  unmerged one is kept and named), and closes that PR's leftover autofix
+  drafts. Run it from outside the PR's worktree so that worktree can go.
+  Exit `3` means checks are still running: run the same command again. It
+  is resumable from any session.
 - `status [--repo owner/name]` classifies every open PR. `sweep --apply`
   closes superseded drafts and lands everything READY.
 
@@ -406,6 +415,19 @@ read-only until `--apply`.
 6. **Stale is a decision, not a state.** Rows `status` marks `STALE`,
    `EXTERNAL` or `ELSEWHERE` go in the end-of-task report as close-or-revive
    decisions for the user. Do not close a feature PR on your own.
+7. **A conflict or failure is work, never a status.** Merge the base in and
+   resolve it, or fix the failing check, then land. If it looks impossible,
+   get a second opinion before stopping: a strongest-tier Claude agent, then
+   a read-only Codex (Astra) diagnosis. Effort may go up to `xhigh`, never
+   `max` without the user's approval. A PR never carries `CHANGELOG.md`
+   edits: put the entry in `## Release notes` (a changelog conflict resolves
+   to the base's file).
+8. **Orphans have an owner.** Run a scheduled routine (e.g. a Claude Code
+   scheduled task every couple of hours during your working day) that takes
+   over any PR whose head has been idle for 2 h, Dependabot's included,
+   works it through rule 7, and keeps a ledger of what it did. A session
+   that can't finish its PR still names its state; the routine picks it up
+   from there.
 
 GitHub's native auto-merge stays off: review findings arrive as comments, not
 checks, and the bump must be the last commit, so it would merge ahead of both.
@@ -509,8 +531,8 @@ second model family doesn't share the author's assumptions. Routing scores,
 effort ladder, and defaults: `~/.claude/instructions/model-delegation.md`.
 Claude-side spawned agents: Haiku = mechanical, Sonnet = integration/low-risk
 review, Fable/Opus = prod-gating + orchestration. Auth, billing, or
-data-migration work gets a Claude review **plus** an independent
-`/codex:adversarial-review`; reconcile disagreements explicitly. Keep the
+data-migration work gets a Claude review **plus** an independent adversarial
+Codex review run through the `codex` CLI; reconcile disagreements explicitly. Keep the
 Codex stop-review gate **off**; invoke reviews at commit/PR boundaries.
 
 ### PR review through the repo's configured automated reviewer
@@ -524,9 +546,10 @@ PR. After opening, wait for that review (2-5 minutes) and inspect its results
 and any autofix PR by the procedure in
 `~/.claude/instructions/pr-review-automation.md`. The Codex review runs
 before push; it does not replace the wait for the automated review. On a repo
-with no automated reviewer configured, a local Claude review (`code-reviewer`
-agent) stands in for it: implement → tests green → commit → Codex + Claude
-review → reconcile/fix → push → PR → land.
+with no automated reviewer configured, a local Claude review of the committed
+diff stands in for it — the repo's own pre-PR reviewer where it has one,
+otherwise Claude Code's built-in `/code-review`: implement → tests green →
+commit → Codex + Claude review → reconcile/fix → push → PR → land.
 
 **Which reviewer that is varies by repo, so read the repo's own `AGENTS.md`
 rather than assuming.** Two properties decide which one you actually gate on,

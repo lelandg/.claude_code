@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runbook</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5b6573; --line: #d5dae1;
+  --accent: #1f5fd1; --accent-text: #ffffff; --danger: #b3261e; --danger-bg: #fde8e6;
+  --ok: #1b7f3b; --warn: #8a5a00; --code-bg: #eef1f5; --focus: #e07b00;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c; --panel: #1d2128; --text: #e6e9ee; --muted: #9aa5b4; --line: #343b46;
+    --accent: #6ea0ff; --accent-text: #0b1220; --danger: #ff8a80; --danger-bg: #3a1e1c;
+    --ok: #67d68a; --warn: #f0b955; --code-bg: #12151a; --focus: #ffb454;
+  }
+}
+* { box-sizing: border-box; }
+html { font-size: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+header.top { position: sticky; top: 0; z-index: 5; background: var(--panel);
+  border-bottom: 1px solid var(--line); padding: .6rem 1rem; }
+header.top .in { max-width: 70rem; margin: 0 auto; display: flex; flex-wrap: wrap;
+  gap: .25rem 1rem; align-items: baseline; }
+header.top h1 { font-size: 1.25rem; margin: 0; }
+#counts, #lastcheck { color: var(--muted); }
+#banner { background: var(--danger-bg); color: var(--danger); border-bottom: 2px solid var(--danger);
+  padding: .5rem 1rem; font-weight: 600; }
+#banner[hidden] { display: none; }
+main { max-width: 70rem; margin: 0 auto; padding: 1rem 1rem 6rem; }
+h2.group { font-size: .9rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  margin: 1.5rem 0 .25rem; border-bottom: 1px solid var(--line); padding-bottom: .2rem; }
+h3.repo { font-size: .95rem; margin: .75rem 0 .35rem; color: var(--accent); }
+article.item { background: var(--panel); border: 1px solid var(--line); border-radius: .5rem;
+  padding: .75rem .9rem; margin: 0 0 .6rem; }
+article.item.urgent { border-left: 4px solid var(--danger); }
+article.item.done, article.item.gated { opacity: .6; }
+article.item.problem { border-left: 4px solid var(--warn); }
+.titlerow { display: flex; gap: .6rem; align-items: flex-start; }
+.titlerow input[type=checkbox] { width: 1.3rem; height: 1.3rem; margin-top: .2rem; flex: none; }
+.titlerow label { font-weight: 600; overflow-wrap: anywhere; }
+.tag { display: inline-block; font-size: .75rem; font-weight: 600; padding: 0 .4rem; border-radius: .6rem;
+  border: 1px solid var(--line); color: var(--muted); margin-left: .35rem; vertical-align: middle; }
+.tag.after { color: var(--warn); border-color: var(--warn); }
+.tag.ok { color: var(--ok); border-color: var(--ok); }
+.meta { color: var(--muted); font-size: .9rem; margin: .15rem 0 0 1.9rem; overflow-wrap: anywhere; }
+.body { margin-left: 1.9rem; min-width: 0; }
+ol.steps { list-style: none; padding: 0; margin: .5rem 0; counter-reset: s; }
+ol.steps > li { counter-increment: s; margin: .5rem 0; }
+.steprow { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.steprow::before { content: counter(s); font-weight: 700; color: var(--muted); min-width: 1.2rem; }
+.shell { font-size: .75rem; font-weight: 700; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: .3rem; padding: 0 .4rem; }
+pre { margin: .3rem 0; padding: .5rem .6rem; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: .4rem; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: .9rem/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; max-width: 100%; }
+.note { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+button { font: inherit; padding: .3rem .7rem; border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); border-radius: .4rem; cursor: pointer; min-height: 2rem; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { cursor: not-allowed; opacity: .6; }
+button.danger { color: var(--danger); }
+textarea, input[type=text] { width: 100%; font: inherit; padding: .4rem .5rem; background: var(--bg);
+  color: var(--text); border: 1px solid var(--line); border-radius: .4rem; }
+textarea { min-height: 4rem; resize: vertical; }
+details { margin: .35rem 0; }
+summary { cursor: pointer; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.opts { border: 0; padding: 0; margin: .5rem 0; min-width: 0; }
+.opt { display: flex; gap: .5rem; align-items: flex-start; margin: .3rem 0; }
+.opt input { margin-top: .35rem; }
+.agentnote { background: var(--danger-bg); border-radius: .4rem; padding: .3rem .6rem; margin: .4rem 0; overflow-wrap: anywhere; }
+.later, .donelog { margin-top: 1.25rem; }
+.later > summary, .donelog > summary { font-weight: 700; text-transform: uppercase; font-size: .9rem; letter-spacing: .08em; }
+.donelog li { margin: .3rem 0; overflow-wrap: anywhere; }
+.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.5rem; }
+@media (max-width: 720px) { .panes { grid-template-columns: 1fr; } }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: .5rem; padding: .75rem; min-width: 0; }
+.pane h2 { margin: 0 0 .5rem; font-size: 1rem; }
+.pane ul { list-style: none; padding: 0; margin: 0 0 .6rem; }
+.pane li { margin: .4rem 0; overflow-wrap: anywhere; }
+#submit { position: fixed; right: 1rem; bottom: 1rem; z-index: 6; padding: .6rem 1.2rem; font-weight: 700;
+  background: var(--accent); color: var(--accent-text); border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+#submitstatus { position: fixed; right: 1rem; bottom: 4rem; z-index: 6; max-width: min(24rem, calc(100vw - 2rem));
+  background: var(--panel); border: 1px solid var(--line); border-radius: .4rem; padding: .3rem .6rem; overflow-wrap: anywhere; }
+#submitstatus:empty { display: none; }
+#toast { position: fixed; left: 1rem; bottom: 1rem; z-index: 7; max-width: min(28rem, calc(100vw - 6rem));
+  background: var(--panel); border: 1px solid var(--warn); color: var(--text); border-radius: .4rem; padding: .4rem .7rem; overflow-wrap: anywhere; }
+#toast:empty { display: none; }
+.empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="top"><div class="in">
+  <h1>Runbook</h1><span id="counts"></span><span id="lastcheck"></span>
+</div></header>
+<div id="banner" role="alert" hidden></div>
+<main id="app"></main>
+<div id="submitstatus" role="status" aria-live="polite"></div>
+<button id="submit" type="button">Submit</button>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+const TOKEN = "{{TOKEN}}";
+
+let S = null;                       // latest state from the server
+const drafts = new Map();           // key -> unsaved text
+const timers = new Map();           // key -> {t, run}
+const openKeys = new Set();         // <details> the user has opened ("!key" = closed on purpose)
+let queue = Promise.resolve();
+let submitting = null;              // {prevAt, started}
+let pollTimer = null;
+
+const $ = (id) => document.getElementById(id);
+
+function el(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, "");
+    else e.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid !== null && kid !== undefined && kid !== false)
+    e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return e;
+}
+
+function localDate() {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+}
+function hhmm(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "?";
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+function dayOf(iso) { return String(iso || "").slice(0, 10); }
+
+// ---------------------------------------------------------------- feedback
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.textContent = ""; }, 6000);
+}
+function banner(msg) {
+  const b = $("banner");
+  b.hidden = !msg;
+  b.textContent = msg || "";
+}
+
+// ---------------------------------------------------------------- api
+function rawFetch(method, path, body) {
+  const opts = { method, headers: {} };
+  if (method !== "GET") {
+    opts.headers["Content-Type"] = "application/json";
+    opts.headers["X-Runbook-Token"] = TOKEN;
+    opts.body = JSON.stringify(body || {});
+  }
+  return fetch(path, opts);
+}
+
+async function loadState() {
+  let res;
+  try { res = await rawFetch("GET", "/api/state"); }
+  catch (e) { banner("The runbook service is unreachable. Is server.py running?"); return false; }
+  if (res.status === 503) { banner("The runbook state file is corrupt or busy (503). Fix it from the CLI."); return false; }
+  if (!res.ok) { banner("The runbook service returned " + res.status + "."); return false; }
+  S = await res.json();
+  banner("");
+  return true;
+}
+
+// One write at a time, so each carries the version the previous one produced.
+function write(method, path, extra, retryOnStale) {
+  const job = queue.then(async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let res;
+      try { res = await rawFetch(method, path, Object.assign({ version: S.version }, extra)); }
+      catch (e) { banner("The runbook service is unreachable. Is server.py running?"); return null; }
+      if (res.status === 409) {
+        await loadState();
+        updateHeader();
+        if (retryOnStale && attempt === 0) continue;   // idempotent write (text, tick, choice, dismiss): resend once on the fresh version
+        toast("The runbook changed underneath you; reloaded.");
+        renderIfIdle();
+        return null;
+      }
+      if (res.status === 503) { banner("The runbook state file is corrupt or busy (503)."); return null; }
+      if (!res.ok) {
+        let msg = res.status;
+        try { msg = (await res.json()).error || msg; } catch (e) { /* keep the status */ }
+        toast("Not saved: " + msg);
+        return null;
+      }
+      const data = await res.json().catch(() => null);
+      banner("");
+      if (data && data.state) S = data.state;
+      if (data && data.redacted && data.redacted.length)
+        toast("removed a " + data.redacted.join(", ") + " from your paste");
+      return data || {};
+    }
+    return null;
+  });
+  queue = job.catch(() => {});
+  return job;
+}
+
+function patchItem(id, fields, retry) {
+  return write("PATCH", "/api/items/" + encodeURIComponent(id), { fields }, retry);
+}
+
+// ---------------------------------------------------------------- autosave
+function autosaveField(key, initial, send) {
+  const value = drafts.has(key) ? drafts.get(key) : initial;
+  const run = async () => {
+    timers.delete(key);
+    if (!drafts.has(key)) return;
+    const sent = drafts.get(key);
+    const r = await send(sent);
+    if (r) {
+      if (drafts.get(key) === sent) drafts.delete(key);
+      updateHeader();
+    }
+  };
+  return {
+    value,
+    onInput(text) {
+      drafts.set(key, text);
+      const old = timers.get(key);
+      if (old) clearTimeout(old.t);
+      timers.set(key, { t: setTimeout(run, 600), run });
+    },
+    onBlur() { const x = timers.get(key); if (x) { clearTimeout(x.t); x.run(); } },
+  };
+}
+
+async function flushAll() {
+  const jobs = [];
+  for (const [, x] of Array.from(timers)) { clearTimeout(x.t); jobs.push(x.run()); }
+  await Promise.all(jobs);
+  await queue;
+}
+
+// ---------------------------------------------------------------- rendering
+function textFocused() {
+  const a = document.activeElement;
+  return !!a && (a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && a.type === "text"));
+}
+function renderIfIdle() { if (!textFocused()) renderAll(); }
+
+function updateHeader() {
+  if (!S) return;
+  const open = S.items.filter((i) => i.state === "open").length;
+  const prob = S.items.filter((i) => i.state === "problem").length;
+  $("counts").textContent = open + " open · " + prob + " problem";
+  const lr = S.last_run;
+  $("lastcheck").textContent = lr && lr.at
+    ? "last check " + hhmm(lr.at) + (lr.result ? " (" + lr.result + ")" : "")
+    : "no check yet";
+}
+
+function gatedBy(item) {
+  const ids = new Set(S.items.map((i) => i.id));
+  return (item.after || []).filter((a) => ids.has(a));
+}
+
+function shellLabel(sh) {
+  if (sh === "wsl") return "WSL";
+  if (sh === "powershell") return "PowerShell";
+  if (typeof sh === "string" && sh.startsWith("bash-remote:")) return "ssh " + sh.slice(12);
+  return String(sh || "shell");
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const old = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  } catch (e) { toast("Could not copy; select the command and copy it by hand."); }
+}
+
+function detailsEl(key, summary, startOpen, ...kids) {
+  const d = el("details", null, el("summary", { text: summary }), ...kids);
+  if (openKeys.has(key) || (startOpen && !openKeys.has("!" + key))) d.open = true;
+  d.addEventListener("toggle", () => {
+    if (d.open) { openKeys.add(key); openKeys.delete("!" + key); }
+    else { openKeys.delete(key); openKeys.add("!" + key); }
+  });
+  return d;
+}
+
+function stepsEl(item, locked) {
+  const ol = el("ol", { class: "steps" });
+  (item.steps || []).forEach((s, n) => {
+    const li = el("li");
+    const btn = el("button", { type: "button", text: "Copy", disabled: locked,
+      "data-fk": item.id + ":copy:" + n, "aria-label": "Copy step " + (n + 1) + " command",
+      onclick: () => copyText(s.cmd || "", btn) });
+    li.append(el("div", { class: "steprow" }, el("span", { class: "shell", text: shellLabel(s.shell) }), btn));
+    li.append(el("pre", { text: s.cmd || "" }));
+    if (s.expect) li.append(el("div", { class: "note", text: "expect: " + s.expect }));
+    if (s.prompts) li.append(el("div", { class: "note", text: "prompts: " + s.prompts }));
+    ol.append(li);
+  });
+  return ol;
+}
+
+function textInput(item, field, tag, locked, label, attrs) {
+  const key = item.id + ":" + field;
+  const a = autosaveField(key, item[field] || "", (text) => patchItem(item.id, { [field]: text }, true));
+  const e = el(tag, Object.assign({ "data-fk": key, "aria-label": label, disabled: locked }, attrs || {}));
+  e.value = a.value;
+  e.addEventListener("input", () => a.onInput(e.value));
+  e.addEventListener("blur", () => a.onBlur());
+  return e;
+}
+
+function itemEl(item) {
+  const gate = gatedBy(item);
+  const isDone = item.state === "done";
+  const locked = isDone || gate.length > 0;
+  const isDecision = item.kind === "decision";
+  const cls = ["item"];
+  if (item.priority === "urgent") cls.push("urgent");
+  if (isDone) cls.push("done");
+  if (item.state === "problem") cls.push("problem");
+  if (gate.length) cls.push("gated");
+  const art = el("article", { class: cls.join(" "), "data-id": item.id });
+
+  const row = el("div", { class: "titlerow" });
+  if (!isDecision) {
+    const cb = el("input", { type: "checkbox", id: "cb-" + item.id, "data-fk": item.id + ":cb",
+      disabled: gate.length > 0 });
+    cb.checked = isDone;
+    cb.addEventListener("change", () => {
+      const want = cb.checked ? "done" : "open";
+      flushAll().then(() => patchItem(item.id, { state: want }, true)).then(() => renderAll());
+    });
+    row.append(cb);
+  } else {
+    row.append(el("span", { "aria-hidden": "true", text: "◇" }));
+  }
+  const title = el("label", { for: isDecision ? null : "cb-" + item.id },
+    el("span", { text: "[" + item.repo + "] " + item.title }));
+  if (item.priority === "urgent") title.append(el("span", { class: "tag", text: "urgent" }));
+  if (isDone) title.append(el("span", { class: "tag ok", text: "done, awaiting check" }));
+  if (item.state === "problem") title.append(el("span", { class: "tag", text: "problem" }));
+  if (gate.length) title.append(el("span", { class: "tag after", text: "after " + gate.join(", ") }));
+  if (item.due) title.append(el("span", { class: "tag", text: "due " + item.due }));
+  row.append(title);
+  art.append(row);
+  art.append(el("div", { class: "meta", text: item.id + (item.why ? " — " + item.why : "") }));
+
+  const body = el("div", { class: "body" });
+  if (item.source) body.append(el("div", { class: "note", text: "source: " + item.source }));
+
+  if (isDecision && item.decision) {
+    const fs = el("fieldset", { class: "opts" }, el("legend", { class: "note", text: "Choose one" }));
+    (item.decision.options || []).forEach((o, n) => {
+      const id = "opt-" + item.id + "-" + n;
+      const r = el("input", { type: "radio", name: "dec-" + item.id, id, "data-fk": id, disabled: locked });
+      r.checked = item.chosen === o.label;
+      r.addEventListener("change", () => {
+        if (r.checked) flushAll().then(() => patchItem(item.id, { chosen: o.label }, true)).then(() => renderAll());
+      });
+      fs.append(el("div", { class: "opt" }, r, el("label", { for: id },
+        el("strong", { text: o.label + (o.recommended ? " ★" : "") }),
+        o.detail ? el("div", { class: "note", text: o.detail }) : null)));
+    });
+    fs.append(el("label", { class: "note", for: "oth-" + item.id, text: "or other:" }));
+    fs.append(textInput(item, "other", "input", locked, "Other answer", { type: "text", id: "oth-" + item.id }));
+    body.append(fs);
+  } else {
+    body.append(stepsEl(item, locked));
+    if (item.verify) body.append(el("div", { class: "note", text: "verify: " + item.verify }));
+    if (item.rollback) body.append(detailsEl(item.id + ":rb", "rollback", false, el("pre", { text: item.rollback })));
+  }
+
+  if (item.agent_note)
+    body.append(el("div",
+      { class: item.state === "problem" ? "agentnote" : "note", text: "Claude: " + item.agent_note }));
+
+  if (!isDecision) {
+    const out = textInput(item, "output", "textarea", locked, "Output or error text for " + item.title);
+    body.append(detailsEl(item.id + ":out", "output (paste here)", item.state === "problem" || !!item.output, out));
+    const acts = el("div", { class: "actions" });
+    if (item.state === "problem") {
+      acts.append(el("button", { type: "button", text: "Back to open", "data-fk": item.id + ":open",
+        onclick: () => flushAll().then(() => patchItem(item.id, { state: "open" }, true)).then(() => renderAll()) }));
+    } else if (!isDone) {
+      acts.append(el("button", { type: "button", text: "Problem", disabled: gate.length > 0,
+        "data-fk": item.id + ":problem",
+        onclick: () => {
+          openKeys.add(item.id + ":out"); openKeys.delete("!" + item.id + ":out");
+          flushAll().then(() => patchItem(item.id, { state: "problem" }, true)).then(() => renderAll());
+        } }));
+    }
+    body.append(acts);
+  }
+  if ((item.tags || []).includes("found-by-sweep")) {
+    body.append(el("div", { class: "actions" }, el("button", { type: "button", class: "danger", text: "Dismiss",
+      "data-fk": item.id + ":dismiss",
+      onclick: () => flushAll().then(() => write("POST", "/api/items/" + encodeURIComponent(item.id) + "/dismiss", {}, true))
+        .then(() => renderAll()) })));
+  }
+  art.append(body);
+  return art;
+}
+
+function groupByRepo(items, parent) {
+  const repos = new Map();
+  for (const i of items) { if (!repos.has(i.repo)) repos.set(i.repo, []); repos.get(i.repo).push(i); }
+  for (const [repo, list] of repos) {
+    parent.append(el("h3", { class: "repo", text: repo }));
+    for (const i of list) parent.append(itemEl(i));
+  }
+}
+
+function notesPane() {
+  const wrap = el("div", { class: "panes" });
+  const mine = el("section", { class: "pane" }, el("h2", { text: "Notes to self" }));
+  const a = autosaveField("notes_self", S.notes_self || "", (t) => write("PUT", "/api/notes_self", { text: t }, true));
+  const ta = el("textarea", { "aria-label": "Notes to self", "data-fk": "notes_self" });
+  ta.value = a.value;
+  ta.addEventListener("input", () => a.onInput(ta.value));
+  ta.addEventListener("blur", () => a.onBlur());
+  mine.append(ta);
+
+  const theirs = el("section", { class: "pane" }, el("h2", { text: "Notes to Claude" }));
+  const ul = el("ul");
+  for (const n of S.notes_claude || []) {
+    const li = el("li", null, el("strong", { text: n.id }), " ", n.text || "", " → ",
+      el("span", { class: "tag", text: n.status || "new" }));
+    if (n.reply) li.append(el("div", { class: "note", text: "Claude: " + n.reply }));
+    ul.append(li);
+  }
+  if (!(S.notes_claude || []).length) ul.append(el("li", { class: "empty", text: "No notes yet." }));
+  theirs.append(ul);
+  const nk = "new_note";
+  const nb = el("textarea", { "aria-label": "New note to Claude", "data-fk": nk, placeholder: "new note…" });
+  nb.value = drafts.get(nk) || "";
+  nb.addEventListener("input", () => drafts.set(nk, nb.value));
+  const sendBtn = el("button", { type: "button", text: "Send note", "data-fk": "send_note",
+    onclick: () => {
+      const text = (drafts.get(nk) || nb.value).trim();
+      if (!text) return;
+      write("POST", "/api/notes_claude", { text }).then((r) => {
+        if (r) { drafts.delete(nk); renderAll(); }
+      });
+    } });
+  theirs.append(nb, el("div", { class: "actions" }, sendBtn));
+  wrap.append(mine, theirs);
+  return wrap;
+}
+
+function renderAll() {
+  if (!S) return;
+  const app = $("app");
+  const act = document.activeElement;
+  const fk = act && act.getAttribute ? act.getAttribute("data-fk") : null;
+  const selStart = act && typeof act.selectionStart === "number" ? act.selectionStart : null;
+  const today = localDate();
+  const frag = document.createDocumentFragment();
+
+  const isLater = (i) => (i.due && String(i.due) > today) || (i.priority === "later" && !i.due);
+  const open = S.items.filter((i) => !isLater(i));
+  const later = S.items.filter(isLater);
+  const urgent = open.filter((i) => i.kind !== "decision" && i.priority === "urgent");
+  const normal = open.filter((i) => i.kind !== "decision" && i.priority !== "urgent");
+  const decisions = open.filter((i) => i.kind === "decision");
+
+  for (const [name, list] of [["URGENT", urgent], ["NORMAL", normal], ["DECISIONS", decisions]]) {
+    if (!list.length) continue;
+    frag.append(el("h2", { class: "group", text: name }));
+    groupByRepo(list, frag);
+  }
+  if (!open.length) frag.append(el("p", { class: "empty", text: "Nothing is waiting on you." }));
+
+  if (later.length) {
+    const d = detailsEl("later", "LATER (hidden until due) · " + later.length, false);
+    d.classList.add("later");
+    groupByRepo(later, d);
+    frag.append(d);
+  }
+  const log = S.done_log || [];
+  const dl = detailsEl("donelog", "DONE (last 30 days) · " + log.length, false);
+  dl.classList.add("donelog");
+  if (!log.length) dl.append(el("p", { class: "empty", text: "Nothing yet." }));
+  else {
+    const ul = el("ul");
+    for (const e of log) ul.append(el("li", null,
+      el("strong", { text: "[" + e.repo + "] " + e.title }), " ",
+      el("span", { class: "note", text: dayOf(e.removed_at) + " — " + (e.reason || "") })));
+    dl.append(ul);
+  }
+  frag.append(dl);
+  frag.append(notesPane());
+
+  app.replaceChildren(frag);
+  updateHeader();
+  if (fk) {
+    const t = Array.from(app.querySelectorAll("[data-fk]")).find((n) => n.getAttribute("data-fk") === fk);
+    if (t && !t.disabled) {
+      t.focus();
+      if (selStart !== null && typeof t.setSelectionRange === "function") {
+        try { t.setSelectionRange(selStart, selStart); } catch (e) { /* not selectable */ }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- submit + poll
+async function submit() {
+  const btn = $("submit"), status = $("submitstatus");
+  btn.disabled = true;
+  await flushAll();
+  const prevAt = S && S.last_run ? S.last_run.at : null;
+  const r = await write("POST", "/api/submit", {});
+  if (!r) { btn.disabled = false; status.textContent = ""; return; }
+  submitting = { prevAt, started: Date.now() };
+  status.textContent = "checking…";
+  schedulePoll(2000);
+}
+
+function finishSubmitIfDone() {
+  if (!submitting) return;
+  const at = S && S.last_run ? S.last_run.at : null;
+  if (at && at !== submitting.prevAt) {
+    $("submitstatus").textContent = "checked: " + (S.last_run.result || "done");
+    submitting = null;
+    $("submit").disabled = false;
+  } else if (Date.now() - submitting.started > 180000) {
+    $("submitstatus").textContent = "No result yet; the check may still be running.";
+    submitting = null;
+    $("submit").disabled = false;
+  }
+}
+
+async function poll() {
+  const ok = await loadState();
+  if (ok) {
+    updateHeader();
+    finishSubmitIfDone();
+    renderIfIdle();
+  }
+  schedulePoll(submitting ? 2000 : 30000);
+}
+function schedulePoll(ms) {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, ms);
+}
+
+// Unsaved text must not vanish silently on close: warn, and best-effort send on pagehide.
+window.addEventListener("beforeunload", (ev) => {
+  if (drafts.size || timers.size) { ev.preventDefault(); ev.returnValue = ""; }
+});
+window.addEventListener("pagehide", () => {
+  if (!S) return;
+  for (const [key, text] of drafts) {
+    let path = null, method = "PATCH", body = null;
+    if (key === "notes_self") { path = "/api/notes_self"; method = "PUT"; body = { text }; }
+    else {
+      const i = key.lastIndexOf(":");
+      const field = key.slice(i + 1);
+      if (i > 0 && (field === "output" || field === "other")) {
+        path = "/api/items/" + encodeURIComponent(key.slice(0, i));
+        body = { fields: { [field]: text } };
+      }
+    }
+    if (!path) continue;
+    try {
+      fetch(path, { method, keepalive: true,
+        headers: { "Content-Type": "application/json", "X-Runbook-Token": TOKEN },
+        body: JSON.stringify(Object.assign({ version: S.version }, body)) });
+    } catch (e) { /* page is closing; nothing more to do */ }
+  }
+});
+
+$("submit").addEventListener("click", submit);
+loadState().then((ok) => { if (ok) renderAll(); schedulePoll(30000); });
+</script>
+</body>
+</html>
