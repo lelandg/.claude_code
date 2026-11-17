@@ -217,6 +217,13 @@ class Scanners(unittest.TestCase):
                      lookalikes[2] + " prod/db/main"):
             self.assertEqual(rblib.find_secrets(text), [], text)
 
+    def test_assigned_secret_cli_options(self):
+        for opt in ("--" + "pass" + "word", "--" + "tok" + "en", "--api" + "-key", "-" + "secret"):
+            text = "tool " + opt + "=" + "q" * 12
+            self.assertEqual(rblib.find_secrets(text), ["assigned-secret"], opt)
+            red, kinds = rblib.redact(text)
+            self.assertEqual((red, kinds), ("tool [REDACTED:assigned-secret]", ["assigned-secret"]), opt)
+
     def test_assigned_secret_is_linear_on_long_identifiers(self):
         # A pasted run of keyword components must not backtrack (was ~7 s).
         name = ("tok" + "en_") * 2000
@@ -224,6 +231,7 @@ class Scanners(unittest.TestCase):
         rblib.redact(name)
         rblib.redact(name + "=" + "q" * 12)
         rblib.find_secrets(name + " " + name)
+        rblib.redact("--" + ("a" + "-") * 6000 + "x")
         self.assertLess(time.monotonic() - t0, 1.0)
 
     def test_redact(self):
