@@ -80,7 +80,13 @@ class PageTests(unittest.TestCase):
             "  const r4 = await flushAll();\n"
             "  const keptOrphan = drafts.get('k:output') === 'orphaned';\n"
             "  drafts.delete('k:output');\n"
-            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, reopened, r2, ran2, r3, r4, keptOrphan, sent, left: drafts.size, toasts: toasts.length }));\n"
+            "  S = { items: [{ id: 'k' }] };\n"
+            "  const b = autosaveField('k:other', '', async () => { throw new Error('bad reply'); });\n"
+            "  b.onInput('y'); b.onBlur(); await tick();\n"
+            "  const r5 = await flushAll();  // a throwing save is a failed save, not a crash\n"
+            "  const keptThrown = drafts.get('k:other') === 'y';\n"
+            "  drafts.delete('k:other');\n"
+            "  console.log(JSON.stringify({ failedTimerGone, r1, ran, reopened, r2, ran2, r3, r4, keptOrphan, r5, keptThrown, sent, left: drafts.size, toasts: toasts.length }));\n"
             "})();\n"
         )
         r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=60)
@@ -96,6 +102,8 @@ class PageTests(unittest.TestCase):
         self.assertTrue(got["r3"])        # an unsent note to Claude never blocks Submit
         self.assertTrue(got["r4"])        # nor does a draft whose item left the list...
         self.assertTrue(got["keptOrphan"])  # ...and its text is kept, not dropped
+        self.assertFalse(got["r5"])       # a save that throws counts as unsaved...
+        self.assertTrue(got["keptThrown"])  # ...and keeps its draft
         self.assertGreaterEqual(len(got["sent"]), 5)  # initial save + 4 retries
 
     def test_demo_fixture_loads(self):

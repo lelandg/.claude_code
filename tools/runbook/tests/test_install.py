@@ -27,8 +27,11 @@ class InstallScriptText(unittest.TestCase):
         # A ~/.bashrc alias is invisible to non-interactive shells (wsl.exe bash -lc, agents).
         text = (ROOT / "install.ps1").read_text(encoding="utf-8")
         self.assertNotIn("alias runbook=", text)
-        self.assertIn('exec python3 __ROOT__/runbook.py "$@"', text)
-        self.assertIn("chmod +x ~/.local/bin/runbook.tmp && mv -f ~/.local/bin/runbook.tmp ~/.local/bin/runbook", text)
+        self.assertIn('exec python3 __PY__ "$@"', text)
+        # the script path is one single-quoted word (spaces survive), and a failed
+        # write never reaches mv
+        self.assertIn(r"""Replace("'", "'\''")""", text)
+        self.assertIn("set -e`ntrap 'rm -f ~/.local/bin/runbook.tmp' EXIT", text)
 
 
 if __name__ == "__main__":

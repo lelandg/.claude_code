@@ -76,7 +76,12 @@ A first run puts a placeholder (auto-picked key sentences) in the Summary
 section; replace it with a real one, as below. Skip this step when the run
 logged `Keeping the written summary already in ...`: that summary was written
 (or edited by the user) on an earlier run, and replacing it would discard that
-work. Write a new one then only if the user asks for it.
+work. Write a new one then only if the user asks for it. One gap: if the user
+hand-edited the placeholder itself, it still starts with the italic
+"Auto-extracted key sentences..." note, so the run treats it as automatic and
+replaces it. Before re-running notes like that, delete that note line (the
+edited text then counts as written and is kept), or copy the Summary section
+aside and put it back afterwards with `add-summary`.
 
 1. Read the `.md` the run reported (`INFO: Saved md: ...`). For a long video,
    read the Transcript section in chunks. If screenshots were taken and the

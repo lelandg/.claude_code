@@ -1531,6 +1531,36 @@ def _branch_worktrees(clone: Path, branch: str) -> list[Path]:
     return found
 
 
+def _branch_in_operation(clone: Path, branch: str) -> str | None:
+    """'rebase' or 'bisect' when a worktree of `clone` is mid-operation on
+    `branch`. Its HEAD is detached then, so _branch_worktrees misses it, and
+    `branch -D` used to refuse; update-ref does not check, so we do."""
+    ref = f"refs/heads/{branch}"
+    for line in git(clone, "worktree", "list", "--porcelain",
+                    check=False).splitlines():
+        if not line.startswith("worktree "):
+            continue
+        wt = line[len("worktree "):]
+        gd = git(Path(wt), "rev-parse", "--absolute-git-dir",
+                 check=False).strip()
+        if not gd:
+            continue
+        for sub, kind in (("rebase-merge", "rebase"), ("rebase-apply", "rebase")):
+            try:
+                if (Path(gd) / sub / "head-name").read_text(
+                        encoding="utf-8").strip() == ref:
+                    return kind
+            except OSError:
+                pass
+        try:
+            if (Path(gd) / "BISECT_START").read_text(
+                    encoding="utf-8").strip() in (branch, ref):
+                return "bisect"
+        except OSError:
+            pass
+    return None
+
+
 def _inside(path: Path) -> bool:
     try:
         Path.cwd().resolve().relative_to(path.resolve())
@@ -1551,6 +1581,12 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
     tip = git(clone, "rev-parse", "--verify", "--quiet", ref,
               check=False).strip()
     if not tip:
+        return
+    # A symbolic branch resolves to its target, so every check below would
+    # vet (and update-ref would delete) the target, e.g. main. Leave it.
+    if run(["git", "-C", str(clone), "symbolic-ref", "-q", ref],
+           check=False).returncode == 0:
+        print(f"  kept local branch {pr.head}: it is a symbolic ref")
         return
     # The merged head may only exist on the server now; pull/N/head keeps it.
     if run(["git", "-C", str(clone), "cat-file", "-e", pr.head_oid],
@@ -1591,20 +1627,30 @@ def clean_local_branch(pr: PR, clone: Path | None) -> None:
     if _branch_worktrees(clone, pr.head):  # checked out again meanwhile
         print(f"  kept local branch {pr.head}: still checked out")
         return
+    busy = _branch_in_operation(clone, pr.head)
+    if busy:
+        print(f"  kept local branch {pr.head}: a {busy} in progress uses it")
+        return
     # Delete only the tip validated above: update-ref with the expected old
     # value fails if anything moved the branch since, where `branch -D`
     # would drop the new commits (and the reflog) unchecked.
-    proc = run(["git", "-C", str(clone), "update-ref", "-d", ref, tip],
-               check=False)
+    proc = run(["git", "-C", str(clone), "update-ref", "--no-deref", "-d",
+                ref, tip], check=False)
     if proc.returncode != 0:
         print(f"  kept local branch {pr.head}: it moved after it was checked "
               f"({(proc.stderr or proc.stdout).strip()})")
         return
     # update-ref leaves branch.<name>.* behind (`branch -D` removed it); a
     # branch recreated under the same name would inherit the old upstream.
-    run(["git", "-C", str(clone), "config", "--remove-section",
-         f"branch.{pr.head}"], check=False)
+    cfg = run(["git", "-C", str(clone), "config", "--remove-section",
+               f"branch.{pr.head}"], check=False)
     print(f"  deleted local branch {pr.head}")
+    leftover = run(["git", "-C", str(clone), "config", "--get-regexp",
+                    rf"^branch\.{re.escape(pr.head)}\."], check=False)
+    if cfg.returncode != 0 and leftover.returncode == 0:  # absent = nothing to do
+        print(f"  WARNING: branch.{pr.head} config was not removed "
+              f"({(cfg.stderr or cfg.stdout).strip()}); run: git -C "
+              f"\"{clone}\" config --remove-section branch.{pr.head}")
 
 
 def after_merge(pr: PR, version: str | None) -> int:

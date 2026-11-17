@@ -227,7 +227,9 @@ function autosaveField(key, initial, send) {
     timers.delete(key);
     if (!drafts.has(key)) return;
     const sent = drafts.get(key);
-    const r = await send(sent);
+    let r = null;
+    try { r = await send(sent); }
+    catch (e) { r = null; }  // e.g. a non-JSON reply while reloading on 409: keep the draft
     if (r) {
       if (drafts.get(key) === sent) drafts.delete(key);
       updateHeader();

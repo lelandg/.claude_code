@@ -137,7 +137,13 @@ def _run_locked(reason: str, state_path: Path, now: datetime, runner: Runner) ->
         return "cap reached"
 
     rev0 = rblib.load(state_path).get("owner_rev", 0)
-    code, out = runner(build_command(cfg), ROOT)
+    try:
+        cmd = build_command(cfg)
+    except ValueError as e:  # bad allowed_tools: record it on the page, never launch claude
+        bad = f"error: config: {e}"
+        rblib.mutate(lambda s: stamp(s, bad), state_path)
+        return bad
+    code, out = runner(cmd, ROOT)
     result, ok = _parse_result(code, out)
 
     def after(s: dict) -> None:

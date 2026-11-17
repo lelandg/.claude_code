@@ -128,9 +128,10 @@ if ($WslOk -and -not $WslRoot) { $WslRoot = ConvertTo-WslPath $Root }
 # shells, so `wsl.exe bash -lc 'runbook ...'` and agent shells never saw one.
 $wslShimBody = @'
 #!/bin/sh
-exec python3 __ROOT__/runbook.py "$@"
+exec python3 __PY__ "$@"
 '@
-$wslShimBody = $wslShimBody.Replace('__ROOT__', $WslRoot)
+# One single-quoted shell word, so a path with spaces stays one argument.
+$wslShimBody = $wslShimBody.Replace('__PY__', "'" + "$WslRoot/runbook.py".Replace("'", "'\''") + "'")
 $wslShimHeredoc = "<<'RUNBOOK_SHIM'`n$wslShimBody`nRUNBOOK_SHIM"
 if (-not $WslOk) {
     Say 'skipped' 'wsl (not available): ~/.local/bin/runbook shim'
@@ -142,7 +143,9 @@ if (-not $WslOk) {
     } else {
         $existed = (Invoke-Wsl 'test -e ~/.local/bin/runbook') -eq 0
         if (-not $WhatIf) {
-            $s = "mkdir -p ~/.local/bin`ncat > ~/.local/bin/runbook.tmp $wslShimHeredoc`nchmod +x ~/.local/bin/runbook.tmp && mv -f ~/.local/bin/runbook.tmp ~/.local/bin/runbook"
+            # set -e: a failed step stops before mv, so a working shim is never
+            # replaced by a partial one; the trap removes the temp file either way.
+            $s = "set -e`ntrap 'rm -f ~/.local/bin/runbook.tmp' EXIT`nmkdir -p ~/.local/bin`ncat > ~/.local/bin/runbook.tmp $wslShimHeredoc`nchmod +x ~/.local/bin/runbook.tmp`nmv -f ~/.local/bin/runbook.tmp ~/.local/bin/runbook"
             if ((Invoke-Wsl $s) -ne 0) { throw 'failed to write WSL ~/.local/bin/runbook' }
         }
         $tag = 'created'

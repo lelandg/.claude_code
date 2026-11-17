@@ -1360,6 +1360,32 @@ def test_branch_that_moves_after_the_check_is_not_deleted(repo, tmp_path, monkey
     assert "kept local branch feature" in capsys.readouterr().out
 
 
+def test_branch_a_paused_rebase_uses_is_kept(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    gd = Path(sh(repo, "rev-parse", "--absolute-git-dir"))
+    (gd / "rebase-merge").mkdir()
+    (gd / "rebase-merge" / "head-name").write_text("refs/heads/feature\n")
+    try:
+        pt.clean_local_branch(pr, repo)
+    finally:
+        (gd / "rebase-merge" / "head-name").unlink()
+        (gd / "rebase-merge").rmdir()
+    assert sh(repo, "branch", "--list", "feature")
+    assert "a rebase in progress uses it" in capsys.readouterr().out
+
+
+def test_symbolic_branch_never_deletes_its_target(repo, tmp_path, capsys):
+    wt, pr = _landed_branch(repo, tmp_path)
+    sh(repo, "worktree", "remove", str(wt))
+    sh(repo, "update-ref", "refs/heads/target", pr.head_oid)
+    sh(repo, "update-ref", "-d", "refs/heads/feature")
+    sh(repo, "symbolic-ref", "refs/heads/feature", "refs/heads/target")
+    pt.clean_local_branch(pr, repo)
+    assert sh(repo, "rev-parse", "refs/heads/target") == pr.head_oid
+    assert "symbolic ref" in capsys.readouterr().out
+
+
 def test_branch_with_unmerged_commits_is_kept(repo, tmp_path, capsys):
     wt, pr = _landed_branch(repo, tmp_path)
     (wt / "app.js").write_bytes(b"3\n")

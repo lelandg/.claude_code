@@ -44,7 +44,9 @@ in your `AGENTS.md`), agents will not know the tool exists.
 | `-WslRoot` (installer) | derived with `wslpath` | `install.ps1` WSL shim |
 
 The tool's own location is always taken from the script path, so the folder
-can live anywhere, for example `/path/to/projects/_runbook`. Since the service
+can live anywhere, for example `/path/to/projects/_runbook`, as long as that
+path has no spaces: the processor's prompt and its `Bash(...)` allowlist rule
+name the runbook CLI by its unquoted path. (The WSL shim quotes it.) Since the service
 is launched at login, prefer `projects_root` in `config.json` over an env var.
 
 ## Install
@@ -76,7 +78,7 @@ Start the service now (it also starts at login):
 The Python is cross-platform (`process.py` kills process groups on POSIX), but
 there is no installer: `install.ps1` is Windows-only. Set it up by hand:
 
-    mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec python3 /path/to/projects/_runbook/runbook.py "$@"\n' > ~/.local/bin/runbook && chmod +x ~/.local/bin/runbook
+    mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec python3 "/path/to/projects/_runbook/runbook.py" "$@"\n' > ~/.local/bin/runbook && chmod +x ~/.local/bin/runbook
     python3 /path/to/projects/_runbook/server.py &      # writes .token on first start
     # hourly processor, e.g. crontab:
     0 * * * * python3 /path/to/projects/_runbook/process.py --reason hourly

@@ -11,8 +11,9 @@ behaviour below is specific to that App.
 
 - **No automated reviewer configured:** use the local-review sequence in
   AGENTS.md instead (the repo's own pre-PR reviewer, or the built-in
-  `/code-review origin/main...HEAD` over the PR's whole base range, before
-  push). Never a bare `/code-review`: it reviews only the commits ahead of the
+  `/code-review origin/<base>...HEAD`, `<base>` being the PR's actual base
+  branch, over the PR's whole range, before push). Never a bare
+  `/code-review`: it reviews only the commits ahead of the
   branch's upstream plus uncommitted edits, which on a pushed branch omits the
   PR's earlier commits.
 - **A different automated reviewer:** the procedure below does not transfer.

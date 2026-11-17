@@ -67,6 +67,15 @@ class Processor(Base):
         self.assertTrue(st["last_run"]["at"].endswith("Z"))
         self.assertEqual(st["runs_today"]["count"], 0)
 
+    def test_bad_allowed_tools_is_recorded_not_raised(self):
+        self.seed()
+        (self.dir / "config.json").write_text('{"allowed_tools": []}', encoding="utf-8")
+        r = FakeRunner()
+        res = process.run("submit", self.path, self.now, r)
+        self.assertTrue(res.startswith("error: config: allowed_tools is empty"), res)
+        self.assertEqual(r.calls, [])
+        self.assertEqual(self.st()["last_run"]["result"], res)  # shown as the last check
+
     def test_change_calls_runner_once(self):
         self.seed()
         r = FakeRunner()
