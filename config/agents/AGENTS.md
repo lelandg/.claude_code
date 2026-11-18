@@ -90,14 +90,17 @@ the evidence is written down.
 
 1. **A fixed version exists:** apply it in the session that finds it. Never
    accept or ignore it. (The precedence rule above, unchanged.)
-2. **No fix, reachable from untrusted input, and the impact is confidentiality
-   or integrity** (data leak, auth bypass, code execution): disable or block
-   the affected feature until a fix ships. Do not accept it in a scanner
-   ledger.
+2. **No fix, and the impact is confidentiality or integrity** (data leak,
+   auth bypass, code execution), **and that impact is either reachable from
+   untrusted input or happens without untrusted input** (for example, the
+   dependency writes credentials to a log during a scheduled job): disable or
+   block the
+   affected feature until a fix ships. Do not accept it in a scanner ledger.
 3. **No fix, reachable from untrusted input, availability impact only**
    (denial of service): mitigate with input limits and timeouts and keep the
    feature on; disable it if there is evidence of exploitation.
-4. **No fix and not reachable from untrusted input:** accept it in the scanner
+4. **No fix, not reachable from untrusted input, and no confidentiality or
+   integrity impact without untrusted input:** accept it in the scanner
    ledger with a short expiry (about 30 days), the reachability evidence, and
    the condition that clears it. Re-trace reachability at every renewal and
    whenever the code that could reach it changes.
