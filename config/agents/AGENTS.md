@@ -93,8 +93,8 @@ the evidence is written down.
 2. **No fix, and the impact is confidentiality or integrity** (data leak,
    auth bypass, code execution), **and that impact is either reachable from
    untrusted input or happens without untrusted input** (for example, the
-   dependency writes
-   credentials to a log during a scheduled job): disable or block the
+   dependency writes credentials to a log during a scheduled job): disable or
+   block the
    affected feature until a fix ships. Do not accept it in a scanner ledger.
 3. **No fix, reachable from untrusted input, availability impact only**
    (denial of service): mitigate with input limits and timeouts and keep the
