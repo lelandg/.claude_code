@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.13.0] - 2026-11-17
+
+- New house rule: how to handle a dependency advisory that has no fixed version, in four tiers by reachability and impact.
+
 ## [0.12.1] - 2026-11-17
 
 - Runbook: failed autosaves are retried before Submit or a tick, reopening is never blocked, item ids are never reused, env-var style secrets are refused, the processor runs with a command allowlist instead of unrestricted Bash, and WSL gets a real `runbook` command.
