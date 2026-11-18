@@ -91,8 +91,8 @@ the evidence is written down.
 1. **A fixed version exists:** apply it in the session that finds it. Never
    accept or ignore it. (The precedence rule above, unchanged.)
 2. **No fix, and the impact is confidentiality or integrity** (data leak,
-   auth bypass, code execution), **whether it is reachable from untrusted
-   input or happens without it** (for example, the dependency writes
+   auth bypass, code execution), **and that impact is either reachable from
+   untrusted input or happens without any input** (for example, the dependency writes
    credentials to a log during a scheduled job): disable or block the
    affected feature until a fix ships. Do not accept it in a scanner ledger.
 3. **No fix, reachable from untrusted input, availability impact only**
