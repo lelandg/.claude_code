@@ -48,8 +48,14 @@ a known attack. So, for the override:
 | **Node.js runtime** | the nodejs-sec list / `https://nodejs.org/en/feed/vulnerability.xml` | a host install, not a package bump; user-scope tools are yours, machine-scope installers (e.g. the Windows MSI) are the user's |
 
 No fixed version available? Say so explicitly and name the mitigation (drop the
-dep, pin away from the vulnerable path, or accept with a stated reason). That is
-the only acceptable "still vulnerable" outcome.
+dep, pin away from the vulnerable path, or one of the tiered responses). That is
+the only acceptable "still vulnerable" outcome. Which response applies is set by
+the four tiers in the global `~/.config/agents/AGENTS.md` ("Advisory with no fix
+available"), decided by traced reachability and impact: reachable +
+confidentiality/integrity → disable or block the feature (the user decides in
+production); reachable + DoS only → input limits and timeouts; unreachable →
+ledger entry with ~30-day expiry, reachability evidence, and the clearing
+condition. "Accept with a stated reason" alone is no longer enough.
 
 ## 2. Minimum package age floor (applies only when nothing is vulnerable)
 
