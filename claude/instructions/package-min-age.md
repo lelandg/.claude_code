@@ -51,11 +51,12 @@ No fixed version available? Say so explicitly and name the mitigation (drop the
 dep, pin away from the vulnerable path, or one of the tiered responses). That is
 the only acceptable "still vulnerable" outcome. Which response applies is set by
 the four tiers in the global `~/.config/agents/AGENTS.md` ("Advisory with no fix
-available"), decided by traced reachability and impact: reachable +
-confidentiality/integrity → disable or block the feature (the user decides in
-production); reachable + DoS only → input limits and timeouts; unreachable →
-ledger entry with ~30-day expiry, reachability evidence, and the clearing
-condition. "Accept with a stated reason" alone is no longer enough.
+available"), decided by traced reachability and impact:
+confidentiality/integrity impact, reachable from untrusted input or happening
+without it → disable or block the feature (the user decides in production);
+reachable + DoS only → input limits and timeouts; unreachable and no
+confidentiality/integrity impact on its own → ledger entry with ~30-day expiry,
+reachability evidence, and the clearing condition. "Accept with a stated reason" alone is no longer enough.
 
 ## 2. Minimum package age floor (applies only when nothing is vulnerable)
 
