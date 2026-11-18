@@ -63,7 +63,8 @@ How to apply it: take the **lowest** version that clears the advisory (patch
 over minor over major) so remediation doesn't smuggle in a feature jump, confirm
 the version is the real upstream release and not a lookalike, then state in one
 line what moved and which advisory it closes. If no fixed version exists, say so
-and name the mitigation — that is the only acceptable "still vulnerable" answer.
+and name the mitigation — that is the only acceptable "still vulnerable" answer,
+and the four tiers below decide what that mitigation is.
 
 **"Immediately" has a deadline: before you stop working.** A dependency
 advisory with an available fix is remediated in the session that found it — on
@@ -79,6 +80,35 @@ mitigation is — an unexplained carry-forward is not an option.
 a package version published **<7 days ago** without explicit approval — if the
 latest is younger and nothing is vulnerable, say so and ask first. Per-manager
 config/enforcement: `~/.claude/instructions/package-min-age.md`.
+
+#### Advisory with no fix available — four tiers
+
+Decide by **reachability and impact**, not by severity score alone.
+Reachability must be traced in the code that ships (the app source, the
+dependency's published build, and any bundled artifact), never assumed, and
+the evidence is written down.
+
+1. **A fixed version exists:** apply it in the session that finds it. Never
+   accept or ignore it. (The precedence rule above, unchanged.)
+2. **No fix, reachable from untrusted input, and the impact is confidentiality
+   or integrity** (data leak, auth bypass, code execution): disable or block
+   the affected feature until a fix ships. Do not accept it in a scanner
+   ledger.
+3. **No fix, reachable from untrusted input, availability impact only**
+   (denial of service): mitigate with input limits and timeouts and keep the
+   feature on; disable it if there is evidence of exploitation.
+4. **No fix and not reachable from untrusted input:** accept it in the scanner
+   ledger with a short expiry (about 30 days), the reachability evidence, and
+   the condition that clears it. Re-trace reachability at every renewal and
+   whenever the code that could reach it changes.
+
+**Disabling a feature in production is the user's decision:** propose it with
+the evidence and wait for a go-ahead — unless a tier 2 finding is being
+actively exploited, in which case say so immediately. Never silence a scanner
+without a ledger entry that has an expiry. Worked example: a glob-matching
+library advisory with no fix, traced as unreachable from untrusted input, was
+accepted at tier 4 with a 30-day expiry while the feature that pulled it in
+stayed on.
 
 ### Dependency, code, and secret scanning
 
