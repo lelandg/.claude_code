@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.13.1] - 2026-11-18
+
+- The no-fix advisory policy now blocks a dependency that can leak or corrupt data on its own, even when untrusted input never reaches it.
+
 ## [0.13.0] - 2026-11-17
 
 - New house rule: how to handle a dependency advisory that has no fixed version, in four tiers by reachability and impact.
