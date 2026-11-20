@@ -39,10 +39,7 @@
       "Bash(grep:*)",
       "Bash(wc:*)",
       "Bash(diff:*)",
-      "Bash(tree:*)",
       "Bash(git status:*)",
-      "Bash(git log:*)",
-      "Bash(git diff:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)"
     ],

@@ -339,7 +339,7 @@ The author's `settings.json` pre-approves commands that can change your machine,
 Add any of these to your own file one at a time, once you know you want them.
 
 ### settings.json
-- **permissions.allow**: Add Bash patterns for commands you frequently approve. The example allows read-only commands only; `find` is left out on purpose, because `find -delete` and `find -exec` are not read-only
+- **permissions.allow**: Add Bash patterns for commands you frequently approve. The example allows only commands that cannot write files whatever their arguments. Some familiar read commands are left out on purpose because an option makes them write: `find -delete` / `find -exec`, `git diff --output=FILE`, `git log --output=FILE`, `tree -o FILE`. Claude asks before running those
 - **permissions.defaultMode**: the example uses `"default"` (ask before edits); `"acceptEdits"` auto-accepts file edits once you trust the setup
 - **enabledPlugins**: Toggle plugins on/off based on your needs
 - **Read permissions**: if you add path-scoped `Read(...)` entries, use your own home directory
