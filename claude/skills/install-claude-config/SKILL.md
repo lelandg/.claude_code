@@ -158,8 +158,10 @@ Merge strategy:
 Claude Code does not read `~/.claude/mcp.json`; user-scope MCP servers live in
 `~/.claude.json`. Never write that file directly. For each server in the
 source file's `mcpServers`:
-- Skip it if `claude mcp list` already shows a server with that name (never
-  overwrite an existing server config)
+- Skip it only if a **user-scope** server with that name already exists
+  (`claude mcp get <name>` shows its scope; never overwrite it). A project- or
+  local-scope server of the same name does not count: it is unavailable in
+  other projects, and Claude Code allows the same name at different scopes
 - Otherwise ask, then register it:
   `claude mcp add-json <name> '<server JSON>' --scope user`
 - Keep `${VAR}` references literal (single-quote the JSON) so tokens are
