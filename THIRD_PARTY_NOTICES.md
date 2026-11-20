@@ -14,7 +14,8 @@ next to the files it covers.
 
 - **rag-blueprint.** The skill's own front matter declares `license: Apache-2.0`
   and names NVIDIA as its author. The files are redistributed unmodified.
-  Copyright NVIDIA Corporation.
+  Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES; the `LICENSE` here is
+  upstream's file, copied verbatim with its copyright header.
 - **graphify.** This copy of the `/graphify` skill was taken in April 2026, while
   upstream was MIT-licensed. Upstream relicensed to Apache 2.0 on 2026-07-22 and
   keeps the original MIT text in its `LICENSE-MIT` file; that text is
