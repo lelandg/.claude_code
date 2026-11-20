@@ -40,9 +40,19 @@ jobs:
         run: python -m pip install --disable-pip-version-check "pytest==9.0.3"
       - name: Run the suite
         # Each suite imports its module relative to its own folder, so run
-        # pytest from inside it.
+        # pytest from inside it. The runbook installer's -WhatIf test needs
+        # Windows (install.ps1 requires pythonw.exe), but Ubuntu runners ship
+        # pwsh, so its skip guard does not fire here: deselect it.
         working-directory: ${{ matrix.suite }}
-        run: python -m pytest -q -p no:cacheprovider
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          set -eu
+          if [ "$SUITE" = "tools/runbook" ]; then
+            python -m pytest -q -p no:cacheprovider --deselect tests/test_install.py::InstallWhatIfCase
+          else
+            python -m pytest -q -p no:cacheprovider
+          fi
 
   guard:
     name: config-secrets-guard cases
