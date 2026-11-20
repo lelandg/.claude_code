@@ -88,6 +88,11 @@ IDENTICAL | agents/code-reviewer.md           | No changes
 
 For each `NEW` file: Ask user to confirm adding it.
 
+A skill's `LICENSE` and `NOTICE` files are part of that skill, not separate
+choices: whenever the user installs or updates a skill, install its `LICENSE`
+and `NOTICE` with it, without a separate question. Never install a skill while
+leaving its license text behind.
+
 For each `CHANGED` file: Show the meaningful differences and ask:
 
 - **Install repo version** - Replace user's file with repo version
