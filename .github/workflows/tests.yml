@@ -1,0 +1,81 @@
+# Unit tests for the tools that ship with this config: the pytest suites of
+# the bundled skills and tools, the config-secrets-guard regression cases,
+# and a check that the two slash-command folders have not drifted apart.
+#
+# Same conventions as security.yml: actions pinned to commit SHAs (Dependabot
+# proposes the bumps), read-only token, no persisted credentials, and the
+# `pull_request` trigger, never `pull_request_target`.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - claude/skills/disk-doctor
+          - claude/skills/land-pr
+          - claude/skills/version-manager
+          - tools/agent-config-sync
+          - tools/runbook
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check "pytest==9.0.3"
+      - name: Run the suite
+        # Each suite imports its module relative to its own folder, so run
+        # pytest from inside it. The runbook installer's -WhatIf test needs
+        # Windows (install.ps1 requires pythonw.exe), but Ubuntu runners ship
+        # pwsh, so its skip guard does not fire here: deselect it.
+        working-directory: ${{ matrix.suite }}
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          set -eu
+          if [ "$SUITE" = "tools/runbook" ]; then
+            python -m pytest -q -p no:cacheprovider --deselect tests/test_install.py::InstallWhatIfCase
+          else
+            python -m pytest -q -p no:cacheprovider
+          fi
+
+  guard:
+    name: config-secrets-guard cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the guard regression cases
+        run: python3 claude/tools/test-config-secrets-guard.py
+
+  commands-in-sync:
+    name: slash-command folders match
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Compare .claude/commands with claude/commands
+        # .claude/commands/ is the source and claude/commands/ the installable
+        # copy (see CONTRIBUTING.md). install-claude-config.md is repo-only.
+        run: |
+          set -eu
+          diff -r --strip-trailing-cr -x install-claude-config.md .claude/commands claude/commands
