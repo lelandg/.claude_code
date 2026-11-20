@@ -3,6 +3,12 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.14.0] - 2026-11-20
+
+- New conservative starter config: `claude/settings.example.json` (read-only allows, asks before edits) and `claude/mcp.example.json` (GitHub only). The README, setup guide and `/install-claude-config` now default to them and flag the author's own settings as "review before copying".
+- Optional Chrome DevTools and ACE Studio MCP servers are documented with pinned versions.
+- README tags every skill General, Template or Personal.
+
 ## [0.13.1] - 2026-11-18
 
 - The no-fix advisory policy now blocks a dependency that can leak or corrupt data on its own, even when untrusted input never reaches it.
