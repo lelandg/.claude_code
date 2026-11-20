@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.14.2] - 2026-11-20
+
+- Added license texts for the two bundled third-party skills (NVIDIA's rag-blueprint, Apache 2.0; graphify, MIT) and a THIRD_PARTY_NOTICES.md listing them.
+
 ## [0.14.1] - 2026-11-20
 
 - Removed three stale `.skill` archives. Skills install through the plugin marketplace.
