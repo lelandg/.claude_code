@@ -28,9 +28,11 @@ cp -r claude/output-styles/*.md ~/.claude/output-styles/
 cp -r claude/tools ~/.claude/tools
 cp -r claude/hookify-rules ~/.claude/hookify-rules
 cp claude/CLAUDE.md claude/CLAUDE_CodeMap.md claude/statusline-command.sh claude/agentic_prompt_template.md ~/.claude/
-# Starter settings + MCP config. These overwrite: skip them if you already have your own.
+# Starter settings. This overwrites: skip it if you already have your own.
 cp claude/settings.example.json ~/.claude/settings.json
-cp claude/mcp.example.json ~/.claude/mcp.json
+# Starter MCP server, registered at user scope (Claude Code stores it in ~/.claude.json).
+# Single quotes keep ${GITHUB_PERSONAL_ACCESS_TOKEN} literal; it is expanded from your environment at startup.
+claude mcp add-json github '{"type":"http","url":"https://api.githubcopilot.com/mcp/","headers":{"Authorization":"Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"}}' --scope user
 chmod +x ~/.claude/statusline-command.sh ~/.claude/tools/*.py ~/.claude/hookify-rules/*.sh
 
 # Shared cross-CLI house rules (CLAUDE.md @imports this file on line 1)
@@ -46,9 +48,9 @@ cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 | Core Config | `claude/CLAUDE.md` | Thin Claude-Code-specific file; line 1 `@import`s the shared AGENTS.md |
 | CodeMap Spec | `CLAUDE_CodeMap.md` | Language-neutral codebase documentation spec |
 | Starter Settings | `settings.example.json` | Conservative starter: read-only allows, `defaultMode: "default"`, a few official plugins, status line, secret-guard hook. **Copy this one.** |
-| Starter MCP | `mcp.example.json` | GitHub's hosted MCP server only. **Copy this one.** |
+| Starter MCP | `mcp.example.json` | GitHub's hosted MCP server only. **Register this one** with `claude mcp add-json` (see Quick Start). |
 | Author's Settings | `settings.json` | The author's own setup, with broad allows (`python3:*`, `git:*`, `curl:*`, `ssh:*` ...). Review before copying; see the README's "Which settings file?" |
-| Author's MCP | `mcp.json` | The author's own servers: GitHub, chrome-devtools, ACE Studio. Review before copying |
+| Author's MCP | `mcp.json` | The author's own servers: GitHub, chrome-devtools, ACE Studio. Review before registering |
 | Status Line | `statusline-command.sh` | Two-line status bar: user@host, path, git branch/worktree; model, context %, rate-limit badges, PR badge, session name |
 | Agentic Template | `agentic_prompt_template.md` | Template for autonomous agent workflows |
 | 1 Agent | `agents/*.md` | code-reviewer (the other five retired in August 2026 — see `claude/agents/README.md`) |
@@ -197,18 +199,14 @@ The author's own `mcp.json` still runs the older `@modelcontextprotocol/server-g
 
 ### Optional Servers
 
-Add these to `~/.claude/mcp.json` under `mcpServers` only if you use the tool. Both are pinned to an exact version: an `@latest` spec runs whatever was published most recently, every time the server starts. Bump the pin deliberately.
+Register these only if you use the tool. Claude Code keeps user-scope servers in `~/.claude.json`, so add each with `claude mcp add-json <name> '<json>' --scope user`, passing the object shown, then check it with `/mcp`. Both are pinned to an exact version: an `@latest` spec runs whatever was published most recently, every time the server starts. Bump the pin deliberately.
 
-**chrome-devtools** — drive and inspect a Chrome started with `--remote-debugging-port=9222`:
+**chrome-devtools** — drive and inspect a Chrome started with `--remote-debugging-port=9222`. `--browser-url` attaches to that browser; without it the server launches a Chrome of its own:
 
 ```json
 "chrome-devtools": {
   "command": "npx",
-  "args": ["-y", "chrome-devtools-mcp@1.13.0"],
-  "env": {
-    "CDP_HOST": "localhost",
-    "CDP_PORT": "9222"
-  }
+  "args": ["-y", "chrome-devtools-mcp@1.13.0", "--browser-url=http://127.0.0.1:9222"]
 }
 ```
 
@@ -223,21 +221,10 @@ Add these to `~/.claude/mcp.json` under `mcpServers` only if you use the tool. B
 
 ### Adding Your Own MCP Servers
 
-Edit `~/.claude/mcp.json` to add additional servers:
+Register more servers the same way, at user scope (stored in `~/.claude.json`, not `~/.claude/mcp.json`):
 
-```json
-{
-  "mcpServers": {
-    "github": { ... },
-    "your-server": {
-      "command": "npx",
-      "args": ["your-mcp-server-package"],
-      "env": {
-        "YOUR_API_KEY": "${YOUR_API_KEY}"
-      }
-    }
-  }
-}
+```bash
+claude mcp add-json your-server '{"command":"npx","args":["your-mcp-server-package@1.2.3"],"env":{"YOUR_API_KEY":"${YOUR_API_KEY}"}}' --scope user
 ```
 
 Use `${VAR_NAME}` syntax for environment variable references (never hardcode tokens).
@@ -410,7 +397,6 @@ After installation, verify everything works:
 ├── CLAUDE.md                          # Thin Claude-Code file; @imports AGENTS.md (line 1)
 ├── CLAUDE_CodeMap.md                  # CodeMap specification
 ├── settings.json                      # Settings, permissions, plugins, hooks
-├── mcp.json                           # MCP server configurations
 ├── statusline-command.sh              # Custom status line script
 ├── agentic_prompt_template.md         # Agentic workflow template
 ├── agents/                            # Custom agent definitions

@@ -12,7 +12,7 @@ The installable content is in the `claude/` subdirectory of this repo. Each path
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` |
 | `claude/CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` |
 | `claude/settings.example.json` | `~/.claude/settings.json` |
-| `claude/mcp.example.json` | `~/.claude/mcp.json` |
+| `claude/mcp.example.json` | user-scope MCP servers, via `claude mcp add-json <name> '<json>' --scope user` (stored in `~/.claude.json`) |
 | `claude/statusline-command.sh` | `~/.claude/statusline-command.sh` |
 | `claude/agentic_prompt_template.md` | `~/.claude/agentic_prompt_template.md` |
 | `claude/agents/*.md` | `~/.claude/agents/*.md` |
@@ -25,6 +25,6 @@ The installable content is in the `claude/` subdirectory of this repo. Each path
 
 **Skip**: `README.md`, `.gitignore`, `.claude/`, `Docs/`, `Notes/`, `claude/agents/README.md`, `claude/skills/*.skill`
 
-**Settings and MCP:** install from the `.example.json` files by default. On a fresh install (no `~/.claude/settings.json` or `~/.claude/mcp.json`), offer the example file first. `claude/settings.json` and `claude/mcp.json` are the author's own setup, with broad allows (`python3:*`, `npx:*`, `git:*`, `curl:*`, `ssh:*` ...); use them only if the user asks, after listing those allows. Details: "Which settings source?" in the skill.
+**Settings and MCP:** install from the `.example.json` files by default. On a fresh install (no `~/.claude/settings.json`, or no user-scope MCP servers in `claude mcp list`), offer the example file first. `claude/settings.json` and `claude/mcp.json` are the author's own setup, with broad allows (`python3:*`, `npx:*`, `git:*`, `curl:*`, `ssh:*` ...); use them only if the user asks, after listing those allows. Details: "Which settings source?" in the skill.
 
 Use the full workflow in `claude/skills/install-claude-config/SKILL.md` for diff comparison, conflict resolution, smart merge logic, and backup creation.

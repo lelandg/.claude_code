@@ -42,7 +42,7 @@ Scan the repo for installable files and compare against user's existing config.
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Core config |
 | `claude/CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` | Spec |
 | `claude/settings.example.json` | `~/.claude/settings.json` | Settings (default source; see "Which settings source?") |
-| `claude/mcp.example.json` | `~/.claude/mcp.json` | MCP servers (default source) |
+| `claude/mcp.example.json` | user-scope MCP servers in `~/.claude.json`, via `claude mcp add-json --scope user` | MCP servers (default source; see "mcp.json" below) |
 | `claude/statusline-command.sh` | `~/.claude/statusline-command.sh` | Script |
 | `claude/agentic_prompt_template.md` | `~/.claude/agentic_prompt_template.md` | Template |
 | `claude/agents/*.md` | `~/.claude/agents/*.md` | Agents |
@@ -76,9 +76,10 @@ The repo ships two versions of each config file:
 | `claude/mcp.example.json` | GitHub's hosted MCP server only |
 | `claude/mcp.json` | The author's own servers (adds ACE Studio and Chrome DevTools) |
 
-- **Fresh install** (no `~/.claude/settings.json`, or no `~/.claude/mcp.json`):
-  offer the `.example.json` file by default and install it as
-  `settings.json` / `mcp.json`. Offer the author's file only as the second
+- **Fresh install** (no `~/.claude/settings.json`, or no user-scope MCP
+  servers in `claude mcp list`): offer the `.example.json` file by default and
+  install it (settings as `~/.claude/settings.json`; MCP servers registered as
+  described under "mcp.json" below). Offer the author's file only as the second
   choice, and before installing it list the risky allows above so the user
   chooses knowingly.
 - **Existing file:** the smart merge below uses the `.example.json` file as
@@ -154,11 +155,16 @@ Merge strategy:
 
 #### mcp.json
 
-Merge strategy:
-- Union of `mcpServers` keys
-- Never overwrite existing server configs
-- Add new servers from repo that user doesn't have
-- Preserve all `${VAR}` environment variable references
+Claude Code does not read `~/.claude/mcp.json`; user-scope MCP servers live in
+`~/.claude.json`. Never write that file directly. For each server in the
+source file's `mcpServers`:
+- Skip it if `claude mcp list` already shows a server with that name (never
+  overwrite an existing server config)
+- Otherwise ask, then register it:
+  `claude mcp add-json <name> '<server JSON>' --scope user`
+- Keep `${VAR}` references literal (single-quote the JSON) so tokens are
+  expanded from the environment at startup and never written to disk
+- Afterwards, tell the user to check the servers with `/mcp`
 
 ### 6. Apply Changes
 

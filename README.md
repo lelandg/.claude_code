@@ -57,9 +57,9 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │                                  #   @imports the shared AGENTS.md above
 │   ├── CLAUDE_CodeMap.md              # CodeMap specification (language-neutral)
 │   ├── settings.example.json          # Conservative starter settings (copy this one)
-│   ├── mcp.example.json               # Starter MCP config: GitHub only (copy this one)
+│   ├── mcp.example.json               # Starter MCP server: GitHub only (register this one)
 │   ├── settings.json                  # The author's own settings: review before copying
-│   ├── mcp.json                       # The author's own MCP servers: review before copying
+│   ├── mcp.json                       # The author's own MCP servers: review before registering
 │   ├── agentic_prompt_template.md     # Template for agentic workflows
 │   ├── statusline-command.sh          # Custom status line script
 │   ├── commands/                      # Repo record of ~/.claude/commands
@@ -207,8 +207,12 @@ git clone https://github.com/lelandg/.claude_code.git
 cp -r .claude_code/claude/* ~/.claude/
 # Start from the conservative examples, not the author's own settings:
 cp .claude_code/claude/settings.example.json ~/.claude/settings.json
-cp .claude_code/claude/mcp.example.json ~/.claude/mcp.json
-rm ~/.claude/settings.example.json ~/.claude/mcp.example.json
+rm ~/.claude/settings.example.json ~/.claude/mcp.example.json ~/.claude/mcp.json
+# Claude Code keeps user-scope MCP servers in ~/.claude.json, not in a file
+# under ~/.claude/, so register the GitHub server with the CLI. The single
+# quotes keep ${GITHUB_PERSONAL_ACCESS_TOKEN} literal: Claude Code expands it
+# from your environment at startup, and the token never lands in a file.
+claude mcp add-json github '{"type":"http","url":"https://api.githubcopilot.com/mcp/","headers":{"Authorization":"Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"}}' --scope user
 mkdir -p ~/.config/agents
 cp .claude_code/config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 ```
@@ -234,9 +238,10 @@ cp claude/output-styles/*.md ~/.claude/output-styles/
 # Just the instructions
 cp claude/instructions/*.md ~/.claude/instructions/
 
-# Starter settings + MCP config (only if you have none yet: these overwrite)
+# Starter settings (only if you have none yet: this overwrites)
 cp claude/settings.example.json ~/.claude/settings.json
-cp claude/mcp.example.json ~/.claude/mcp.json
+# Starter MCP server, registered at user scope (stored in ~/.claude.json)
+claude mcp add-json github '{"type":"http","url":"https://api.githubcopilot.com/mcp/","headers":{"Authorization":"Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"}}' --scope user
 # The starter settings' hook and status line need these too:
 mkdir -p ~/.claude/tools
 cp claude/tools/config-secrets-guard.py ~/.claude/tools/
@@ -324,8 +329,8 @@ And in `CLAUDE.md`: the skill triggers, if you install a different skill set.
 |---|---|---|
 | `claude/settings.example.json` | Conservative starter: read-only command allows, `defaultMode: "default"` (Claude asks before editing), five official plugins, the secrets-guard hook and the status line | First install, or you want a clean base |
 | `claude/settings.json` | **The author's own setup — review before copying.** One person's trust decisions on their own machine | You have read it and want specific pieces of it |
-| `claude/mcp.example.json` | GitHub's hosted MCP server only, authenticated by `GITHUB_PERSONAL_ACCESS_TOKEN` | First install |
-| `claude/mcp.json` | **The author's own MCP servers — review before copying.** Adds ACE Studio and Chrome DevTools | You use those tools; see [optional servers](Docs/SETUP_GUIDE.md#optional-servers) |
+| `claude/mcp.example.json` | GitHub's hosted MCP server only, authenticated by `GITHUB_PERSONAL_ACCESS_TOKEN`. Register it with `claude mcp add-json` (see Option 2) | First install |
+| `claude/mcp.json` | **The author's own MCP servers — review before registering.** Adds ACE Studio and Chrome DevTools | You use those tools; see [optional servers](Docs/SETUP_GUIDE.md#optional-servers) |
 
 The author's `settings.json` pre-approves commands that can change your machine, or reach other machines, without a prompt. Among them:
 
@@ -346,6 +351,7 @@ Add any of these to your own file one at a time, once you know you want them.
 
 ### mcp.json
 - **github**: Requires `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable ([setup instructions](Docs/SETUP_GUIDE.md#github_personal_access_token)). The example uses GitHub's hosted server; the `@modelcontextprotocol/server-github` npm package in the author's `mcp.json` is archived and unmaintained
+- Claude Code does not read `~/.claude/mcp.json`: user-scope servers live in `~/.claude.json`. Treat the repo's `mcp*.json` files as server definitions to register with `claude mcp add-json <name> '<json>' --scope user`, then check them with `/mcp`
 - Optional servers (Chrome DevTools, ACE Studio): [Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md#optional-servers)
 - Add your own MCP servers as needed
 
