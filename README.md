@@ -56,8 +56,10 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   ├── CLAUDE.md                      # Thin Claude-Code-specific file; line 1
 │   │                                  #   @imports the shared AGENTS.md above
 │   ├── CLAUDE_CodeMap.md              # CodeMap specification (language-neutral)
-│   ├── settings.json                  # Claude Code settings & permissions
-│   ├── mcp.json                       # MCP server configurations
+│   ├── settings.example.json          # Conservative starter settings (copy this one)
+│   ├── mcp.example.json               # Starter MCP server: GitHub only (register this one)
+│   ├── settings.json                  # The author's own settings: review before copying
+│   ├── mcp.json                       # The author's own MCP servers: review before registering
 │   ├── agentic_prompt_template.md     # Template for agentic workflows
 │   ├── statusline-command.sh          # Custom status line script
 │   ├── commands/                      # Repo record of ~/.claude/commands
@@ -203,11 +205,19 @@ The command is available immediately after cloning — no pre-installation neede
 ```bash
 git clone https://github.com/lelandg/.claude_code.git
 cp -r .claude_code/claude/* ~/.claude/
+# Start from the conservative examples, not the author's own settings:
+cp .claude_code/claude/settings.example.json ~/.claude/settings.json
+rm ~/.claude/settings.example.json ~/.claude/mcp.example.json ~/.claude/mcp.json
+# Claude Code keeps user-scope MCP servers in ~/.claude.json, not in a file
+# under ~/.claude/, so register the GitHub server with the CLI. The single
+# quotes keep ${GITHUB_PERSONAL_ACCESS_TOKEN} literal: Claude Code expands it
+# from your environment at startup, and the token never lands in a file.
+claude mcp add-json github '{"type":"http","url":"https://api.githubcopilot.com/mcp/","headers":{"Authorization":"Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"}}' --scope user
 mkdir -p ~/.config/agents
 cp .claude_code/config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 ```
 
-> **Note:** This overwrites existing files without merging. Back up `~/.claude/` first if you have existing config. The `AGENTS.md` copy matters — `CLAUDE.md` line 1 `@import`s it.
+> **Note:** This overwrites existing files without merging. Back up `~/.claude/` first if you have existing config. The `AGENTS.md` copy matters — `CLAUDE.md` line 1 `@import`s it. Read [Which settings file?](#which-settings-file) before you swap in the author's own `settings.json`.
 
 ---
 
@@ -227,6 +237,15 @@ cp claude/output-styles/*.md ~/.claude/output-styles/
 
 # Just the instructions
 cp claude/instructions/*.md ~/.claude/instructions/
+
+# Starter settings (only if you have none yet: this overwrites)
+cp claude/settings.example.json ~/.claude/settings.json
+# Starter MCP server, registered at user scope (stored in ~/.claude.json)
+claude mcp add-json github '{"type":"http","url":"https://api.githubcopilot.com/mcp/","headers":{"Authorization":"Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"}}' --scope user
+# The starter settings' hook and status line need these too:
+mkdir -p ~/.claude/tools
+cp claude/tools/config-secrets-guard.py ~/.claude/tools/
+cp claude/statusline-command.sh ~/.claude/
 ```
 
 ---
@@ -267,13 +286,13 @@ instructions dir alongside it so no pointer dangles). `CLAUDE.md` is a thin file
 | Your Name | your-github-username | your-discord-username |
 ```
 
-**2. Fix the Read permission path in `~/.claude/settings.json`** — find and update:
+**2. If you copied the author's `settings.json` rather than `settings.example.json`, fix its Read permission path** — find and update:
 
 ```json
 "Read(//home/<YOUR_USER>/.claude/**)"
 ```
 
-Replace `<YOUR_USER>` with your actual username.
+Replace `<YOUR_USER>` with your actual username. (`settings.example.json` has no home-path entries, so there is nothing to change.)
 
 **3. Set the GitHub token** (required for GitHub MCP server):
 
@@ -304,14 +323,36 @@ every Claude Code session. Customize these sections of `AGENTS.md`:
 
 And in `CLAUDE.md`: the skill triggers, if you install a different skill set.
 
+### Which settings file?
+
+| File | What it is | Use it when |
+|---|---|---|
+| `claude/settings.example.json` | Conservative starter: read-only command allows, `defaultMode: "default"` (Claude asks before editing), five official plugins, the secrets-guard hook and the status line | First install, or you want a clean base |
+| `claude/settings.json` | **The author's own setup — review before copying.** One person's trust decisions on their own machine | You have read it and want specific pieces of it |
+| `claude/mcp.example.json` | GitHub's hosted MCP server only, authenticated by `GITHUB_PERSONAL_ACCESS_TOKEN`. Register it with `claude mcp add-json` (see Option 2) | First install |
+| `claude/mcp.json` | **The author's own MCP servers — review before registering.** Adds ACE Studio and Chrome DevTools | You use those tools; see [optional servers](Docs/SETUP_GUIDE.md#optional-servers) |
+
+The author's `settings.json` pre-approves commands that can change your machine, or reach other machines, without a prompt. Among them:
+
+- `Bash(python3:*)`, `Bash(npx:*)`, `Bash(node -e:*)`: run arbitrary code
+- `Bash(git:*)`, `Bash(git push:*)`, `Bash(git reset:*)`: any git operation, including pushes and history rewrites
+- `Bash(curl:*)`, `Bash(ssh:*)`, `Bash(scp:*)`, `Bash(rsync:*)`: network access and copying files to other hosts
+- `Bash(pip install:*)`, `Bash(npm install:*)`: install packages
+- `Bash(psql:*)`, `Bash(aws ...)`: database and cloud access
+- `defaultMode: "acceptEdits"`: file edits are applied without asking
+
+Add any of these to your own file one at a time, once you know you want them.
+
 ### settings.json
-- **permissions.allow**: Add Bash patterns for commands you frequently approve
-- **permissions.defaultMode**: `"acceptEdits"` auto-accepts file edits (recommended)
+- **permissions.allow**: Add Bash patterns for commands you frequently approve. The example allows only commands that cannot write files whatever their arguments. Some familiar read commands are left out on purpose because an option makes them write: `find -delete` / `find -exec`, `git diff --output=FILE`, `git log --output=FILE`, `tree -o FILE`. Claude asks before running those
+- **permissions.defaultMode**: the example uses `"default"` (ask before edits); `"acceptEdits"` auto-accepts file edits once you trust the setup
 - **enabledPlugins**: Toggle plugins on/off based on your needs
-- **Read permissions**: Update paths to match your home directory
+- **Read permissions**: if you add path-scoped `Read(...)` entries, use your own home directory
 
 ### mcp.json
-- **github**: Requires `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable ([setup instructions](Docs/SETUP_GUIDE.md#github_personal_access_token))
+- **github**: Requires `GITHUB_PERSONAL_ACCESS_TOKEN` environment variable ([setup instructions](Docs/SETUP_GUIDE.md#github_personal_access_token)). The example uses GitHub's hosted server; the `@modelcontextprotocol/server-github` npm package in the author's `mcp.json` is archived and unmaintained
+- Claude Code does not read `~/.claude/mcp.json`: user-scope servers live in `~/.claude.json`. Treat the repo's `mcp*.json` files as server definitions to register with `claude mcp add-json <name> '<json>' --scope user`, then check them with `/mcp`
+- Optional servers (Chrome DevTools, ACE Studio): [Docs/SETUP_GUIDE.md](Docs/SETUP_GUIDE.md#optional-servers)
 - Add your own MCP servers as needed
 
 ## Key Features
@@ -348,6 +389,14 @@ Custom skills extend Claude Code with repeatable workflows:
 - **version-manager** - Standardized version bumping and changelog currency for any repo, in any stack. Auto-detects where the version lives (pyproject, package.json, `VERSION` file, module constants, README display) with no per-repo config, reconciles git history against the changelog, and reconstructs missing git tags from history. Dry-run by default. `release --no-tag` commits a bump and leaves the tag to the lander, and writes keep each file's line endings.
 - **land-pr** - Drives every pull request to merged or closed. `status` classifies each open PR (READY, WAITING, THREADS, FAILING, CONFLICT, REVIEW, BLOCKED, SUPERSEDED, AUTOFIX, DRAFT, EXTERNAL, ELSEWHERE, with a STALE overlay); `land <owner/repo#N> --apply` cuts the version bump at merge time from the PR body's `## Release notes` section, waits for checks, merges in the repo's own style, tags the merge commit and closes leftover autofix drafts; `sweep --apply` does that for the whole backlog. Keeps no state, so a run that times out waiting on CI is finished by running it again from any session. Which accounts count as yours and where your clones live go in `~/.claude/land-pr.json` (`{"owners": [...], "code_roots": [...]}`); with nothing set it surveys only the account `gh` is signed in as. Stdlib + `gh` + `git`; delegates bumps to `version-manager`.
 - **time** - Tracks execution time for each step in a workflow
+
+#### Which skills fit your setup?
+
+| Tag | Meaning | Skills |
+|---|---|---|
+| **General** | Works anywhere as shipped | update-code-map, feature-documenter, project-documenter, technical-documenter, claude-md-optimizer, graphify, raginclude-generator, disk-doctor, unify-agents-md, unify-agents-global-git-config, repo-doctor, yt-transcript, product-manager, astrocade-game-creation, install-claude-config, sync-claude-config, version-manager, land-pr, getting-started, github-stacked-prs, model-registry, discord-post, time |
+| **Template** | Works once you fill in your own details | cl-project-init (company name, brand, stack), html-doc (house style and `template.html`), doc-all-projects (your project list in `~/.claude/my-projects.yaml`) |
+| **Personal** | Built around the author's own machines or projects; read before using | update-hermes (a Hermes Agent run from a source checkout with local patches), imageai-cli (only useful inside the author's ImageAI repo), agent-config-sync (one WSL home plus one Windows home kept in step) |
 
 ### Agent config sync (two-way, WSL <-> Windows)
 
