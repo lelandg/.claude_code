@@ -27,7 +27,10 @@ cp -r claude/instructions/*.md ~/.claude/instructions/
 cp -r claude/output-styles/*.md ~/.claude/output-styles/
 cp -r claude/tools ~/.claude/tools
 cp -r claude/hookify-rules ~/.claude/hookify-rules
-cp claude/CLAUDE.md claude/CLAUDE_CodeMap.md claude/settings.json claude/mcp.json claude/statusline-command.sh claude/agentic_prompt_template.md ~/.claude/
+cp claude/CLAUDE.md claude/CLAUDE_CodeMap.md claude/statusline-command.sh claude/agentic_prompt_template.md ~/.claude/
+# Starter settings + MCP config. These overwrite: skip them if you already have your own.
+cp claude/settings.example.json ~/.claude/settings.json
+cp claude/mcp.example.json ~/.claude/mcp.json
 chmod +x ~/.claude/statusline-command.sh ~/.claude/tools/*.py ~/.claude/hookify-rules/*.sh
 
 # Shared cross-CLI house rules (CLAUDE.md @imports this file on line 1)
@@ -42,8 +45,10 @@ cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 | House Rules | `config/agents/AGENTS.md` | Tool-agnostic rules shared by every AI coding CLI (Claude Code, Codex, Copilot, Gemini, Pi) |
 | Core Config | `claude/CLAUDE.md` | Thin Claude-Code-specific file; line 1 `@import`s the shared AGENTS.md |
 | CodeMap Spec | `CLAUDE_CodeMap.md` | Language-neutral codebase documentation spec |
-| Settings | `settings.json` | Permissions, plugins, status line, secret-guard hook wiring |
-| MCP Servers | `mcp.json` | GitHub, chrome-devtools, and ACE Studio MCP server configs |
+| Starter Settings | `settings.example.json` | Conservative starter: read-only allows, `defaultMode: "default"`, a few official plugins, status line, secret-guard hook. **Copy this one.** |
+| Starter MCP | `mcp.example.json` | GitHub's hosted MCP server only. **Copy this one.** |
+| Author's Settings | `settings.json` | The author's own setup, with broad allows (`python3:*`, `git:*`, `curl:*`, `ssh:*` ...). Review before copying; see the README's "Which settings file?" |
+| Author's MCP | `mcp.json` | The author's own servers: GitHub, chrome-devtools, ACE Studio. Review before copying |
 | Status Line | `statusline-command.sh` | Two-line status bar: user@host, path, git branch/worktree; model, context %, rate-limit badges, PR badge, session name |
 | Agentic Template | `agentic_prompt_template.md` | Template for autonomous agent workflows |
 | 1 Agent | `agents/*.md` | code-reviewer (the other five retired in August 2026 — see `claude/agents/README.md`) |
@@ -182,13 +187,39 @@ Installed but off in the repo config (enable if you use them): `agent-sdk-dev`, 
 
 ### Included Servers
 
-The `mcp.json` configures three servers:
+`mcp.example.json` (the starter) configures one server:
 
-| Server | Command | Requires |
-|--------|---------|----------|
-| **github** | `npx -y @modelcontextprotocol/server-github` | Node.js/npm + `GITHUB_PERSONAL_ACCESS_TOKEN` |
-| **chrome-devtools** | `npx chrome-devtools-mcp@latest` | Chrome running with `--remote-debugging-port=9222` |
-| **acestudio** | `npx mcp-remote http://localhost:21572/mcp` | ACE Studio running locally (remove if you don't use it) |
+| Server | Transport | Requires |
+|--------|-----------|----------|
+| **github** | HTTP, `https://api.githubcopilot.com/mcp/` (GitHub's hosted MCP server) | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+
+The author's own `mcp.json` still runs the older `@modelcontextprotocol/server-github` npm package, which is archived and unmaintained. Prefer the hosted server above.
+
+### Optional Servers
+
+Add these to `~/.claude/mcp.json` under `mcpServers` only if you use the tool. Both are pinned to an exact version: an `@latest` spec runs whatever was published most recently, every time the server starts. Bump the pin deliberately.
+
+**chrome-devtools** — drive and inspect a Chrome started with `--remote-debugging-port=9222`:
+
+```json
+"chrome-devtools": {
+  "command": "npx",
+  "args": ["-y", "chrome-devtools-mcp@1.13.0"],
+  "env": {
+    "CDP_HOST": "localhost",
+    "CDP_PORT": "9222"
+  }
+}
+```
+
+**acestudio** — ACE Studio's local MCP endpoint, bridged with `mcp-remote` (ACE Studio must be running):
+
+```json
+"acestudio": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote@0.16.6", "http://localhost:21572/mcp"]
+}
+```
 
 ### Adding Your Own MCP Servers
 

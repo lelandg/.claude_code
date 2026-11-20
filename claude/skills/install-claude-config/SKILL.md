@@ -41,8 +41,8 @@ Scan the repo for installable files and compare against user's existing config.
 | `config/agents/AGENTS.md` | `~/.config/agents/AGENTS.md` | Shared house rules (all CLIs) |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Core config |
 | `claude/CLAUDE_CodeMap.md` | `~/.claude/CLAUDE_CodeMap.md` | Spec |
-| `claude/settings.json` | `~/.claude/settings.json` | Settings |
-| `claude/mcp.json` | `~/.claude/mcp.json` | MCP servers |
+| `claude/settings.example.json` | `~/.claude/settings.json` | Settings (default source; see "Which settings source?") |
+| `claude/mcp.example.json` | `~/.claude/mcp.json` | MCP servers (default source) |
 | `claude/statusline-command.sh` | `~/.claude/statusline-command.sh` | Script |
 | `claude/agentic_prompt_template.md` | `~/.claude/agentic_prompt_template.md` | Template |
 | `claude/agents/*.md` | `~/.claude/agents/*.md` | Agents |
@@ -63,6 +63,28 @@ Scan the repo for installable files and compare against user's existing config.
 - `claude/skills/sync-claude-config/` - reverse-direction skill
 - `claude/skills/install-claude-config/` - this skill itself
 - `claude/skills/*.skill` - packaged skill archives
+- `claude/settings.json`, `claude/mcp.json` - the author's own setup; used only when the user asks for it (see below)
+
+#### Which settings source?
+
+The repo ships two versions of each config file:
+
+| File | What it is |
+|------|------------|
+| `claude/settings.example.json` | Conservative starter: read-only command allows, `defaultMode: "default"`, a few official plugins, the secrets-guard hook and the status line |
+| `claude/settings.json` | The author's own setup. Its `permissions.allow` pre-approves `python3:*`, `npx:*`, `node -e:*`, `git:*` (including `git push` and `git reset`), `curl:*`, `ssh:*`, `scp:*`, `rsync:*`, `pip install:*`, `npm install:*`, `psql:*` and some `aws` reads, with `defaultMode: "acceptEdits"` |
+| `claude/mcp.example.json` | GitHub's hosted MCP server only |
+| `claude/mcp.json` | The author's own servers (adds ACE Studio and Chrome DevTools) |
+
+- **Fresh install** (no `~/.claude/settings.json`, or no `~/.claude/mcp.json`):
+  offer the `.example.json` file by default and install it as
+  `settings.json` / `mcp.json`. Offer the author's file only as the second
+  choice, and before installing it list the risky allows above so the user
+  chooses knowingly.
+- **Existing file:** the smart merge below uses the `.example.json` file as
+  its source, so a merge never adds broad allows the user did not choose. If
+  the user asks for the author's settings, show the allow entries the merge
+  would add and let them pick entries one by one.
 
 ### 3. Compare and Present Diff Summary
 
