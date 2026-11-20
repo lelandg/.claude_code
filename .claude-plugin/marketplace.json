@@ -5,8 +5,7 @@
     "url": "https://github.com/lelandg"
   },
   "metadata": {
-    "description": "Installable skills from lelandg/.claude_code — a production-tested Claude Code configuration. Add with: /plugin marketplace add lelandg/.claude_code",
-    "version": "0.2.0"
+    "description": "Installable skills from lelandg/.claude_code — a production-tested Claude Code configuration. Add with: /plugin marketplace add lelandg/.claude_code"
   },
   "plugins": [
     {

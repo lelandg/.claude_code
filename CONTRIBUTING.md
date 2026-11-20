@@ -23,6 +23,12 @@ Security problems are different. Please report those privately, as described in 
 3. Match the existing code style, and run any tests the README mentions before you push.
 4. Say what changed and why in the description.
 
+### Slash commands live in two folders
+
+`.claude/commands/` is the source. Those are the commands Claude Code loads when you open this repository, and the folder the config mirror is published into. `claude/commands/` is the installable copy that the install options put in `~/.claude/commands/`.
+
+Edit the file in `.claude/commands/`, then copy it to `claude/commands/` in the same commit. The two folders must match file for file, with one exception: `install-claude-config.md` lives only in `.claude/commands/`, because it installs this repository and means nothing once installed. The `tests` workflow fails when the folders drift.
+
 For anything bigger than a small fix, open an issue or ask on Discord first. Nobody wants you to spend a weekend on something that needed a five-minute conversation.
 
 Looking for somewhere to start? Try an issue labelled [`good first issue`](https://github.com/lelandg/.claude_code/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).

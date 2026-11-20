@@ -8,9 +8,9 @@ Invoke the `repo-doctor` skill.
 Scope from `$ARGUMENTS`:
 - empty → audit the current repo.
 - a path → audit that repository.
-- `all` → audit every repo under `/mnt/d/Documents/Code/GitHub/` (and `Web/`),
-  one `audit.py` run each, then present a single table sorted by severity.
-  Do **not** fix anything in `all` mode — report only.
+- `all` → audit every repository under your projects root, one `audit.py` run
+  each, then present a single table sorted by severity. Set the root to wherever
+  you keep your checkouts. Do **not** fix anything in `all` mode — report only.
 - `--fix` → after reporting, run the recommended remediations in order without
   asking between each one. Without it, ask before running any.
 
