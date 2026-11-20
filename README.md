@@ -46,7 +46,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       └── yt-transcript.md          # /yt-transcript slash command
 ├── agents/                            # Mirrors ~/.agents — cross-CLI skills record
 │   └── skills/
-│       └── rag-blueprint/             # NVIDIA RAG Blueprint skill (Apache-2.0, upstream copy)
+│       └── rag-blueprint/             # NVIDIA RAG Blueprint skill (Apache-2.0, upstream copy + LICENSE)
 ├── config/
 │   └── agents/
 │       └── AGENTS.md                  # Shared house rules for EVERY AI coding CLI
@@ -108,7 +108,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │       ├── feature-documenter/        # Feature documentation skill
 │       ├── getting-started/           # Interview-first concierge for people new to Claude Code
 │       ├── github-stacked-prs/        # Split a big feature into a chain of dependent PRs (gh-stack)
-│       ├── graphify/                  # Any input → knowledge graph (HTML + JSON)
+│       ├── graphify/                  # Any input → knowledge graph (HTML + JSON; MIT, upstream copy)
 │       ├── html-doc/                  # Standalone HTML deliverables (reports, explainers)
 │       ├── imageai-cli/               # Drive the ImageAI CLI (images/video/layouts, any provider)
 │       ├── install-claude-config/     # Install config into ~/.claude/
@@ -492,3 +492,5 @@ Found something useful to add? PRs welcome. Keep these principles in mind:
 ## License
 
 MIT - see [LICENSE](LICENSE). Use however you like.
+
+A few skills were written by others and keep their own licenses (Apache 2.0, MIT); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
