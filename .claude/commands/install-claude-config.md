@@ -21,6 +21,7 @@ The installable content is in the `claude/` subdirectory of this repo. Each path
 | `claude/output-styles/*.md` | `~/.claude/output-styles/*.md` |
 | `claude/skills/*/SKILL.md` | `~/.claude/skills/*/SKILL.md` |
 | `claude/skills/*/references/*` | `~/.claude/skills/*/references/*` |
+| `claude/skills/*/LICENSE`, `claude/skills/*/NOTICE` | `~/.claude/skills/*/` (always with their skill) |
 | `claude/skills/time.md` | `~/.claude/skills/time.md` |
 
 **Skip**: `README.md`, `.gitignore`, `.claude/`, `Docs/`, `Notes/`, `claude/agents/README.md`, `claude/skills/*.skill`

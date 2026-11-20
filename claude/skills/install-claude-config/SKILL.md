@@ -51,6 +51,7 @@ Scan the repo for installable files and compare against user's existing config.
 | `claude/output-styles/*.md` | `~/.claude/output-styles/*.md` | Output styles |
 | `claude/skills/*/SKILL.md` | `~/.claude/skills/*/SKILL.md` | Skills |
 | `claude/skills/*/references/*` | `~/.claude/skills/*/references/*` | Skill refs |
+| `claude/skills/*/LICENSE`, `claude/skills/*/NOTICE` | `~/.claude/skills/*/` | Third-party license texts (always install them with their skill; see `THIRD_PARTY_NOTICES.md`) |
 | `claude/skills/time.md` | `~/.claude/skills/time.md` | Skill |
 | `claude/workflows/*.js` | `~/.claude/workflows/*.js` | Saved Workflow scripts (e.g. `/unify-agents-global-git-config`) |
 | `claude/tools/*.py` | `~/.claude/tools/*.py` | Hook tools (secrets guard; wired via `hooks` in settings.json) |
@@ -109,6 +110,11 @@ IDENTICAL | agents/code-reviewer.md           | No changes
 ### 4. Per-File Decision
 
 For each `NEW` file: Ask user to confirm adding it.
+
+A skill's `LICENSE` and `NOTICE` files are part of that skill, not separate
+choices: whenever the user installs or updates a skill, install its `LICENSE`
+and `NOTICE` with it, without a separate question. Never install a skill while
+leaving its license text behind.
 
 For each `CHANGED` file: Show the meaningful differences and ask:
 
