@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test the block-unpinned-codex-rescue hookify rule end-to-end.
-# Policy since 2026-09-22: block Sol / bare gpt-5.6 on write paths; Astra default allowed.
+# Policy since 2026-09-22: block Sol / bare gpt-5.6 on any codex exec; Astra allowed.
 # Run from any project whose .claude/ contains (or symlinks) the rule:
 #   bash ~/.claude/hookify-rules/test-codex-guard.sh
 # Exit code 0 = all cases behaved as expected.
@@ -32,6 +32,22 @@ CASES = [
     ("astra-pinned rescue task",  'node "/x/codex-companion.mjs" task --model gpt-6-astra --effort high fix', False),
     ("terra-pinned rescue task",  'node "/x/codex-companion.mjs" task --model gpt-5.6-terra --effort high fix', False),
     ("review (Sol allowed)",      'node "/x/codex-companion.mjs" review --base origin/main',      False),
+    ("CLI bare alias, short flag", 'codex exec -m gpt-5.6 -s workspace-write -C . - < task.md',  True),
+    ("CLI astra rescue",          'codex exec -m gpt-6-astra -c model_reasoning_effort=high -s workspace-write -C . - < task.md', False),
+    ("CLI astra review",          'codex exec -s read-only -C . review -m gpt-6-astra -c model_reasoning_effort=high --base origin/main', False),
+    ("CLI sol review (agents never run Sol)", 'codex exec -s read-only -C . review -m gpt-5.6-sol --base origin/main', True),
+    ("CLI bare alias then redirect", 'codex exec -s workspace-write "fix it" -m gpt-5.6>out.txt', True),
+    ("CLI bare alias then semicolon", 'codex exec -m gpt-5.6; echo done',                       True),
+    ("CLI bare alias, flag glued",  'codex exec -mgpt-5.6 -s workspace-write -C . - < task.md',  True),
+    ("CLI bare alias via -c model", 'codex exec -c model="gpt-5.6" -s workspace-write - < task.md', True),
+    ("CLI terra, short flag",     'codex exec -m gpt-5.6-terra -c model_reasoning_effort=high -s workspace-write -C . - < task.md', False),
+    ("CLI astra with effort config", 'codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh -s read-only - < p.md', False),
+    ("CLI exec alias e, sol",     'codex e -m gpt-5.6-sol -s workspace-write "fix it"',           True),
+    ("CLI model flag before exec", 'codex -m gpt-5.6 exec -s workspace-write "fix it"',          True),
+    ("CLI escaped quotes in -c",  'codex exec -c model=\\"gpt-5.6\\" -s workspace-write "fix it"', True),
+    ("CLI profile-style override", 'codex exec -c profiles.x.model=gpt-5.6 -s workspace-write - < t.md', True),
+    ("CLI exec alias e, astra",   'codex e -m gpt-6-astra -s read-only - < p.md',                 False),
+    ("codex login",               'codex login',                                                  False),
     ("unrelated command",         'git status',                                                   False),
 ]
 

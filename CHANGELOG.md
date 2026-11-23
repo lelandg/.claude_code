@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.14.3] - 2026-11-23
+
+- Codex reviews, adversarial reviews and rescue jobs are now documented as `codex` CLI commands instead of plugin slash commands, and the Sol guard also catches the short `-m gpt-5.6` flag.
+
 ## [0.14.2] - 2026-11-20
 
 - Added license texts for the two bundled third-party skills (NVIDIA's rag-blueprint, Apache 2.0; graphify, MIT) and a THIRD_PARTY_NOTICES.md listing them.

@@ -5,7 +5,7 @@ Adapted 2026-07-23 from the author's original routing notes, reconciled against 
 live in `~/.config/agents/AGENTS.md` ("Model delegation & cross-provider
 review"); this file is the full guide. The Sol lockdown lives in
 `~/.claude/CLAUDE.md` (Codex delegation section) because it governs how
-Claude Code invokes the plugin.
+Claude Code invokes Codex.
 
 ## Why delegate across providers
 
@@ -60,9 +60,9 @@ model you have access to.
 ## Standing config (2026-09-22)
 
 `~/.codex/config.toml`: `model = "gpt-6-astra"`, `model_reasoning_effort = "high"`.
-A second machine may run the same model at `ultra`. The review commands
-inherit this default, so **Codex reviews now run Astra.** Sol is reachable
-only by editing the file (see the Sol section in `~/.claude/CLAUDE.md`).
+A second machine may run the same model at `ultra`. Every command
+in this guide still pins `-m gpt-6-astra`, so the default is only a backstop.
+Agents never run Sol (see the Sol section in `~/.claude/CLAUDE.md`).
 
 Before 2026-09-22 the default was Sol at `max`; the backup is
 `~/.codex/config.toml.bak-<timestamp>` beside the file.
@@ -76,15 +76,11 @@ all: fan-out means multiple agents burning tokens at once. Quota impact: treat
 `xhigh` ≈ one step worse, `max` ≈ two steps worse, `ultra` worse than `max`.
 
 **Astra accepts `low`, `medium`, `high`, `xhigh`, `max` (and `ultra` in the
-desktop app). It rejects `none` and `minimal`** — a plugin call that passes
+desktop app). It rejects `none` and `minimal`** — a call that passes
 either fails, so use `low` as Astra's floor.
 
-The plugin's `--effort` flag only accepts up to `xhigh` — its companion script
-hard-whitelists `none|minimal|low|medium|high|xhigh` and rejects `max`/`ultra`
-(installed v1.0.2, rechecked 2026-09-22). To reach `max`, leave `--effort` off
-the call so the `~/.codex/config.toml` default applies (or run `codex`
-directly). The plugin passes `--model` through unchanged (only `spark` is
-aliased), so `--model gpt-6-astra` works without a plugin update.
+The CLI takes any accepted effort through `-c model_reasoning_effort=<e>`,
+including `max`; `max` still needs the user's approval.
 
 `ultra` rules: use it only deliberately, never as the WSL config default, and
 **never with Sol**. If ultra is worth trying it is Astra, on a
@@ -131,51 +127,47 @@ Practical defaults (**always prefer Astra over Terra**):
   prod-gating reviews + orchestration). Haiku stays fine for fully-specified
   mechanical tasks with cheap verification.
 
-## Write access — which Codex models may run `/codex:rescue`
+## Write access — which Codex models may run a write-capable `codex exec`
 
-| model | rescue (writes) | review commands |
+| model | rescue (`-s workspace-write`) | review (`-s read-only`) |
 |---|---|---|
-| `gpt-6-astra` | yes, commit-first | yes (config default) |
-| `gpt-5.6-terra` | yes, fallback only | by config edit |
-| `gpt-5.6-luna` | yes, if still listed | by config edit |
-| `gpt-5.6-sol` | **never** | by config edit only |
+| `gpt-6-astra` | yes, commit-first | yes (pin `-m gpt-6-astra`) |
+| `gpt-5.6-terra` | yes, fallback only | yes, fallback only |
+| `gpt-5.6-luna` | yes, if still listed | yes, if still listed |
+| `gpt-5.6-sol` | **never** | the user's own terminal only |
 
 Commit-first for every writer: clean `git status` before the run, review the
-diff after. Multi-file jobs use `--background`.
+diff after. Long or multi-file jobs run under Bash `run_in_background`.
 
 ## Reaching Codex from Claude Code
 
-Installed: the official `openai-codex` marketplace plugin (`codex`, v1.0.2).
-It reuses the local Codex CLI install (0.153.4 on WSL, ≥0.153.1 required for
-Astra), its auth, and `~/.codex/config.toml` — never wrap `codex exec` in
-custom shell code.
+Claude Code calls the local Codex CLI (≥0.153.1 for Astra) from the Bash tool.
+It uses that install's auth and `~/.codex/config.toml`. The `openai-codex`
+plugin's `/codex:*` slash commands are **not** used: they are user-only, and
+cloud and project sessions do not have them. Every call pins
+`-m gpt-6-astra` and an explicit `-c model_reasoning_effort=<e>`.
 
-- `/codex:review [--base <ref>] [--scope auto|working-tree|branch]` —
-  read-only native review of local git state; inherits the config model.
-- `/codex:adversarial-review [focus ...]` — challenge review (assumptions,
-  design, tradeoffs); same scope flags plus focus text. User-only: the plugin
-  sets `disable-model-invocation`, so agents use the CLI form below.
-- **Adversarial review through the CLI** — the agent runs it itself. Commit
-  first, write the prompt to a file (`<role>` adversarial, `<target>` branch
-  and base, `<focus>`, `<output>` severity + file:line + scenario + fix), then
-  run it in the background:
+- **Review** — commit first. Branch review against the base:
+  `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high --ephemeral -o <result.md> --base origin/main`
+  `--commit <sha>` reviews one commit; `--uncommitted` is a pre-commit look
+  only, never the gate.
+- **Adversarial review** — commit first, write the prompt to a file
+  (`<role>` adversarial, `<target>` branch and base, `<focus>`, `<output>`
+  severity + file:line + scenario + fix), then:
   `codex exec -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C <repo> --ephemeral -o <result.md> - < <prompt.md>`
-  Always `-s read-only` and a pinned `-m gpt-6-astra` (never Sol: `exec` can
-  write without the sandbox flag). Reconcile every finding in the PR body. If
-  the CLI cannot run, it is not a gate: say so in the PR body and go on.
-- `/codex:rescue --model <m> --effort <e> [--background] <task>` —
-  investigation / fix delegation. Pin `--model gpt-6-astra`; an unpinned
-  call inherits Astra from config, which is allowed. Terra only as a named
-  fallback. Never Sol, never the bare `gpt-5.6` alias.
-- `/codex:status`, `/codex:result`, `/codex:cancel` — manage background jobs.
-- `/codex:setup` — health check / review-gate toggle.
+- **Rescue** (investigation / fix delegation, writes) — clean `git status`,
+  task written to a file, then:
+  `codex exec -m gpt-6-astra -c model_reasoning_effort=<effort> -s workspace-write -C <repo> --ephemeral -o <result.md> - < <task.md>`
+  Terra only as a named fallback. Never Sol, never the bare `gpt-5.6` alias.
 
-Notes: there is **no `/codex:transfer`** in the installed plugin. `gpt-5.6` is
-an alias for Sol — never use the bare alias.
+Always `-s read-only` on reviews (`exec` can write without the sandbox flag).
+Reconcile every review finding in the PR body. If the CLI cannot run, it is
+not a gate: say so in the PR body and go on. `gpt-5.6` is an alias for Sol —
+never use the bare alias.
 
 **Auth expires silently.** On 2026-09-22 a WSL `codex exec` returned
-`401 Unauthorized` / "access token could not be refreshed". Every `/codex:*`
-command fails the same way until the user runs `codex login` in a terminal.
+`401 Unauthorized` / "access token could not be refreshed". Every `codex`
+call fails the same way until the user runs `codex login` in a terminal.
 When a Codex call fails with 401, report that as the cause, not a model or
 plugin fault.
 
@@ -196,6 +188,7 @@ commit/PR boundaries and before user-facing or high-risk work ships.
 ## Workflows and subagents
 
 Claude Code's native subagent `model:` field selects Claude models only. To use
-Codex from a workflow, delegate through the plugin's commands or the
-`codex:codex-rescue` agent with a complete, self-contained task — never a raw
-CLI wrapper.
+Codex from a workflow, have the agent run the `codex exec` forms above, each
+with a pinned model. The branch review takes `--base` and no prompt (Codex
+rejects a prompt combined with `--base`); the adversarial review and the
+rescue each take a complete, self-contained prompt file.
