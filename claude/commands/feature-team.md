@@ -25,7 +25,7 @@ Invoke the **superpowers:subagent-driven-development** skill and run it task-by-
 ## Finishing phase (after the last task)
 1. Controller runs the project's full build + full lint **once**. On failure, dispatch ONE Sonnet fix agent with the exact error output; loop until green. Substantive fixes get a scoped re-review.
 2. Final whole-branch review (part of subagent-driven-development).
-3. `/codex:review --base origin/main` against the committed branch — the cross-provider review AGENTS.md requires on every PR, *before* it opens. Fix each finding or answer it in the PR body.
+3. Codex review against the committed branch, through the CLI: `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high --ephemeral -o <result.md> --base origin/main` — the cross-provider review AGENTS.md requires on every PR, *before* it opens. Fix each finding or answer it in the PR body.
 4. **superpowers:finishing-a-development-branch**, used only to push and open the PR. Push happens here, never earlier (review-before-push rule). Stop there — do **not** take its local-merge option yet.
 5. Wait for the repo's automated reviewers on the pushed head, and fix what they find (AGENTS.md → "PR review through the repo's configured automated reviewer"). Each push re-opens that window: the head you finally merge has to be one they actually reviewed.
 6. `/version-manager release <level>` — version bump + changelog in the same commit, cut **once the review fixes have landed**, as the last commit on the feature branch. Re-cut it if another PR merges first and takes the version.

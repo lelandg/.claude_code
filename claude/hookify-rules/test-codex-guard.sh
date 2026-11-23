@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test the block-unpinned-codex-rescue hookify rule end-to-end.
-# Policy since 2026-09-22: block Sol / bare gpt-5.6 on write paths; Astra default allowed.
+# Policy since 2026-09-22: block Sol / bare gpt-5.6 on any codex exec; Astra allowed.
 # Run from any project whose .claude/ contains (or symlinks) the rule:
 #   bash ~/.claude/hookify-rules/test-codex-guard.sh
 # Exit code 0 = all cases behaved as expected.
@@ -32,6 +32,10 @@ CASES = [
     ("astra-pinned rescue task",  'node "/x/codex-companion.mjs" task --model gpt-6-astra --effort high fix', False),
     ("terra-pinned rescue task",  'node "/x/codex-companion.mjs" task --model gpt-5.6-terra --effort high fix', False),
     ("review (Sol allowed)",      'node "/x/codex-companion.mjs" review --base origin/main',      False),
+    ("CLI bare alias, short flag", 'codex exec -m gpt-5.6 -s workspace-write -C . - < task.md',  True),
+    ("CLI astra rescue",          'codex exec -m gpt-6-astra -c model_reasoning_effort=high -s workspace-write -C . - < task.md', False),
+    ("CLI astra review",          'codex exec -s read-only -C . review -m gpt-6-astra -c model_reasoning_effort=high --base origin/main', False),
+    ("CLI sol review (agents never run Sol)", 'codex exec -s read-only -C . review -m gpt-5.6-sol --base origin/main', True),
     ("unrelated command",         'git status',                                                   False),
 ]
 

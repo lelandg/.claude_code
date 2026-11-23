@@ -41,47 +41,52 @@ Read it there before writing any date; otherwise run `date '+%Y-%m-%d %H:%M'`
 At startup, if `./CLAUDE.md` exists and there's no project-level
 `Docs/CodeMap.md`, offer to create it.
 
-## Codex delegation (GPT-6 Astra / GPT-5.6) — plugin mechanics
+## Codex delegation (GPT-6 Astra / GPT-5.6) — CLI mechanics
 
 The shared rules' "Model delegation & cross-provider review" section is
-implemented here by the `codex` plugin (full guide:
-`~/.claude/instructions/model-delegation.md`):
+implemented here through the `codex` CLI, run from the Bash tool (full guide:
+`~/.claude/instructions/model-delegation.md`). Never use the `/codex:*`
+plugin slash commands: they are user-only, and cloud and project sessions do
+not have them. Every call pins `-m gpt-6-astra` and an explicit effort
+(`-c model_reasoning_effort=<e>`); every review adds `-s read-only`.
 
-- `/codex:review [--base <ref>]` —
-  read-only reviews; they inherit the `~/.codex/config.toml` default
-  (`gpt-6-astra` at `high`). Commit everything first.
-- `/codex:adversarial-review [focus ...]` — the plugin command is user-only
-  (`disable-model-invocation`). Run adversarial reviews yourself through the
-  `codex` CLI instead; the command is in
-  `~/.claude/instructions/model-delegation.md`.
-- `/codex:rescue --model gpt-6-astra --effort <e> [--background] <task>`
-  — pin `--model` explicitly; an unpinned call inherits the config default
-  (Astra, allowed). Prefer Astra over Terra; Terra only as a named fallback.
-  Never `gpt-5.6-sol` and never the bare `gpt-5.6` alias. Plugin caps effort
-  at `xhigh` (`max` exists in the CLI/API but the plugin rejects it —
-  workaround in the guide); multi-file jobs → `--background`. A clean
-  `git status` first, same as any writer.
-- `/codex:status` / `/codex:result` / `/codex:cancel` — background jobs;
-  `/codex:setup` — health check. There is no `/codex:transfer`.
-- Leave the stop-review gate disabled (`/codex:setup` shows its state).
+- **Review** (every PR, before it opens) — commit everything first, then:
+  `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high --ephemeral -o <result.md> --base origin/main`
+  (`--commit <sha>` reviews one commit; `--uncommitted` is a pre-commit look,
+  never the gate).
+- **Adversarial review** (auth, billing, data migration) — commit first, write
+  the prompt to a file (`<role>` adversarial, `<target>` branch and base,
+  `<focus>`, `<output>` severity + file:line + scenario + fix), then:
+  `codex exec -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C <repo> --ephemeral -o <result.md> - < <prompt.md>`
+- **Rescue** (investigation or fix delegation; it writes) — clean
+  `git status` first, task written to a file, then:
+  `codex exec -m gpt-6-astra -c model_reasoning_effort=<effort> -s workspace-write -C <repo> --ephemeral -o <result.md> - < <task.md>`
+  Review the diff afterwards. Terra (`-m gpt-5.6-terra`) only as a named
+  fallback. Never `gpt-5.6-sol` and never the bare `gpt-5.6` alias.
+- Effort `low|medium|high|xhigh` on your own judgment; `max` only with
+  the user's approval. Astra rejects `none` and `minimal`.
+- Long or multi-file runs: Bash `run_in_background`, then read `<result.md>`.
+- A `401` means `codex login` is needed; procedure in the guide.
+- Leave the plugin's stop-review gate disabled.
 
 ### Sol is REVIEW-ONLY — CRITICAL (standing policy; lift it deliberately)
 
 (Lives here rather than in the shared AGENTS.md: the rule governs how Claude
-Code invokes the codex plugin, so it is a Claude mechanism.)
+Code invokes Codex, so it is a Claude mechanism.)
 
 `gpt-5.6-sol` has a record of destructive autonomous action elsewhere
 (deleted home dirs, intrusion into other systems in pursuit of a goal). So:
 
-- Sol runs **only** through read-only review commands
-  (`/codex:review`, `/codex:adversarial-review`) — never on `/codex:rescue`
-  or anything that can write.
+- Sol runs **only** as a read-only review (`codex exec -s read-only ...`,
+  review or adversarial) — never with `-s workspace-write`,
+  `danger-full-access`, `--dangerously-bypass-approvals-and-sandbox`, or
+  anything else that can write.
 - **Commit everything first** — clean `git status` before any Sol run; review
   the committed work (`--base <ref>` for branch review).
-- `~/.codex/config.toml` defaults to `gpt-6-astra`, so the review commands
-  run Astra and Sol is reachable only by editing that file. To run a Sol
-  review: set `model = "gpt-5.6-sol"`, run the review, set it back. Never
-  pass Sol to `/codex:rescue`. Never the bare `gpt-5.6` alias (= Sol).
+- Agents do not run Sol: the `block-unpinned-codex-rescue` hookify rule denies
+  any `codex exec` naming `gpt-5.6-sol` or the bare `gpt-5.6` alias, review or
+  not. A Sol review is the user's to run in their own terminal, with the review
+  command above and `-m gpt-5.6-sol`. Never the bare `gpt-5.6` alias (= Sol).
 
 ## Custom skill triggers
 
