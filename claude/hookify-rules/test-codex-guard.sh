@@ -42,6 +42,12 @@ CASES = [
     ("CLI bare alias via -c model", 'codex exec -c model="gpt-5.6" -s workspace-write - < task.md', True),
     ("CLI terra, short flag",     'codex exec -m gpt-5.6-terra -c model_reasoning_effort=high -s workspace-write -C . - < task.md', False),
     ("CLI astra with effort config", 'codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh -s read-only - < p.md', False),
+    ("CLI exec alias e, sol",     'codex e -m gpt-5.6-sol -s workspace-write "fix it"',           True),
+    ("CLI model flag before exec", 'codex -m gpt-5.6 exec -s workspace-write "fix it"',          True),
+    ("CLI escaped quotes in -c",  'codex exec -c model=\\"gpt-5.6\\" -s workspace-write "fix it"', True),
+    ("CLI profile-style override", 'codex exec -c profiles.x.model=gpt-5.6 -s workspace-write - < t.md', True),
+    ("CLI exec alias e, astra",   'codex e -m gpt-6-astra -s read-only - < p.md',                 False),
+    ("codex login",               'codex login',                                                  False),
     ("unrelated command",         'git status',                                                   False),
 ]
 

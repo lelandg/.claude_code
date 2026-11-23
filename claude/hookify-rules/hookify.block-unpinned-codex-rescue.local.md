@@ -5,10 +5,10 @@ event: bash
 conditions:
   - field: command
     operator: regex_match
-    pattern: codex-companion\.mjs"?\s+task\b|\bcodex\s+exec\b
+    pattern: codex-companion\.mjs"?\s+task\b|\bcodex(?:\.exe|\.cmd)?["']?\s
   - field: command
     operator: regex_match
-    pattern: gpt-5\.6-sol\b|(?:--model|-m|\bmodel)[=\s]*["']?gpt-5\.6["']?(?![\w.-])
+    pattern: gpt-5\.6-sol\b|gpt-5\.6(?![\w.-])
 action: block
 ---
 
