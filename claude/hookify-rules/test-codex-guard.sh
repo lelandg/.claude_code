@@ -36,6 +36,12 @@ CASES = [
     ("CLI astra rescue",          'codex exec -m gpt-6-astra -c model_reasoning_effort=high -s workspace-write -C . - < task.md', False),
     ("CLI astra review",          'codex exec -s read-only -C . review -m gpt-6-astra -c model_reasoning_effort=high --base origin/main', False),
     ("CLI sol review (agents never run Sol)", 'codex exec -s read-only -C . review -m gpt-5.6-sol --base origin/main', True),
+    ("CLI bare alias then redirect", 'codex exec -s workspace-write "fix it" -m gpt-5.6>out.txt', True),
+    ("CLI bare alias then semicolon", 'codex exec -m gpt-5.6; echo done',                       True),
+    ("CLI bare alias, flag glued",  'codex exec -mgpt-5.6 -s workspace-write -C . - < task.md',  True),
+    ("CLI bare alias via -c model", 'codex exec -c model="gpt-5.6" -s workspace-write - < task.md', True),
+    ("CLI terra, short flag",     'codex exec -m gpt-5.6-terra -c model_reasoning_effort=high -s workspace-write -C . - < task.md', False),
+    ("CLI astra with effort config", 'codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh -s read-only - < p.md', False),
     ("unrelated command",         'git status',                                                   False),
 ]
 

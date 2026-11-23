@@ -188,5 +188,7 @@ commit/PR boundaries and before user-facing or high-risk work ships.
 ## Workflows and subagents
 
 Claude Code's native subagent `model:` field selects Claude models only. To use
-Codex from a workflow, have the agent run the `codex exec` forms above with a
-complete, self-contained prompt file and a pinned model.
+Codex from a workflow, have the agent run the `codex exec` forms above, each
+with a pinned model. The branch review takes `--base` and no prompt (Codex
+rejects a prompt combined with `--base`); the adversarial review and the
+rescue each take a complete, self-contained prompt file.
