@@ -1537,6 +1537,25 @@ def test_lander_commits_are_remembered_across_runs():
     assert bump in pt.own_commits()
 
 
+def test_recorded_commits_prove_themselves_mechanical_in_a_later_run():
+    # The temporary clone is gone; the record alone proves the lander's merge.
+    bump = "f" * 40
+    pt.record_own_commits([bump])
+    pt._CACHE.pop("own_commits")
+    commits = [{"oid": "a" * 40, "messageHeadline": "fix: x"},
+               {"oid": bump, "messageHeadline": "Merge remote-tracking branch 'origin/main' into HEAD"}]
+    assert pt.verified_mechanical("octo-user/r", "main", commits) == {bump}
+
+
+def test_commit_record_is_written_atomically(tmp_path):
+    pt.record_own_commits(["a" * 40])
+    pt.record_own_commits(["b" * 40, "a" * 40])
+    path = pt._own_path()
+    assert json.loads(path.read_text()) == ["a" * 40, "b" * 40]
+    assert not path.with_name(path.name + ".lock").exists()
+    assert not list(path.parent.glob("*.tmp"))
+
+
 def test_approval_covers_every_proven_lander_commit():
     # A -> B -> C, the lander pushed B and C: approving B still holds after C.
     a, b, c = "a" * 40, "b" * 40, "c" * 40

@@ -519,12 +519,12 @@ def verified_mechanical(repo: str, base: str, commits: list[dict]) -> set[str]:
     proven: set[str] = set()
     # Commits this very run created and pushed need no proof: the lander made
     # them, in a clone that may be temporary and gone from every search path.
-    own: set[str] = _CACHE.get("own_commits", set())  # type: ignore[assignment]
+    own = own_commits()
     for c in reversed(commits[1:]):
         title = c.get("messageHeadline") or ""
         if not MECHANICAL_COMMIT.match(title):
             break
-        if c.get("oid") in own:
+        if (c.get("oid") or "").lower() in own:
             proven.add(c["oid"])
             continue
         parents =[p["oid"] for p in (c.get("parents") or {}).get("nodes", [])]
@@ -1363,18 +1363,41 @@ def own_commits() -> set[str]:
 
 
 def record_own_commits(oids: list[str]) -> None:
-    """Remember commits the lander pushed, so an approval survives them."""
+    """Remember commits the lander pushed, so an approval survives them.
+
+    The record is shared by every landing on this machine, in any repo, so
+    the read-merge-write runs under its own lock and lands by an atomic
+    replace. A failure here only costs a later re-approval (fail closed)."""
     _CACHE.setdefault("own_commits", set()).update(oids)  # type: ignore[union-attr]
     path = _own_path()
-    try:
-        old = json.loads(path.read_text(encoding="utf-8"))
-        old = [x for x in old if isinstance(x, str)] if isinstance(old, list) else []
-    except (OSError, ValueError):
-        old = []
-    keep = (old + [o for o in oids if o not in old])[-OWN_COMMITS_KEEP:]
+    lock = path.with_name(path.name + ".lock")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(keep), encoding="utf-8")
+        deadline = time.time() + 30
+        while True:
+            try:
+                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                break
+            except FileExistsError:
+                if time.time() - lock.stat().st_mtime > 120:
+                    lock.unlink(missing_ok=True)        # abandoned
+                elif time.time() > deadline:
+                    raise OSError(f"{lock} is held")
+                else:
+                    time.sleep(0.2)
+        try:
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+                old = [x for x in old if isinstance(x, str)] \
+                    if isinstance(old, list) else []
+            except (OSError, ValueError):
+                old = []
+            keep = (old + [o for o in oids if o not in old])[-OWN_COMMITS_KEEP:]
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(keep), encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            lock.unlink(missing_ok=True)
     except OSError as exc:
         print(f"  note: could not record the lander's commits in {path}: {exc}")
 
