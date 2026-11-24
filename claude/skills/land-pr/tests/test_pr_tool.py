@@ -1521,6 +1521,29 @@ def test_approval_survives_only_the_landers_own_commits():
                                         code_oid=bump), code)[0]
 
 
+def test_approval_covers_every_proven_lander_commit():
+    # A -> B -> C, B and C proven mechanical: approving B still holds after C.
+    a, b, c = "a" * 40, "b" * 40, "c" * 40
+    pr = make(author="nick-p", head_oid=c, code_oid=a, mech_oids=[b, c])
+    assert pt.approval_matches(pr, b[:9])[0]
+    assert not pt.approval_matches(pr, "d" * 40)[0]
+
+
+def test_parse_proves_lander_commits_on_a_merged_pr_too(monkeypatch):
+    # A land resumed after its merge must still find the approved commit.
+    seen = []
+    monkeypatch.setattr(pt, "verified_mechanical",
+                        lambda repo, base, commits: seen.append(repo) or {"x"})
+    monkeypatch.setattr(pt, "pr_from_node",
+                        lambda repo, node, proven: proven)
+    node = {"pullRequest": {"state": "MERGED", "baseRefName": "main",
+            "commits": {"nodes": [{"commit": {"oid": "a"}},
+                                  {"commit": {"oid": "x", "messageHeadline":
+                                              "chore(release): v1.2.3"}}]}}}
+    assert pt._parse("octo-user/r", node) == {"x"}
+    assert seen == ["octo-user/r"]
+
+
 def test_approval_never_skips_another_gate(monkeypatch):
     head = "b" * 40
     calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY,

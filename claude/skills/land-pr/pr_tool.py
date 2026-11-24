@@ -292,6 +292,7 @@ class PR:
     head: str = ""
     head_oid: str = ""
     code_oid: str = ""             # last commit not the lander's own ("": head)
+    mech_oids: list[str] = field(default_factory=list)  # proven lander commits after it
     mergeable: str = "MERGEABLE"   # MERGEABLE | CONFLICTING | UNKNOWN
     merge_state: str = "CLEAN"
     created: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -665,7 +666,8 @@ def head_facts(n: dict, commits: list[dict],
             "running": running, "active": active,
             "review_clock": _when(commits[i]["committedDate"])
             if mechanical_head else pushed,
-            "code_oid": (commits[i].get("oid") or "") if commits else ""}
+            "code_oid": (commits[i].get("oid") or "") if commits else "",
+            "mech_oids": [c.get("oid") or "" for c in commits[i + 1:]]}
 
 
 def pr_from_node(repo: str, repo_node: dict,
@@ -723,6 +725,7 @@ def pr_from_node(repo: str, repo_node: dict,
         base=n.get("baseRefName") or "main", head=n.get("headRefName") or "",
         head_oid=n.get("headRefOid") or "",
         code_oid=head.get("code_oid") or "",
+        mech_oids=list(head.get("mech_oids") or []),
         mergeable=n.get("mergeable") or "UNKNOWN",
         merge_state=n.get("mergeStateStatus") or "UNKNOWN",
         created=_when(n.get("createdAt")), updated=_when(n.get("updatedAt")),
@@ -763,7 +766,9 @@ def _parse(repo: str, repo_node: dict) -> PR:
     n = repo_node.get("pullRequest") or {}
     commits = [c["commit"] for c in (n.get("commits") or {}).get("nodes", [])]
     proven: set[str] = set()
-    if n.get("state") == "OPEN" and commits and MECHANICAL_COMMIT.match(
+    # MERGED too: a land resumed after its merge (tag refused, process
+    # killed) must still see the approved commit behind the lander's own.
+    if n.get("state") in ("OPEN", "MERGED") and commits and MECHANICAL_COMMIT.match(
             commits[-1].get("messageHeadline") or ""):
         proven = verified_mechanical(repo, n.get("baseRefName") or "main",
                                      commits)
@@ -1326,7 +1331,8 @@ def approval_matches(pr: PR, approved: str) -> tuple[bool, str]:
     if not re.fullmatch(r"[0-9a-f]{7,40}", sha):
         return False, f"--approved-head {approved!r} is not a commit SHA"
     code = (pr.code_oid or pr.head_oid).lower()
-    if code.startswith(sha) or pr.head_oid.lower().startswith(sha):
+    covered = [code, pr.head_oid.lower()] + [o.lower() for o in pr.mech_oids if o]
+    if any(o.startswith(sha) for o in covered if o):
         return True, f"owner approved {sha[:9]}"
     return False, (f"the approval is for {sha[:9]}, but the PR's code is now "
                    f"at {code[:9]}: commits were pushed after it was approved, "
