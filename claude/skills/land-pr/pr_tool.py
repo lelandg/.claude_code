@@ -53,6 +53,16 @@ CONFIG_PATH = "~/.claude/land-pr.json"
 # count as yours to merge in. PRs you authored elsewhere are always listed.
 OWNERS: list[str] = []
 
+# Bot accounts whose PRs count as the owner's own, matched without "[bot]"
+# and ignoring case. A bot opens a PR for whoever set it going: Dependabot for
+# the repository's own config, but Copilot or any other app for whoever
+# assigned it, so only bots listed here skip the author gate. Every other PR
+# is EXTERNAL: explained to the owner, never landed without their approval
+# (`land --approved-head`). Per machine: `trusted_bots` in the config file
+# replaces this list, and `trusted_authors` there adds human accounts (the
+# owner's own agent accounts) to the signed-in one.
+TRUSTED_BOTS: list[str] = ["dependabot"]
+
 # A PR that is not READY and has not moved for this long is STALE: a decision
 # for a person (close or revive), never something the tool settles.
 STALE_DAYS = 14
@@ -281,6 +291,7 @@ class PR:
     base: str = "main"
     head: str = ""
     head_oid: str = ""
+    code_oid: str = ""             # last commit not the lander's own ("": head)
     mergeable: str = "MERGEABLE"   # MERGEABLE | CONFLICTING | UNKNOWN
     merge_state: str = "CLEAN"
     created: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -653,7 +664,8 @@ def head_facts(n: dict, commits: list[dict],
     return {"pushed": pushed, "expected": expected, "reviewed": reviewed,
             "running": running, "active": active,
             "review_clock": _when(commits[i]["committedDate"])
-            if mechanical_head else pushed}
+            if mechanical_head else pushed,
+            "code_oid": (commits[i].get("oid") or "") if commits else ""}
 
 
 def pr_from_node(repo: str, repo_node: dict,
@@ -710,6 +722,7 @@ def pr_from_node(repo: str, repo_node: dict,
         cross_repo=bool(n.get("isCrossRepository")),
         base=n.get("baseRefName") or "main", head=n.get("headRefName") or "",
         head_oid=n.get("headRefOid") or "",
+        code_oid=head.get("code_oid") or "",
         mergeable=n.get("mergeable") or "UNKNOWN",
         merge_state=n.get("mergeStateStatus") or "UNKNOWN",
         created=_when(n.get("createdAt")), updated=_when(n.get("updatedAt")),
@@ -834,7 +847,9 @@ NEXT_STEP = {
     "DRAFT": "finish it or close it",
     "STACKED": "land the PR it is based on first; GitHub then retargets this "
                "one to the default branch and it can land",
-    "EXTERNAL": "outside contributor: the owner decides",
+    "EXTERNAL": "someone else opened it: explain it to the owner (what it "
+                "changes, who opened it, checks, review, a recommendation); "
+                "land only after they approve, with --approved-head <sha>",
     "ELSEWHERE": "your PR in someone else's repo: its owner merges",
 }
 STALE_STEP = "no movement: the owner decides, close or revive"
@@ -856,8 +871,9 @@ def classify(pr: PR, now: datetime, trusted: set[str],
             and idle_days >= STALE_DAYS
         return Verdict(state, list(reasons), stale)
 
-    if not pr.author_is_bot and pr.author.lower() not in trusted:
-        return verdict("EXTERNAL", f"author {pr.author or 'unknown'}")
+    if not author_trusted(pr, trusted):
+        return verdict("EXTERNAL", f"author {pr.author or 'unknown'}"
+                       + (" (bot)" if pr.author_is_bot else ""))
     # No explicit list means "whatever this run is configured for", so the
     # PR_TOOL_OWNERS override reaches every caller, not just the survey query.
     home = {o.lower() for o in (owners if owners is not None else _owners(None))}
@@ -1264,8 +1280,57 @@ def signed_in() -> str:
 
 
 def trusted_authors() -> set[str]:
+    """Human accounts whose PRs are the owner's own: the signed-in account
+    plus `trusted_authors` in the config file (the owner's agent accounts)."""
     me = signed_in().lower()
-    return {me} if me else set()
+    extra = {a.lower() for a in _names(config().get("trusted_authors"))}
+    return ({me} if me else set()) | extra
+
+
+def _bot_name(login: str) -> str:
+    login = login.strip().lower()
+    login = login[4:] if login.startswith("app/") else login
+    return login[:-5] if login.endswith("[bot]") else login
+
+
+def trusted_bots() -> set[str]:
+    """Bot accounts whose PRs are the owner's own (see TRUSTED_BOTS)."""
+    names = config().get("trusted_bots")
+    chosen = _names(names) if isinstance(names, list) else list(TRUSTED_BOTS)
+    return {_bot_name(b) for b in chosen}
+
+
+def author_key(pr: PR) -> str:
+    """How an author appears in a trusted set: bots as `bot:<name>`, so a
+    person who happens to share a bot's name is never taken for it."""
+    return f"bot:{_bot_name(pr.author)}" if pr.author_is_bot \
+        else pr.author.lower()
+
+
+def author_trusted(pr: PR, trusted: set[str]) -> bool:
+    """Did the owner, or automation acting for them, open this PR?"""
+    if not pr.author:
+        return False
+    if pr.author_is_bot and _bot_name(pr.author) in trusted_bots():
+        return True
+    return author_key(pr) in trusted
+
+
+def approval_matches(pr: PR, approved: str) -> tuple[bool, str]:
+    """Is `approved` the commit the owner reviewed, and still the PR's code?
+
+    The approval names a commit. It covers the head, or the last commit
+    before the lander's own (a version bump, a clean merge of the base),
+    which carry no new code. Anything pushed after it voids it."""
+    sha = approved.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{7,40}", sha):
+        return False, f"--approved-head {approved!r} is not a commit SHA"
+    code = (pr.code_oid or pr.head_oid).lower()
+    if code.startswith(sha) or pr.head_oid.lower().startswith(sha):
+        return True, f"owner approved {sha[:9]}"
+    return False, (f"the approval is for {sha[:9]}, but the PR's code is now "
+                   f"at {code[:9]}: commits were pushed after it was approved, "
+                   "so the owner must look again")
 
 
 def detect_method(pr: PR) -> str:
@@ -1370,13 +1435,22 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
              clone: str | None = None, wait: float = 8.0,
              trusted: set[str] | None = None,
              owners: list[str] | None = None,
-             accept_missing: bool = False, **_: object) -> int:
+             accept_missing: bool = False, approved: str | None = None,
+             **_: object) -> int:
     repo, number = parse_ref(ref)
     trusted = trusted if trusted is not None else trusted_authors()
     owners = owners if owners is not None else _owners(None)
     _CACHE["clone_hint"] = clone      # so proofs can use the same clone
     pr = fetch_pr(repo, number)
     print(f"{pr.ref}  {pr.title}")
+    if approved and not author_trusted(pr, trusted):
+        # Someone else's PR, approved by the owner at one commit. Trust its
+        # author for this run only; every other gate still applies.
+        ok, why = approval_matches(pr, approved)
+        print(f"  author {pr.author}: {why}")
+        if not ok:
+            return 1
+        trusted = set(trusted) | {author_key(pr)}
     if pr.state == "MERGED":
         return finish_merged(pr, apply, trusted, owners)
     if pr.state != "OPEN":
@@ -1798,7 +1872,7 @@ def finish_merged(pr: PR, apply: bool, trusted: set[str],
     after the merge (tag refused, process killed) instead of calling it done."""
     # The same trust an open PR needs: your PR, in a repository that is yours.
     home = {o.lower() for o in owners}
-    if (not pr.author_is_bot and pr.author.lower() not in trusted) \
+    if not author_trusted(pr, trusted) \
             or pr.repo.split("/", 1)[0].lower() not in home:
         print("  already merged; not your PR or not your repository, so "
               "nothing is tagged or cleaned up from here")
@@ -1912,6 +1986,17 @@ def _owner_hint(args_owner: list[str] | None, repo: str | None) -> None:
           "PR_TOOL_OWNERS=a,b.", file=sys.stderr)
 
 
+def check_summary(pr: PR) -> dict:
+    """Counts of the head's checks by outcome, and the names of failing ones."""
+    out: dict = {"pass": 0, "fail": 0, "pending": 0, "other": 0, "failing": []}
+    for name, bucket in pr.checks:
+        key = bucket if bucket in ("pass", "fail", "pending") else "other"
+        out[key] += 1
+        if key == "fail":
+            out["failing"].append(name)
+    return out
+
+
 def cmd_status(owner: list[str] | None = None, repo: str | None = None,
                as_json: bool = False, **_: object) -> int:
     trusted = trusted_authors()
@@ -1921,6 +2006,14 @@ def cmd_status(owner: list[str] | None = None, repo: str | None = None,
         print(json.dumps([{"ref": pr.ref, "state": v.state, "stale": v.stale,
                            "reasons": v.reasons, "title": pr.title,
                            "url": pr.url, "author": pr.author,
+                           "author_is_bot": pr.author_is_bot,
+                           "fork": pr.cross_repo, "base": pr.base,
+                           "head_oid": pr.head_oid,
+                           "code_oid": pr.code_oid or pr.head_oid,
+                           "files_total": pr.files_total,
+                           "checks": check_summary(pr),
+                           "reviewed_head": pr.reviewed_head,
+                           "open_threads": len(pr.threads),
                            "updated": pr.updated.isoformat()}
                           for pr, v in rows], indent=2))
     else:
@@ -2018,6 +2111,12 @@ def main(argv: list[str] | None = None) -> int:
                          "this PR earlier has not reviewed the head (it is "
                          "gone, or will not re-review). Never skips a check "
                          "or a running workflow; never implied; never in sweep")
+    la.add_argument("--approved-head", dest="approved", metavar="SHA",
+                    help="the owner approved this PR, opened by someone else, "
+                         "at commit SHA. Lands it only if nothing but the "
+                         "lander's own commits came after SHA, and only past "
+                         "every other gate. The owner's call alone; never "
+                         "implied; never in sweep")
 
     sw = sub.add_parser("sweep", help="close superseded, land everything READY")
     scope(sw)

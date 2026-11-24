@@ -445,11 +445,14 @@ def test_landers_own_commits_keep_the_review_only_when_proven():
     # re-reviews a push, is not expected again on it.
     assert proven.expected_checks == []
     assert pt.classify(proven, NOW, ME).state == "READY"
+    # An owner's approval of a1 still covers the PR after the lander's bump.
+    assert proven.code_oid == "a1"
     # The same titles with no proof of what the commits contain: a title is
     # only a claim, so the head counts as unreviewed code.
     claimed = _pr(node)
     assert claimed.reviewed_head is False
     assert claimed.expected_checks == ["Greptile Review"]
+    assert claimed.code_oid == "r3"
     assert pt.classify(claimed, NOW, ME).state == "WAITING"
     # Proof stops at the first commit that fails it: r3 alone is not enough
     # to reach back past an unproven merge.
@@ -1444,3 +1447,97 @@ def test_branch_checked_out_in_the_main_clone_is_kept(repo, tmp_path, capsys):
     pt.clean_local_branch(pr, repo)
     assert sh(repo, "rev-parse", "--abbrev-ref", "HEAD") == "feature"
     assert "main checkout" in capsys.readouterr().out
+
+
+# ---- someone else's PR: explained, landed only on the owner's approval -----
+# Leland, 2026-11-24: "Make sure the land open PRs doesn't land something that
+# someone else opens, unless I approve it."
+
+def test_only_listed_bots_count_as_the_owners_automation(monkeypatch, tmp_path):
+    assert state(author="dependabot", author_is_bot=True) == "READY"
+    assert state(author="dependabot[bot]", author_is_bot=True) == "READY"
+    # Copilot works for whoever assigned it, so its PRs need the owner.
+    v = pt.classify(make(author="Copilot", author_is_bot=True), NOW, ME)
+    assert v.state == "EXTERNAL" and "(bot)" in v.reasons[0]
+    assert state(author="github-actions", author_is_bot=True) == "EXTERNAL"
+    # A person whose login is a listed bot's name is still a person.
+    assert state(author="dependabot", author_is_bot=False) == "EXTERNAL"
+    assert state(author="", author_is_bot=False) == "EXTERNAL"
+    cfg = tmp_path / "land-pr.json"
+    cfg.write_text('{"trusted_bots": ["Copilot"], "trusted_authors": ["my-agent"]}',
+                   encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    assert state(author="Copilot", author_is_bot=True) == "READY"
+    assert state(author="dependabot", author_is_bot=True) == "EXTERNAL"  # replaced
+    assert "my-agent" in pt.trusted_authors() and "octo-user" in pt.trusted_authors()
+
+
+def test_someone_elses_pr_is_external_even_when_green_and_never_swept(monkeypatch):
+    nick = make(author="nick-p")
+    assert pt.classify(nick, NOW, ME).state == "EXTERNAL"
+    assert not pt.classify(nick, NOW - timedelta(days=60), ME).stale
+    monkeypatch.setattr(pt, "survey", lambda owners, repo, trusted:
+                        [(nick, pt.classify(nick, NOW, trusted))])
+    calls = _land_env(monkeypatch, [nick])
+    assert pt.cmd_sweep(apply=True) == 0
+    assert calls == []
+
+
+def test_land_refuses_someone_elses_pr_without_approval(monkeypatch, capsys):
+    calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 1
+    out = capsys.readouterr().out
+    assert calls == [] and "EXTERNAL" in out and "--approved-head" in out
+
+
+def test_approval_lands_only_the_commit_the_owner_saw(monkeypatch, capsys):
+    head = "b" * 40
+    pr = make(author="nick-p", files=CI_ONLY, head_oid=head)
+    merged = make(author="nick-p", files=CI_ONLY, head_oid=head,
+                  state="MERGED", merge_commit="c" * 40)
+    calls = _land_env(monkeypatch, [pr, merged])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head[:7]) == 0
+    assert ("pr", "merge") in [c[:2] for c in calls]
+    # A push after the approval voids it: nothing is merged.
+    calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY,
+                                         head_oid="d" * 40)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head[:9]) == 1
+    assert calls == [] and "look again" in capsys.readouterr().out
+    # Not a SHA at all.
+    calls = _land_env(monkeypatch, [pr])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved="yes") == 1
+    assert calls == []
+
+
+def test_approval_survives_only_the_landers_own_commits():
+    code, bump = "e" * 40, "f" * 40
+    pr = make(author="nick-p", head_oid=bump, code_oid=code)
+    assert pt.approval_matches(pr, code[:8])[0]       # bump came after it
+    assert pt.approval_matches(pr, bump)[0]           # or approved the head
+    assert not pt.approval_matches(make(author="nick-p", head_oid=bump,
+                                        code_oid=bump), code)[0]
+
+
+def test_approval_never_skips_another_gate(monkeypatch):
+    head = "b" * 40
+    calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY,
+                                         head_oid=head,
+                                         checks=[("ci", "fail")])])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head) == 1
+    assert calls == []
+
+
+def test_status_json_carries_what_the_owner_needs_to_decide(monkeypatch, capsys):
+    nick = make(author="nick-p", checks=[("ci", "pass"), ("lint", "fail")],
+                code_oid="e" * 40)
+    monkeypatch.setattr(pt, "survey", lambda owners, repo, trusted:
+                        [(nick, pt.classify(nick, NOW, trusted))])
+    pt.cmd_status(as_json=True)
+    row = json.loads(capsys.readouterr().out)[0]
+    assert row["state"] == "EXTERNAL" and row["author"] == "nick-p"
+    assert row["code_oid"] == "e" * 40 and row["checks"]["failing"] == ["lint"]
+    assert row["reviewed_head"] is True and row["open_threads"] == 0

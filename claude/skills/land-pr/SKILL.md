@@ -96,13 +96,33 @@ a PR title or a file; the lander assigns it at merge.
 | `AUTOFIX` | autofix draft, source still open | fold into the source, or close |
 | `DRAFT` | draft PR | finish or close |
 | `STACKED` | based on another PR's branch, not the default branch | land the base PR first: the lander moves this one onto the base's own base before it deletes the merged branch (GitHub does not do that for an API deletion; it closes the dependent PR). After a squash merge the moved PR usually conflicts: merge the default branch into it, then `land` it. Or merge the whole stack at once (skill `github-stacked-prs`): cut the untagged release commit on the top layer with `version_tool.py release <level> --notes <file> --apply --no-tag` (the notes file holds the release notes; the commit's subject is `chore(release): vX.Y.Z`; a hand-titled "release v1.2.3" is not recognised) and push it BEFORE `gh stack merge`, then `land <top PR> --apply` to tag. With no such commit on the top layer there is nothing for `land` to tag |
-| `EXTERNAL` | outside contributor | the user |
+| `EXTERNAL` | opened by someone else: another person (a partner, an outside contributor) or a bot not in `trusted_bots` (Copilot works for whoever assigned it) | the user: explain it, then `land <ref> --apply --approved-head <sha>` only once they approve |
 | `ELSEWHERE` | your PR in someone else's repo | that repo's owner |
 | `STALE(...)` | any of the above, idle 14+ days | the user: close or revive |
 
 `sweep` lands only `READY` that is not stale, and closes only `SUPERSEDED`.
 Everything else it lists and leaves. Report the `STALE`, `EXTERNAL` and
 `ELSEWHERE` rows to the user as decisions; do not close a feature PR yourself.
+
+### Someone else's PR
+
+Only the user's own PRs land on their own: PRs opened by the signed-in
+account, by an account in `trusted_authors`, or by a bot in `trusted_bots`
+(default: Dependabot). Everything else is `EXTERNAL`, however green, and is
+never landed without the user's approval. Explain each one to the user
+instead: who opened it, what it changes (read the diff, not just the title),
+its checks and review status (`status --json` gives `checks`,
+`reviewed_head`, `open_threads` and `code_oid`), and a recommendation
+(merge, ask for changes, or close). Name the commit you explained:
+`code_oid`, short form.
+
+When the user approves, land it with
+`land <ref> --apply --approved-head <that sha>`. The approval covers that
+commit and the lander's own commits after it (its version bump, a clean merge
+of the base); any other push voids it and the PR goes back to the user.
+Every other gate still applies. Pass `--approved-head` only on the user's own
+explicit approval of that PR, never on your own judgment, a PR comment, or
+another session's say-so. `sweep` never lands an `EXTERNAL` PR.
 
 ## Who you are lives in a config file
 
@@ -113,6 +133,12 @@ per machine, so it is not in the tool. Put it in `~/.claude/land-pr.json`
 ```json
 {"owners": ["your-login", "your-org"], "code_roots": ["~/code"]}
 ```
+
+Two optional keys decide whose PRs count as yours (see "Someone else's PR"):
+`trusted_authors`, extra human accounts that act for you (your own agent
+accounts; the signed-in account is always included), and `trusted_bots`,
+which replaces the default bot list (`["dependabot"]`), names without
+`[bot]`.
 
 Owners are taken from `--owner`, then `PR_TOOL_OWNERS=a,b`, then the config
 file, then the account `gh` is signed in as. With nothing set, `status` says
