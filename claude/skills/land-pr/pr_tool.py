@@ -1632,7 +1632,10 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
                     version = prepare_branch(vt, vt_path, ws.wt, base_ref,
                                              plan.level, plan.notes, taken,
                                              ws.tmp)
-                    made = git(ws.wt, "rev-list", f"{pr.head_oid}..HEAD").split()
+                    # First parent only: a merge of the base brings the base's
+                    # own commits along, and those are not the lander's.
+                    made = git(ws.wt, "rev-list", "--first-parent", "--reverse",
+                               f"{pr.head_oid}..HEAD").split()
                     git(ws.wt, "push", "origin", f"HEAD:refs/heads/{pr.head}")
                     record_own_commits(made)
                     oid = git(ws.wt, "rev-parse", "HEAD").strip()
