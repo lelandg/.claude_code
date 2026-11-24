@@ -28,6 +28,7 @@ def _hermetic(monkeypatch, tmp_path):
     """No test may depend on this machine's config, environment or sign-in:
     whose repositories count as "yours" is fixed here for every test."""
     monkeypatch.setenv("PR_TOOL_CONFIG", str(tmp_path / "no-such-config.json"))
+    monkeypatch.setenv("PR_TOOL_OWN_COMMITS", str(tmp_path / "own-commits.json"))
     monkeypatch.delenv("PR_TOOL_OWNERS", raising=False)
     monkeypatch.delenv("PR_TOOL_CODE_ROOT", raising=False)
     monkeypatch.setattr(pt, "OWNERS", ["octo-user", "Octo-Org"])
@@ -1497,14 +1498,19 @@ def test_approval_lands_only_the_commit_the_owner_saw(monkeypatch, capsys):
                   state="MERGED", merge_commit="c" * 40)
     calls = _land_env(monkeypatch, [pr, merged])
     assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
-                       approved=head[:7]) == 0
+                       approved=head) == 0
     assert ("pr", "merge") in [c[:2] for c in calls]
     # A push after the approval voids it: nothing is merged.
     calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY,
                                          head_oid="d" * 40)])
     assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
-                       approved=head[:9]) == 1
+                       approved=head) == 1
     assert calls == [] and "look again" in capsys.readouterr().out
+    # A short prefix can be ground; only the full SHA counts.
+    calls = _land_env(monkeypatch, [pr])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head[:12]) == 1
+    assert calls == []
     # Not a SHA at all.
     calls = _land_env(monkeypatch, [pr])
     assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
@@ -1514,19 +1520,65 @@ def test_approval_lands_only_the_commit_the_owner_saw(monkeypatch, capsys):
 
 def test_approval_survives_only_the_landers_own_commits():
     code, bump = "e" * 40, "f" * 40
-    pr = make(author="nick-p", head_oid=bump, code_oid=code)
-    assert pt.approval_matches(pr, code[:8])[0]       # bump came after it
+    pr = make(author="nick-p", head_oid=bump, code_oid=code, mech_oids=[bump])
+    # The bump's title and content prove nothing: its author may be anyone.
+    assert not pt.approval_matches(pr, code)[0]
+    pt.record_own_commits([bump])                     # this lander pushed it
+    assert pt.approval_matches(pr, code)[0]
     assert pt.approval_matches(pr, bump)[0]           # or approved the head
     assert not pt.approval_matches(make(author="nick-p", head_oid=bump,
                                         code_oid=bump), code)[0]
 
 
+def test_lander_commits_are_remembered_across_runs():
+    bump = "f" * 40
+    pt.record_own_commits([bump])
+    pt._CACHE.pop("own_commits")                      # a new run
+    assert bump in pt.own_commits()
+
+
 def test_approval_covers_every_proven_lander_commit():
-    # A -> B -> C, B and C proven mechanical: approving B still holds after C.
+    # A -> B -> C, the lander pushed B and C: approving B still holds after C.
     a, b, c = "a" * 40, "b" * 40, "c" * 40
     pr = make(author="nick-p", head_oid=c, code_oid=a, mech_oids=[b, c])
-    assert pt.approval_matches(pr, b[:9])[0]
+    pt.record_own_commits([c])
+    assert pt.approval_matches(pr, b)[0]
     assert not pt.approval_matches(pr, "d" * 40)[0]
+    # A merged PR can no longer change: its proven tail counts as it is.
+    merged = make(author="nick-p", head_oid=c, code_oid=a, mech_oids=[b, c],
+                  state="MERGED")
+    assert pt.approval_matches(merged, a)[0]
+
+
+def test_commit_list_behind_the_head_trusts_nothing_but_the_head():
+    a, b = "a" * 40, "b" * 40
+    t = NOW - timedelta(minutes=5)
+    node = _node([(a, "fix: thing", t), (b, "chore(release): v1.2.3", t)])
+    assert _pr(node, {b}).code_oid == a           # list current: a is the code
+    node["pullRequest"]["headRefOid"] = "c" * 40   # a push the list lags
+    pr = _pr(node, {b})
+    assert pr.code_oid == "" and pr.mech_oids == []
+    assert not pt.approval_matches(pr, a)[0]
+
+
+def test_bad_trust_config_is_an_error(monkeypatch, tmp_path):
+    cfg = tmp_path / "c.json"
+    cfg.write_text('{"trusted_bots": "copilot"}', encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    with pytest.raises(pt.ToolError):
+        pt.trusted_bots()
+    cfg.write_text('{"trusted_bots": []}', encoding="utf-8")
+    pt._CACHE.clear()
+    assert pt.trusted_bots() == set()
+
+
+def test_bot_autofix_draft_is_still_cleaned_up():
+    draft = make(author="coderabbitai", author_is_bot=True, draft=True,
+                 head="autofix/pr-5", autofix_source_state="MERGED")
+    assert pt.classify(draft, NOW, ME).state == "SUPERSEDED"
+    person = make(author="nick-p", draft=True, head="autofix/pr-5",
+                  autofix_source_state="MERGED")
+    assert pt.classify(person, NOW, ME).state == "EXTERNAL"
 
 
 def test_parse_proves_lander_commits_on_a_merged_pr_too(monkeypatch):
