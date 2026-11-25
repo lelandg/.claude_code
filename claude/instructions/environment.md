@@ -93,13 +93,16 @@ under a user prefix. Security tooling installed this way: `osv-scanner`,
 **Updates are yours to run.** Upgrading software that is already installed,
 on this machine and on the hosts you administer for the user: global npm
 tools, `claude update`, and apt upgrades where the login has sudo, plus a
-reboot when the machine is idle. Simulate first (`apt-get -s full-upgrade`):
-run `apt-get full-upgrade` only when that plan removes no package and
-installs no NEW one. Otherwise run plain `apt-get upgrade`, which neither
-removes nor adds packages, and hand the rest to the user with the plan: a
-package an upgrade would pull in as a new dependency is a new machine-scope
-install like any other. New machine-scope installs, removals, and sudoers,
-user, key, firewall or VPN changes still go to the user. Pin
+reboot when the machine is idle. The apt command you run is the one that
+can neither remove a package nor add one, whatever the machine's apt
+configuration says:
+`apt-get -o APT::Get::Upgrade-Allow-New=false upgrade --no-remove`.
+Anything it holds back needs `full-upgrade`, which can remove packages and
+pull in new ones: show the user the simulated plan
+(`apt-get -s full-upgrade`) and leave that run to them, because a package
+added as a new dependency is a new machine-scope install like any other.
+New machine-scope installs, removals, and sudoers, user, key, firewall or
+VPN changes still go to the user. Pin
 exact versions (`npm install -g <pkg>@<v>`), never `npm update -g`: with
 `min-release-age` it downgrades. Production hosts reboot only per their
 runbook. A scheduled routine is a good home for this.
