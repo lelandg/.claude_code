@@ -68,8 +68,9 @@ rule file names the line-up:
   `gpt-5.6` alias whatever the file says, and `max` effort without
   `--allow-max` (the user's approval).
 - The shared prompt is `tools/council/prompt.md` beside the runner. If the
-  runner is missing (the `.claude_code` checkout is behind), run the members
-  by hand with the per-CLI commands below and the same prompt.
+  runner is missing (the `.claude_code` checkout is behind), update the
+  checkout; failing that, run the members by hand with the per-CLI commands
+  below and a prompt of the same shape.
 
 What each CLI loads at start-up (measured 2026-11-25, headless, Windows):
 
@@ -276,7 +277,8 @@ Facts verified 2026-11-24 (agy 1.5.16 Windows, 1.5.13 WSL; both recipes
 below ran end to end from an untrusted directory and returned a review):
 
 - Model IDs carry the effort: `gemini-4-neon-low|medium|high|xhigh`. Reviews
-  use `gemini-4-neon-high`; `xhigh` only when `high` missed. There is no
+  use `gemini-4-neon-high`; `xhigh` for the adversarial pass (the `security`
+  council) and when `high` missed. There is no
   separate `max`/`ultra` for Neon. Check `agy models` if an ID is refused.
 - **Read-only = `--mode plan --sandbox`.** Tested: asked to create a file in
   that mode, it wrote only a plan into its own `~/.gemini/antigravity-cli/`
@@ -333,13 +335,19 @@ The dry run calls nobody. It writes `change.diff`, `commits.txt`, the filled
 `prompt.md`, a snapshot of the head commit (`tree/`) and copies of the rule
 files (`rules/`) to `<O>`, and prints each member's command. The prompt
 names those paths, so Neon needs only `<O>` and `<O>/tree`, as absolute
-paths (it cannot `cd`).
+paths (it cannot `cd`). agy starts inside the snapshot so the rule files it
+auto-loads are the snapshot's. The subshell and `Push-Location` /
+`Pop-Location` do that without moving your own shell; from an agent, set the
+tool call's working directory to `<O>/tree` instead of using `cd`.
 
-Without the runner at all (the `.claude_code` checkout is behind): in an
-empty folder write `git -C <repo> diff <remote>/<base>...HEAD` to
-`change.diff` and `git -C <repo> log --oneline <remote>/<base>..HEAD` to
-`commits.txt`, fill the `{{FIELDS}}` of `tools/council/prompt.md` by hand,
-and pass `--add-dir` for the repo, that folder, `~/.config/agents` and
+Without the runner at all (the `.claude_code` checkout predates
+`tools/council/` and cannot be updated): in an empty folder write
+`git -C <repo> diff <remote>/<base>...HEAD` to `change.diff` and
+`git -C <repo> log --oneline <remote>/<base>..HEAD` to `commits.txt`, write
+a self-contained read-only review prompt that names those two files, the
+base and head, and the rule files that bind the change (the `{{FIELDS}}` of
+`tools/council/prompt.md`, filled by hand, when you have that file), and
+pass `--add-dir` for the repo, that folder, `~/.config/agents` and
 `~/.claude/instructions`. `<base>` is the PR's real base branch (`main`,
 `master`, ...), never assumed; stop if the fetch or the diff fails, because
 an empty diff still produces an answer.
