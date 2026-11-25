@@ -50,14 +50,21 @@ plugin slash commands: they are user-only, and cloud and project sessions do
 not have them. Every call pins `-m gpt-6-astra` and an explicit effort
 (`-c model_reasoning_effort=<e>`); every review adds `-s read-only`.
 
-- **Review** (every PR, before it opens) — commit everything first, then:
-  `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high --ephemeral -o <result.md> --base origin/main`
-  (`--commit <sha>` reviews one commit; `--uncommitted` is a pre-commit look,
-  never the gate).
-- **Adversarial review** (auth, billing, data migration) — commit first, write
-  the prompt to a file (`<role>` adversarial, `<target>` branch and base,
-  `<focus>`, `<output>` severity + file:line + scenario + fix), then:
-  `codex exec -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C <repo> --ephemeral -o <result.md> - < <prompt.md>`
+- **Council review** (every PR, before it opens) — commit everything first,
+  then run the council from the Bash tool (background for a large diff):
+  `python /path/to/.claude_code/tools/council/council.py review --repo <repo> --purpose "<PR title and first paragraph>"`
+  The seated members come from `~/.config/agents/council.toml` (default
+  Astra and Neon; `council.py list` shows them). The base is the remote's
+  default branch unless `--base` says otherwise. Exit 10 means a member did
+  not review: read `summary.md` in the results folder, name that member in
+  the PR body, and go on.
+- **Adversarial pass** (auth, billing, data migration) — the same command
+  with `--council security --adversarial`. That council's members run at
+  `xhigh` (the guide's ladder: adversarial depth where failure is expensive).
+- **By hand** (the runner is missing, or one member needs a re-run) — the
+  per-CLI commands are in the guide: "Reaching Codex from any agent CLI",
+  "Neon reviews through agy", "Copilot reviews". An empty result with exit 0
+  is a failed review, not a clean one.
 - **Rescue** (investigation or fix delegation; it writes) — clean
   `git status` first, task written to a file, then:
   `codex exec -m gpt-6-astra -c model_reasoning_effort=<effort> -s workspace-write -C <repo> --ephemeral -o <result.md> - < <task.md>`
@@ -67,26 +74,25 @@ not have them. Every call pins `-m gpt-6-astra` and an explicit effort
   the user's approval. Astra rejects `none` and `minimal`.
 - Long or multi-file runs: Bash `run_in_background`, then read `<result.md>`.
 - A `401` means `codex login` is needed; procedure in the guide.
-- Leave the plugin's stop-review gate disabled.
+- Leave the plugin's stop-review gate disabled; reviews run at commit/PR
+  boundaries.
+- Spawned Claude agents: Haiku = mechanical, Sonnet = integration and
+  low-risk review, Fable/Opus = prod-gating and orchestration.
 
-### Sol is REVIEW-ONLY — CRITICAL (standing policy; lift it deliberately)
+### Sol — agents never run it (standing policy; lift it deliberately)
 
-(Lives here rather than in the shared AGENTS.md: the rule governs how Claude
-Code invokes Codex, so it is a Claude mechanism.)
+No agent runs `gpt-5.6-sol` or the bare `gpt-5.6` alias (= Sol), review or
+not. The ban is in the shared Security section; Sol has a record of
+destructive autonomous action elsewhere (deleted home dirs, intrusion into
+other systems in pursuit of a goal).
 
-`gpt-5.6-sol` has a record of destructive autonomous action elsewhere
-(deleted home dirs, intrusion into other systems in pursuit of a goal). So:
-
-- Sol runs **only** as a read-only review (`codex exec -s read-only ...`,
-  review or adversarial) — never with `-s workspace-write`,
-  `danger-full-access`, `--dangerously-bypass-approvals-and-sandbox`, or
-  anything else that can write.
-- **Commit everything first** — clean `git status` before any Sol run; review
-  the committed work (`--base <ref>` for branch review).
-- Agents do not run Sol: the `block-unpinned-codex-rescue` hookify rule denies
-  any `codex exec` naming `gpt-5.6-sol` or the bare `gpt-5.6` alias, review or
-  not. A Sol review is the user's to run in their own terminal, with the review
-  command above and `-m gpt-5.6-sol`. Never the bare `gpt-5.6` alias (= Sol).
+- A Sol review is the user's to run in their own terminal: read-only
+  (`codex exec -s read-only ... -m gpt-5.6-sol`), on committed work with a
+  clean `git status`, never with a mode that can write.
+- The council runner refuses any Sol model id at load time. Where the
+  `block-unpinned-codex-rescue` hookify rule is armed it also denies any
+  `codex exec` naming Sol or the bare alias; where no hook enforces it, the
+  rule is yours to keep.
 
 ## Custom skill triggers
 

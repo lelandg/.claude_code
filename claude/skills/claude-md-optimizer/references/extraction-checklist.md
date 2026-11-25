@@ -63,9 +63,13 @@ are the classic skill-migration range.
 
 Brief (1–2 lines), plain backticked path, just enough context to know when to
 read it. Shared-file caveats (files also read by Codex/Copilot/agy/Pi): no
-`@`-prefixed lines (Claude/Gemini auto-inline them), no skill-name-only
-pointers (other CLIs can't invoke skills — name the underlying script/file),
-and remember Copilot needs `--add-dir` (alias) to read outside the cwd.
+`@`-prefixed lines (Claude Code and Gemini CLI inline them; Codex, agy and
+Copilot do not follow them; the exception is `@AGENTS.md` as line 1 of a
+repo's `CLAUDE.md` and `GEMINI.md`), no skill-name-only pointers (other CLIs can't invoke skills —
+name the underlying script/file), and remember Copilot needs `--add-dir`
+(alias) to read outside the cwd. Size cap: agy cuts any single rule file at
+22,035 bytes (working-tree bytes, so CRLF counts; measured 2026-11-25), so
+keep every `AGENTS.md` and `GEMINI.md` under 21 KB.
 
 ## Interface-over-example conversions
 
@@ -88,6 +92,7 @@ and remember Copilot needs `--add-dir` (alias) to read outside the cwd.
 
 - [ ] Before/after token counts reported
 - [ ] Every pointer target exists on disk
+- [ ] Every `AGENTS.md` / `GEMINI.md` is under 21 KB (`wc -c`; agy cuts at 22,035 bytes)
 - [ ] No rule now exists in two layers (grep the changed value everywhere)
 - [ ] Hard (a)-class rules survived verbatim
 - [ ] `/doctor` run and reconciled

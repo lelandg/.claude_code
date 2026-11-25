@@ -95,7 +95,7 @@ a PR title or a file; the lander assigns it at merge.
 | `THREADS` | unresolved review threads | fix or answer each, then resolve it |
 | `FAILING` | a check failed, or one never reported on the head within 30 min | fix and push, or re-run it |
 | `CONFLICT` | conflicts with the base branch | merge base in, resolve |
-| `REVIEW` | auth / billing / migration paths, no adversarial review recorded | run it, add the line `Adversarial review: <result>` to the PR body |
+| `REVIEW` | auth / billing / migration paths, no adversarial review recorded | run the review council's adversarial pass (read-only; `~/.claude/instructions/model-delegation.md`, "Review council"), then add the line `Adversarial review: <result>` to the PR body with its real result |
 | `BLOCKED` | a branch rule refuses the merge | read `gh pr merge` output |
 | `SUPERSEDED` | autofix draft whose source PR merged or closed | `sweep --apply` closes it |
 | `AUTOFIX` | autofix draft, source still open | fold into the source, or close |
@@ -165,6 +165,16 @@ version bump) and `SENSITIVE` (paths that need the adversarial review) are
 constants at the top of `pr_tool.py`. Change behavior there, not in the logic
 below.
 
+`REVIEWER_BOTS` and `REVIEWER_CHECKS` list the automated reviewers that post
+on GitHub (CodeRabbit, GrepTile and the like). They are not the review
+council and do not close it: the council
+(`~/.claude/instructions/model-delegation.md`, "Review council") reviews the
+committed branch before the PR opens, and its record is one
+`Council review: <member> ...` line per member in the PR body. The lander
+does not read those lines; of the pre-PR reviews it checks only the
+`Adversarial review:` line on a sensitive PR. A council member that could
+not run is recorded as `owed: <reason>` and never holds a PR back.
+
 ## Gotchas
 
 - **Every verdict is about the current head, not the PR.** Right after a push
@@ -178,8 +188,11 @@ below.
   "review" with an empty body (GitHub files every reply in a review thread
   as one, on the head); and a skipped or neutral reviewer check, which is
   the reviewer saying it did NOT review that commit (CodeRabbit reports
-  "Review paused" that way: re-trigger it with `@coderabbitai review`). It
-  is safe to run `land --apply` straight after pushing a fix; it waits.
+  "Review paused" that way: comment `@coderabbitai resume`; for a failed,
+  cancelled or missing review on the head, comment `@coderabbitai full
+  review`. A plain `@coderabbitai review` is incremental and leaves an
+  already-recorded head as it is). It is safe to run `land --apply` straight
+  after pushing a fix; it waits.
 - **A reviewer that skips the whole PR is not owed a review.** CodeRabbit on
   a Dependabot PR reports "Review skipped: author ignored by configuration"
   on every commit; that PR lands on its checks. The rule below applies only
