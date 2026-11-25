@@ -42,7 +42,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tarfile
 import tempfile
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
@@ -79,9 +78,11 @@ DEFAULT_TIMEOUT = 1800
 # Root-level paths an agent CLI reads by itself at start-up: instructions,
 # settings (hooks), and MCP server definitions. In the review snapshot these
 # are the base branch's versions.
-AUTOLOADED = ("AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md",
-              ".claude/settings.json", ".claude/settings.local.json", ".mcp.json",
-              ".vscode/mcp.json", ".codex", ".gemini", ".copilot")
+AUTOLOADED = ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md",
+              ".github/copilot-instructions.md", ".claude/settings.json", ".claude/settings.local.json",
+              ".mcp.json", ".vscode/mcp.json", ".codex", ".gemini", ".copilot")
+# Folders the runner itself creates in the results folder; a member cannot be named after one.
+RESERVED_NAMES = {"tree", "rules", "changed-autoloaded"}
 RULE_NAMES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
 ADVERSARIAL = (
     "Adversarial pass. Assume the change is wrong and look for the way it fails: a caller who is "
@@ -227,15 +228,16 @@ def _names(value, where: str) -> list[str]:
 
 
 def _member(name: str, raw, where: str) -> Member:
-    if not NAME.fullmatch(name):
-        raise CouncilError(f"{where}: member name {name!r} must be lowercase letters, digits, - or _")
+    if not NAME.fullmatch(name) or name in RESERVED_NAMES:
+        raise CouncilError(f"{where}: member name {name!r} must be lowercase letters, digits, - or _, "
+                           f"and not one of {', '.join(sorted(RESERVED_NAMES))}")
     if not isinstance(raw, dict):
         raise CouncilError(f"{where}: [members.{name}] must be a table")
     unknown = set(raw) - MEMBER_KEYS
     if unknown:
         raise CouncilError(f"{where}: member {name!r} has unknown keys: {', '.join(sorted(unknown))}")
     cli, model = raw.get("cli"), raw.get("model")
-    if cli not in DRIVERS:
+    if not isinstance(cli, str) or cli not in DRIVERS:
         raise CouncilError(f"{where}: member {name!r} has cli {cli!r}; known CLIs: {', '.join(sorted(DRIVERS))}")
     if not isinstance(model, str) or not MODEL.fullmatch(model):
         raise CouncilError(f"{where}: member {name!r} needs a plain model id")
@@ -406,15 +408,34 @@ def collect_change(repo: Path, base: str | None, head: str, shared: Path) -> dic
 
 
 def _export(repo: Path, rev: str, paths: list[str], dest: Path, scratch: Path) -> None:
-    """Extract paths (all of them when empty) of one commit into dest."""
-    tar = scratch / "export.tar"
-    proc = subprocess.run(["git", "-C", str(repo), "archive", "--format=tar", "-o", str(tar), rev, "--", *paths],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode != 0:
-        raise CouncilError(f"git archive failed: {proc.stderr.strip()}")
-    with tarfile.open(tar) as tf:
-        tf.extractall(dest, filter="data")
-    tar.unlink()
+    """Write the files of one commit (all of them, or those under paths) into dest.
+
+    Uses a throwaway index and checkout-index, not git archive: archive leaves
+    out export-ignore paths, and the reviewers must see every tracked file.
+    Symlinks are written as small text files holding their target, so a link
+    in the change cannot point a reviewer outside the snapshot.
+    """
+    env = dict(os.environ, GIT_INDEX_FILE=str(scratch / "snapshot.index"))
+    base = ["git", "-C", str(repo), "-c", "core.symlinks=false"]
+
+    def run(*args: str, stdin: str | None = None) -> str:
+        proc = subprocess.run([*base, *args], input=stdin, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env)
+        if proc.returncode != 0:
+            raise CouncilError(f"git {args[0]} failed while exporting {rev[:12]}: {proc.stderr.strip()}")
+        return proc.stdout
+
+    try:
+        run("read-tree", rev)
+        prefix = "--prefix=" + dest.as_posix() + "/"
+        if paths:
+            names = run("ls-files", "-z", "--", *paths)
+            if names:
+                run("checkout-index", prefix, "-z", "--stdin", stdin=names)
+        else:
+            run("checkout-index", prefix, "-a")
+    finally:
+        (scratch / "snapshot.index").unlink(missing_ok=True)
 
 
 def _tracked(repo: Path, rev: str, path: str) -> bool:
@@ -432,20 +453,24 @@ def snapshot(repo: Path, change: dict, shared: Path) -> tuple[Path, list[str]]:
     tree.mkdir()
     head, base = change["head_sha"], change["base_tip"]
     _export(repo, head, [], tree, shared)
+    # What the change itself edited (from the merge base, so a base branch that
+    # moved on is not blamed on the change). Names are compared without case:
+    # on Windows and macOS "agents.md" is the file a CLI opens as AGENTS.md.
+    changed = git(repo, "diff", "--name-only", "-z", change["base_sha"], head).split("\0")
+    lowered = [c.lower() for c in changed if c]
     touched = [p for p in AUTOLOADED
-               if git(repo, "diff", "--name-only", base, head, "--", p).strip()]
+               if any(c == p.lower() or c.startswith(p.lower() + "/") for c in lowered)]
     if touched:
         kept = shared / "changed-autoloaded"
         kept.mkdir()
-        at_head = [p for p in touched if _tracked(repo, head, p)]
-        if at_head:
-            _export(repo, head, at_head, kept, shared)
-        for p in touched:
-            target = tree / p
-            if target.is_dir():
-                shutil.rmtree(target)
-            elif target.exists():
-                target.unlink()
+        wanted = {p.lower() for p in touched}
+        for entry in list(tree.iterdir()) + [e for d in (".github", ".claude", ".vscode")
+                                             if (tree / d).is_dir() for e in (tree / d).iterdir()]:
+            rel = entry.relative_to(tree).as_posix()
+            if rel.lower() in wanted:            # move the head's version out, whatever its case
+                target = kept / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(entry), str(target))
         at_base = [p for p in touched if _tracked(repo, base, p)]
         if at_base:
             _export(repo, base, at_base, tree, shared)
@@ -537,18 +562,19 @@ def resolve(argv: list[str]) -> list[str]:
     if exe is None:
         raise FileNotFoundError(argv[0])
     low = exe.lower()
-    if low.endswith((".cmd", ".bat")) and Path(exe).with_suffix(".ps1").is_file():
-        # npm installs both shims; PATHEXT finds the .cmd first. PowerShell
-        # passes arguments through intact, cmd.exe does not.
-        exe = str(Path(exe).with_suffix(".ps1"))
-        low = exe.lower()
+    if low.endswith((".cmd", ".bat")) and any(CMD_UNSAFE.search(a) for a in argv[1:]):
+        # cmd.exe re-parses the command line and does not honour the quoting
+        # Python applies, so text from a commit could become a command. npm
+        # installs a .ps1 beside the .cmd; PowerShell 7 passes arguments intact
+        # (Windows PowerShell 5.1 does not, so it is not used).
+        ps1, pwsh = Path(exe).with_suffix(".ps1"), shutil.which("pwsh")
+        if not (ps1.is_file() and pwsh):
+            raise CouncilError(f"{argv[0]} is a .cmd shim and an argument cannot pass through cmd.exe safely "
+                               "(a native executable, or the .ps1 shim plus PowerShell 7, is needed)")
+        return [pwsh, "-NoProfile", "-NonInteractive", "-File", str(ps1), *argv[1:]]
     if low.endswith(".ps1"):
         shell = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
         return [shell, "-NoProfile", "-NonInteractive", "-File", exe, *argv[1:]]
-    if low.endswith((".cmd", ".bat")) and any(CMD_UNSAFE.search(a) for a in argv[1:]):
-        # cmd.exe re-parses the command line and does not honour the quoting
-        # Python applies, so text from a commit could become a command.
-        raise CouncilError(f"{argv[0]} is a .cmd shim and an argument cannot pass through cmd.exe safely")
     return [exe, *argv[1:]]
 
 
@@ -590,7 +616,7 @@ def parse_answer(text: str) -> dict | None:
     cut off: that is no answer, never a reason to fall back to an earlier one.
     """
     decoder = json.JSONDecoder(strict=False)
-    found, pos, unfinished_at = None, 0, -1
+    found, pos, failed = None, 0, []
     while True:
         start = text.find("{", pos)
         if start == -1:
@@ -598,15 +624,21 @@ def parse_answer(text: str) -> dict | None:
         try:
             obj, end = decoder.raw_decode(text, start)
         except ValueError:
-            unfinished_at = start
+            failed.append(start)
             pos = start + 1
             continue
         if isinstance(obj, dict) and "verdict" in obj:
-            found = (obj, end)
+            found = (obj, start, end)
         pos = end
-    if found is None or unfinished_at > found[1]:
+    if found is None:
         return None
-    return found[0]
+    obj, start, end = found
+    for f in failed:
+        if f >= end:                                  # a later object was started and cut off
+            return None
+        if f < start and "}" not in text[f:start]:    # the answer sits inside an unclosed object
+            return None
+    return obj
 
 
 def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, str, dict | None]:
@@ -657,8 +689,10 @@ def run_member(job: Job, head_sha: str, runner=execute) -> dict:
     code, text, err, early = None, "", "", ""
     try:
         code, text, err = runner(inv, m.timeout)
-        if inv.result_file is not None and inv.result_file.is_file():
-            text = inv.result_file.read_text(encoding="utf-8", errors="replace")
+        if inv.result_file is not None:
+            # stdout of such a CLI is its transcript, never the answer
+            text = inv.result_file.read_text(encoding="utf-8", errors="replace") \
+                if inv.result_file.is_file() else ""
         (job.out / "result.md").write_text(text, encoding="utf-8")
         (job.out / "err.txt").write_text(err, encoding="utf-8")
     except FileNotFoundError:
@@ -698,6 +732,10 @@ def reserve(out: Path) -> None:
     given the same folder, exactly one gets it.
     """
     out.mkdir(parents=True, exist_ok=True)
+    inside = subprocess.run(["git", "-C", str(out), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if inside.returncode == 0:
+        raise CouncilError(f"results folder {out} is inside a git checkout ({inside.stdout.strip()}); "
+                           "the reviewers' CLIs would load that checkout's rule files. Use a folder outside it")
     if (out / ".council-run").exists():
         raise CouncilError(f"results folder is already in use or was used before: {out} "
                            "(each run needs its own)")
@@ -826,7 +864,7 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
             prefix="council-" + datetime.now().strftime("%Y%m%d-%H%M%S-")))
         summary = review(cfg, seated, repo, args.base, args.head, out, focus,
                          _text_arg(args.purpose), runner, args.dry_run)
-    except (CouncilError, OSError, tarfile.TarError) as exc:
+    except (CouncilError, OSError) as exc:
         print(f"council: {exc}", file=sys.stderr)
         return EXIT_ERROR
     print(render(summary))

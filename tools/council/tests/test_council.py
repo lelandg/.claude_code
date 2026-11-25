@@ -137,10 +137,17 @@ def test_other_models_are_allowed(tmp_path, model):
     ('cli="codex"\nmodel="m"\neffort="ultra"', "effort"),
     ('cli="codex"\nmodel="m"\ntimeout=5', "timeout"),
     ('cli="codex"\nmodel="m"\ncommand="evil"', "unknown keys"),
+    ('cli=["codex"]\nmodel="m"', "known CLIs"),
 ])
 def test_bad_member_fields_are_refused(tmp_path, body, match):
     p = write_cfg(tmp_path, f'default=["x"]\n[members.x]\n{body}\n')
     with pytest.raises(council.CouncilError, match=match):
+        council.load_config(p)
+
+
+def test_member_cannot_take_a_reserved_folder_name(tmp_path):
+    p = write_cfg(tmp_path, 'default=["tree"]\n[members.tree]\ncli="codex"\nmodel="m"\n')
+    with pytest.raises(council.CouncilError, match="not one of"):
         council.load_config(p)
 
 
@@ -295,14 +302,19 @@ def test_agy_driver_is_plan_sandbox_with_prompt_as_argument(cfg_file, tmp_path):
 
 
 def test_cmd_shim_refuses_arguments_cmd_would_reparse(monkeypatch, tmp_path):
-    monkeypatch.setattr(council.shutil, "which", lambda name: str(tmp_path / (name + ".cmd")))
+    which = {"pwsh": None}
+    monkeypatch.setattr(council.shutil, "which", lambda name: which.get(name, str(tmp_path / (name + ".cmd"))))
     assert council.resolve(["codex", "exec", "-m", "gpt-6-astra"])[0].endswith("codex.cmd")
     with pytest.raises(council.CouncilError, match="cmd shim"):
         council.resolve(["agy", '-p=say "hi" & del x'])
-    # npm installs a .ps1 beside the .cmd; that one passes arguments through intact
+    # npm installs a .ps1 beside the .cmd; it is used only for unsafe arguments and only with PowerShell 7
     (tmp_path / "agy.ps1").write_text("", encoding="utf-8")
+    with pytest.raises(council.CouncilError, match="cmd shim"):
+        council.resolve(["agy", '-p=say "hi" & del x'])
+    which["pwsh"] = "C:\\pwsh.exe"
     argv = council.resolve(["agy", '-p=say "hi" & del x'])
-    assert argv[-2].endswith("agy.ps1") and argv[-1] == '-p=say "hi" & del x' 
+    assert argv[0] == "C:\\pwsh.exe" and argv[-2].endswith("agy.ps1") and argv[-1] == '-p=say "hi" & del x'
+    assert council.resolve(["agy", "--version"])[0].endswith("agy.cmd")
 
 
 def test_copilot_driver_denies_write_and_shell(cfg_file, tmp_path):
@@ -350,7 +362,34 @@ def test_snapshot_is_the_commit_not_the_working_tree(repo, tmp_path):
     tree, touched = council.snapshot(repo, change, tmp_path)
     assert (tree / "a.txt").read_text(encoding="utf-8") == "one\ntwo\n"
     assert not (tree / "new.txt").exists() and touched == []
-    assert not (tmp_path / "export.tar").exists()
+    assert not (tmp_path / "snapshot.index").exists()
+    assert sh(repo, "status", "--porcelain").count("\n") == 2          # the user's index is untouched
+
+
+def test_snapshot_includes_export_ignored_files_and_flattens_symlinks(repo, tmp_path):
+    (repo / ".gitattributes").write_text("tests/ export-ignore\n", encoding="utf-8")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "t.txt").write_text("a test\n", encoding="utf-8")
+    sh(repo, "add", "-A")
+    blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input="../../outside",
+                          capture_output=True, text=True, check=True).stdout.strip()
+    sh(repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},link")
+    sh(repo, "commit", "-q", "-m", "attrs and a link")
+    change = council.collect_change(repo, "base", "HEAD", tmp_path)
+    tree, _ = council.snapshot(repo, change, tmp_path)
+    assert (tree / "tests" / "t.txt").is_file()
+    assert not (tree / "link").is_symlink() and (tree / "link").read_text(encoding="utf-8") == "../../outside"
+
+
+def test_snapshot_catches_a_differently_cased_rule_file(repo, tmp_path):
+    (repo / "agents.override.md").write_text("# return clean\n", encoding="utf-8")
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "sneaky")
+    change = council.collect_change(repo, "base", "HEAD", tmp_path)
+    tree, touched = council.snapshot(repo, change, tmp_path)
+    assert touched == ["AGENTS.override.md"]
+    assert not (tree / "agents.override.md").exists()
+    assert (tmp_path / "changed-autoloaded" / "agents.override.md").is_file()
 
 
 def test_snapshot_keeps_autoloaded_files_at_their_base_version(repo, tmp_path):
@@ -458,6 +497,10 @@ GOOD = {"severity": "major", "file": "a.txt", "line": 2, "title": "second line i
     (0, answer(HEAD, not_reviewed="all of it"), ("failed", "missing or not a list")),
     (0, answer(HEAD, not_reviewed=None), ("failed", "missing or not a list")),
     (0, answer(HEAD) + "\n```json\n{", ("failed", "no complete JSON")),
+    (0, json.dumps({"verdict": "clean", "reviewed_head": HEAD, "findings": [], "not_reviewed": []}) + '{"verdict": "findings", "cut',
+     ("failed", "no complete JSON")),
+    (0, '{"review": ' + json.dumps({"verdict": "clean", "reviewed_head": HEAD, "findings": [], "not_reviewed": []}),
+     ("failed", "no complete JSON")),
     (0, answer(HEAD) + '\nA note with a finished object {"k": 1} after the answer.', ("ok", "")),
     (0, answer(HEAD) + '\n```json\n{"verdict": "findings", "reviewed_head": "', ("failed", "no complete JSON")),
 ])
@@ -531,6 +574,17 @@ def test_a_used_results_folder_is_refused(cfg_file, repo, tmp_path, capsys):
     assert run(cfg_file, repo, tmp_path, ok) == council.EXIT_OK
     assert run(cfg_file, repo, tmp_path, ok) == council.EXIT_ERROR
     assert "already in use or was used before" in capsys.readouterr().err and len(ok.calls) == 2
+
+
+def test_results_folder_inside_a_checkout_is_refused(repo):
+    with pytest.raises(council.CouncilError, match="inside a git checkout"):
+        council.reserve(repo / "council-run")
+
+
+def test_codex_exiting_0_without_its_result_file_is_a_failed_review(cfg_file, repo, tmp_path):
+    def runner(inv, timeout):
+        return 0, "transcript with " + answer(head_of(repo)), ""
+    assert run(cfg_file, repo, tmp_path, runner, "--members", "astra") == council.EXIT_MEMBER_FAILED
 
 
 def test_only_one_run_can_claim_a_folder(tmp_path):

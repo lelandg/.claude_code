@@ -95,15 +95,16 @@ object so the runner can tell a clean review from a truncated one.
 ## Tests
 
 ```bash
-cd tools/council && python -m pytest -q
+python -m pytest -q tools/council/tests
 ```
 
 ## What the reviewers can read
 
 - `tree/` is an export of the head commit. Agent CLIs load some files by
-  themselves at start-up: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
-  `.github/copilot-instructions.md`, `.claude/settings*.json`, `.mcp.json`,
-  `.vscode/mcp.json`, `.codex/`, `.gemini/`, `.copilot/`. In the snapshot
+  themselves at start-up: `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`,
+  `CLAUDE.local.md`, `GEMINI.md`, `.github/copilot-instructions.md`,
+  `.claude/settings*.json`, `.mcp.json`, `.vscode/mcp.json`, `.codex/`,
+  `.gemini/`, `.copilot/` (matched without regard to case). In the snapshot
   those root-level paths hold the **base branch's** versions, so a change
   cannot rewrite its reviewers' instructions, add a hook, or add an MCP
   server. What the change proposes for them is in `changed-autoloaded/` and
@@ -122,8 +123,27 @@ These are the CLIs' own controls: the runner cannot make a CLI safer than its
 read-only mode is. agy and Copilot have no switch that turns off every
 user-configured MCP server; they rely on the tool allow-list.
 
-On Windows a `.cmd` shim is refused when an argument could be re-parsed by
-`cmd.exe`; the `.ps1` shim npm installs beside it is used instead when it
-exists.
+On Windows a `.cmd` shim runs when its arguments are plain. When one could be
+re-parsed by `cmd.exe` (the agy prompt always can), the `.ps1` shim npm
+installs beside it is used through PowerShell 7; without both, that member
+fails with a message saying so.
+
+The results folder must be outside any git checkout: a CLI started below a
+checkout loads that checkout's rule files from the parent folders.
+
+## Known limits
+
+- The snapshot swaps root-level auto-loaded files only. A nested `AGENTS.md`
+  in a subfolder is the head's version.
+- Symlinks are written as text files holding their target, so a reviewer sees
+  that a link exists but cannot follow it.
+- The Claude member still runs the hooks in *your* user settings (not the
+  repository's). A hook that writes into its working folder writes into the
+  snapshot the members share.
+- A member with findings may also list material it did not read; that is
+  shown under the table and does not fail the member. Only a `clean` verdict
+  with unread material is rejected.
+- Findings are checked for severity, file, title and detail; line and quoted
+  evidence are asked for but not enforced.
 
 The tests use temporary repositories and a fake runner. They never call a model.
