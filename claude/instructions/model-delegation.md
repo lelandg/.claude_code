@@ -226,9 +226,11 @@ cloud and project sessions do not have them. Every call pins
 `-m gpt-6-astra` and an explicit `-c model_reasoning_effort=<e>`.
 
 - **Council review** — the runner above builds this for the `codex` members:
-  `codex exec -m gpt-6-astra -c model_reasoning_effort=<effort> -s read-only -C <repo> --ephemeral -o <result.md> - < <prompt.md>`
+  `codex exec -m gpt-6-astra -c model_reasoning_effort=<effort> -c mcp_servers={} -s read-only -C <repo> --skip-git-repo-check --ephemeral -o <result.md> - < <prompt.md>`
   (generic `exec` with the shared prompt, so Astra answers the same question
-  in the same shape as the other members). `<effort>` is `high`, or `xhigh`
+  in the same shape as the other members; `-c mcp_servers={}` because an MCP
+  server is a write channel the file sandbox does not cover; `<repo>` is the
+  run's `tree/` snapshot). `<effort>` is `high`, or `xhigh`
   for the adversarial pass.
 - **Quick manual review** — commit first, then the built-in reviewer:
   `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high --ephemeral -o <result.md> --base <remote>/<base>`
@@ -298,33 +300,49 @@ below ran end to end from an untrusted directory and returned a review):
   a file.
 - agy has no `-C`: list every directory it may read with `--add-dir`.
 
-Procedure — commit first, then (bash / WSL):
+Procedure — commit first. Let the runner prepare the folder, then run the
+one member by hand. `O` must be a new, empty folder outside any git checkout;
+add `--base <remote>/<branch>` when the PR's base is not the remote's default
+branch. Bash / WSL:
 
 ```bash
-R=/abs/path/to/repo; O=/abs/scratch/neon; mkdir -p "$O"
-git -C "$R" fetch origin && git -C "$R" diff origin/main...HEAD > "$O/review.diff"
+R=/abs/path/to/repo; O=/abs/scratch/neon-run
+python3 /path/to/.claude_code/tools/council/council.py review --repo "$R" --members neon --dry-run --out "$O"
+# stop here unless that exited 0
 S='{"permissions":{"allow":["read_file(*)","list_dir(*)"]}}'
-agy --model gemini-4-neon-high --mode plan --sandbox --settings "$S" --add-dir "$R" --add-dir "$O" -p="$(cat "$O/prompt.md")" > "$O/result.md" 2> "$O/err.txt"
-test -s "$O/result.md" || { echo "Neon review FAILED:"; cat "$O/err.txt"; }
+mkdir -p "$O/neon"
+( cd "$O/tree" && agy --model gemini-4-neon-high --mode plan --sandbox --settings "$S" --add-dir "$O/tree" --add-dir "$O" -p="$(cat "$O/prompt.md")" > "$O/neon/result.md" 2> "$O/neon/err.txt" )
+test -s "$O/neon/result.md" || { echo "Neon review FAILED:"; cat "$O/neon/err.txt"; }
 ```
 
 PowerShell (Windows):
 
 ```powershell
-$R = 'D:\abs\path\to\repo'; $O = 'C:\abs\scratch\neon'; New-Item -ItemType Directory -Force $O | Out-Null
-git -C $R fetch origin; git -C $R diff origin/main...HEAD > "$O\review.diff"
+$R = 'D:\abs\path\to\repo'; $O = 'C:\abs\scratch\neon-run'
+python C:\path\to\.claude_code\tools\council\council.py review --repo $R --members neon --dry-run --out $O
+# stop here unless $LASTEXITCODE is 0
 $S = '{"permissions":{"allow":["read_file(*)","list_dir(*)"]}}'
-agy --model gemini-4-neon-high --mode plan --sandbox --settings $S --add-dir $R --add-dir $O -p="$(Get-Content -Raw "$O\prompt.md")" > "$O\result.md" 2> "$O\err.txt"
-if ((Get-Item "$O\result.md").Length -eq 0) { 'Neon review FAILED:'; Get-Content "$O\err.txt" }
+New-Item -ItemType Directory -Force "$O\neon" | Out-Null
+Push-Location "$O\tree"
+agy --model gemini-4-neon-high --mode plan --sandbox --settings $S --add-dir "$O\tree" --add-dir $O -p="$(Get-Content -Raw "$O\prompt.md")" > "$O\neon\result.md" 2> "$O\neon\err.txt"
+Pop-Location
+if ((Get-Item "$O\neon\result.md").Length -eq 0) { 'Neon review FAILED:'; Get-Content "$O\neon\err.txt" }
 ```
 
-`prompt.md` is the shared council prompt (`tools/council/prompt.md` in the
-config repo) with its
-`{{FIELDS}}` filled in; `council.py review --dry-run --out <O>` writes the
-filled prompt and the diff to `<O>` without calling anyone. Use absolute
-paths, since Neon cannot `cd`, and add `--add-dir` for
-`~/.config/agents` and `~/.claude/instructions` so it can read the rule files
-the prompt names.
+The dry run calls nobody. It writes `change.diff`, `commits.txt`, the filled
+`prompt.md`, a snapshot of the head commit (`tree/`) and copies of the rule
+files (`rules/`) to `<O>`, and prints each member's command. The prompt
+names those paths, so Neon needs only `<O>` and `<O>/tree`, as absolute
+paths (it cannot `cd`).
+
+Without the runner at all (the `.claude_code` checkout is behind): in an
+empty folder write `git -C <repo> diff <remote>/<base>...HEAD` to
+`change.diff` and `git -C <repo> log --oneline <remote>/<base>..HEAD` to
+`commits.txt`, fill the `{{FIELDS}}` of `tools/council/prompt.md` by hand,
+and pass `--add-dir` for the repo, that folder, `~/.config/agents` and
+`~/.claude/instructions`. `<base>` is the PR's real base branch (`main`,
+`master`, ...), never assumed; stop if the fetch or the diff fails, because
+an empty diff still produces an answer.
 
 Long reviews: run in the background (Claude Code: Bash `run_in_background`)
 and read `result.md`. If agy is missing, not signed in, or the model is
@@ -340,8 +358,10 @@ Copilot is a defined council member (`copilot`) that is not seated by
 default. Facts from the live test:
 
 - Headless, read-only, prompt on stdin:
-  `copilot -C <repo> -s --no-color --no-auto-update --no-ask-user --disable-builtin-mcps --stream off --model <model> --reasoning-effort <effort> --deny-tool=write --deny-tool=shell --deny-tool=memory --allow-tool=read --add-dir <results folder> < <prompt.md> > <result.md> 2> <err.txt>`
-  A write probe in this mode was refused.
+  `copilot -C <repo> -s --no-color --no-auto-update --no-ask-user --disable-builtin-mcps --no-custom-instructions --stream off --model <model> --reasoning-effort <effort> --deny-tool=write --deny-tool=shell --deny-tool=memory --allow-tool=read --add-dir <results folder> < <prompt.md> > <result.md> 2> <err.txt>`
+  A write probe in this mode was refused. Unset `COPILOT_ALLOW_ALL`,
+  `COPILOT_ALLOW_ALL_TOOLS` and `COPILOT_ALLOW_ALL_PATHS` for the call: an
+  inherited allow-all undoes the deny rules (the runner drops them).
 - It serves its own model catalog. On this account `gpt-6-astra`, the Opus
   and Fable models and Gemini 4 Neon are **not** available; usable ids
   include `gpt-6.1-terra`, `claude-sonnet-5.5`, `gemini-4-hydrogen`,

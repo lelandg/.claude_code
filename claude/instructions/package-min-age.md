@@ -1,7 +1,8 @@
 # Vulnerability fixes vs. minimum package age — per-manager enforcement
 
 Two rules live here, in priority order. The rule text itself is in
-`~/.config/agents/AGENTS.md`; this file holds the per-manager mechanics.
+`~/.claude/instructions/security-scanning.md` (in brief in
+`~/.config/agents/AGENTS.md`); this file holds the per-manager mechanics.
 Facts below were verified against primary sources on 2026-10-23.
 
 ## Why both exist
@@ -50,8 +51,8 @@ a known attack. So, for the override:
 No fixed version available? Say so explicitly and name the mitigation (drop the
 dep, pin away from the vulnerable path, or one of the tiered responses). That is
 the only acceptable "still vulnerable" outcome. Which response applies is set by
-the four tiers in the global `~/.config/agents/AGENTS.md` ("Advisory with no fix
-available"), decided by traced reachability and impact:
+the four tiers in `~/.claude/instructions/security-scanning.md` ("Advisory
+with no fix available"), decided by traced reachability and impact:
 confidentiality/integrity impact that is either reachable from untrusted input
 or happens without untrusted input → disable or block the feature (the user decides
 in production); reachable + DoS only → input limits and timeouts, feature stays

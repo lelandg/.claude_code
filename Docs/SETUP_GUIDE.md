@@ -55,7 +55,7 @@ cp config/agents/AGENTS.md ~/.config/agents/AGENTS.md
 | Agentic Template | `agentic_prompt_template.md` | Template for autonomous agent workflows |
 | 1 Agent | `agents/*.md` | code-reviewer (the other five retired in August 2026 — see `claude/agents/README.md`) |
 | Agent Specs | `agents/specs/CLAUDE_CodeMap.md` | CodeMap spec copy for agent access |
-| 10 Instructions | `instructions/*.md` | credentials, environment, file-dispositions, file-operations, github-issues, model-delegation, package-min-age, plan-templates, pr-review-automation, runbook-standards |
+| 13 Instructions | `instructions/*.md` | credentials, environment, file-dispositions, file-operations, git-workflow, github-issues, landing-and-versioning, model-delegation, package-min-age, plan-templates, pr-review-automation, runbook-standards, security-scanning |
 | 3 Output Styles | `output-styles/*.md` | genui, html, technical-quality |
 | 26 Skills | `skills/*/` | See the [Skills](#skills) table below |
 | Guard Tools | `tools/*.py`, `tools/*.pi.ts` | config-secrets-guard hook (blocks printing secrets) + its 88-case regression suite + masked safe-config-reader; Pi port included |

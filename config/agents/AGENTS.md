@@ -218,10 +218,11 @@ Gates before merge, by the riskiest thing the change touches:
   failed in the PR body and go on.
 - **Merge** only when checks are green, the automated PR review has arrived
   and every finding is fixed or answered, the council's findings are
-  reconciled, and no dependency advisory with an available fix is open against
-  the code the branch ships. Never bypass branch protection (`--admin`), never
-  force-push the default branch. Merge with the lander (see "Landing"), not a
-  hand-run `gh pr merge`.
+  reconciled, and no dependency advisory this PR introduced or touched is
+  left open with a fix available (a pre-existing one gets its own same-day
+  PR instead). Never bypass branch protection (`--admin`), never force-push
+  the default branch. Merge with the lander (see "Landing"), not a hand-run
+  `gh pr merge`.
 - **After merging to a deploying branch,** watch the deploy, then smoke-test
   production as a user. If either fails, fix forward or revert the PR at once,
   then tell the user.
