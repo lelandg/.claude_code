@@ -3,6 +3,11 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.15.0] - 2026-11-24
+
+- `land-pr` no longer lands a PR opened by anyone other than you, your listed agent accounts or your listed bots (default: Dependabot). Copilot and other bots no longer pass automatically. Such PRs are shown as `EXTERNAL`, explained to you, and land only with `land <ref> --apply --approved-head <full sha>` after you approve that exact commit.
+- `status --json` adds the facts needed to explain such a PR: author type, fork, base, head and code commits, file count, a checks summary, review state and open threads.
+
 ## [0.14.3] - 2026-11-23
 
 - Codex reviews, adversarial reviews and rescue jobs are now documented as `codex` CLI commands instead of plugin slash commands, and the Sol guard also catches the short `-m gpt-5.6` flag.
