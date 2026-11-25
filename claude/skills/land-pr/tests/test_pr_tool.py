@@ -28,6 +28,7 @@ def _hermetic(monkeypatch, tmp_path):
     """No test may depend on this machine's config, environment or sign-in:
     whose repositories count as "yours" is fixed here for every test."""
     monkeypatch.setenv("PR_TOOL_CONFIG", str(tmp_path / "no-such-config.json"))
+    monkeypatch.setenv("PR_TOOL_OWN_COMMITS", str(tmp_path / "own-commits.json"))
     monkeypatch.delenv("PR_TOOL_OWNERS", raising=False)
     monkeypatch.delenv("PR_TOOL_CODE_ROOT", raising=False)
     monkeypatch.setattr(pt, "OWNERS", ["octo-user", "Octo-Org"])
@@ -445,11 +446,14 @@ def test_landers_own_commits_keep_the_review_only_when_proven():
     # re-reviews a push, is not expected again on it.
     assert proven.expected_checks == []
     assert pt.classify(proven, NOW, ME).state == "READY"
+    # An owner's approval of a1 still covers the PR after the lander's bump.
+    assert proven.code_oid == "a1"
     # The same titles with no proof of what the commits contain: a title is
     # only a claim, so the head counts as unreviewed code.
     claimed = _pr(node)
     assert claimed.reviewed_head is False
     assert claimed.expected_checks == ["Greptile Review"]
+    assert claimed.code_oid == "r3"
     assert pt.classify(claimed, NOW, ME).state == "WAITING"
     # Proof stops at the first commit that fails it: r3 alone is not enough
     # to reach back past an unproven merge.
@@ -1444,3 +1448,210 @@ def test_branch_checked_out_in_the_main_clone_is_kept(repo, tmp_path, capsys):
     pt.clean_local_branch(pr, repo)
     assert sh(repo, "rev-parse", "--abbrev-ref", "HEAD") == "feature"
     assert "main checkout" in capsys.readouterr().out
+
+
+# ---- someone else's PR: explained, landed only on the owner's approval -----
+# Leland, 2026-11-24: "Make sure the land open PRs doesn't land something that
+# someone else opens, unless I approve it."
+
+def test_only_listed_bots_count_as_the_owners_automation(monkeypatch, tmp_path):
+    assert state(author="dependabot", author_is_bot=True) == "READY"
+    assert state(author="dependabot[bot]", author_is_bot=True) == "READY"
+    # Copilot works for whoever assigned it, so its PRs need the owner.
+    v = pt.classify(make(author="Copilot", author_is_bot=True), NOW, ME)
+    assert v.state == "EXTERNAL" and "(bot)" in v.reasons[0]
+    assert state(author="github-actions", author_is_bot=True) == "EXTERNAL"
+    # A person whose login is a listed bot's name is still a person.
+    assert state(author="dependabot", author_is_bot=False) == "EXTERNAL"
+    assert state(author="", author_is_bot=False) == "EXTERNAL"
+    cfg = tmp_path / "land-pr.json"
+    cfg.write_text('{"trusted_bots": ["Copilot"], "trusted_authors": ["my-agent"]}',
+                   encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    assert state(author="Copilot", author_is_bot=True) == "READY"
+    assert state(author="dependabot", author_is_bot=True) == "EXTERNAL"  # replaced
+    assert "my-agent" in pt.trusted_authors() and "octo-user" in pt.trusted_authors()
+
+
+def test_someone_elses_pr_is_external_even_when_green_and_never_swept(monkeypatch):
+    nick = make(author="nick-p")
+    assert pt.classify(nick, NOW, ME).state == "EXTERNAL"
+    assert not pt.classify(nick, NOW - timedelta(days=60), ME).stale
+    monkeypatch.setattr(pt, "survey", lambda owners, repo, trusted:
+                        [(nick, pt.classify(nick, NOW, trusted))])
+    calls = _land_env(monkeypatch, [nick])
+    assert pt.cmd_sweep(apply=True) == 0
+    assert calls == []
+
+
+def test_land_refuses_someone_elses_pr_without_approval(monkeypatch, capsys):
+    calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME) == 1
+    out = capsys.readouterr().out
+    assert calls == [] and "EXTERNAL" in out and "--approved-head" in out
+
+
+def test_approval_lands_only_the_commit_the_owner_saw(monkeypatch, capsys):
+    head = "b" * 40
+    pr = make(author="nick-p", files=CI_ONLY, head_oid=head)
+    merged = make(author="nick-p", files=CI_ONLY, head_oid=head,
+                  state="MERGED", merge_commit="c" * 40)
+    calls = _land_env(monkeypatch, [pr, merged])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head) == 0
+    assert ("pr", "merge") in [c[:2] for c in calls]
+    # A push after the approval voids it: nothing is merged.
+    calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY,
+                                         head_oid="d" * 40)])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head) == 1
+    assert calls == [] and "look again" in capsys.readouterr().out
+    # A short prefix can be ground; only the full SHA counts.
+    calls = _land_env(monkeypatch, [pr])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head[:12]) == 1
+    assert calls == []
+    # Not a SHA at all.
+    calls = _land_env(monkeypatch, [pr])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved="yes") == 1
+    assert calls == []
+
+
+def test_approval_survives_only_the_landers_own_commits():
+    code, bump = "e" * 40, "f" * 40
+    pr = make(author="nick-p", head_oid=bump, code_oid=code, mech_oids=[bump])
+    # The bump's title and content prove nothing: its author may be anyone.
+    assert not pt.approval_matches(pr, code)[0]
+    pt.record_own_commits([bump])                     # this lander pushed it
+    assert pt.approval_matches(pr, code)[0]
+    assert pt.approval_matches(pr, bump)[0]           # or approved the head
+    assert not pt.approval_matches(make(author="nick-p", head_oid=bump,
+                                        code_oid=bump), code)[0]
+
+
+def test_lander_commits_are_remembered_across_runs():
+    bump = "f" * 40
+    pt.record_own_commits([bump])
+    pt._CACHE.pop("own_commits")                      # a new run
+    assert bump in pt.own_commits()
+
+
+def test_recorded_commits_prove_themselves_mechanical_in_a_later_run():
+    # The temporary clone is gone; the record alone proves the lander's merge.
+    bump = "f" * 40
+    pt.record_own_commits([bump])
+    pt._CACHE.pop("own_commits")
+    commits = [{"oid": "a" * 40, "messageHeadline": "fix: x"},
+               {"oid": bump, "messageHeadline": "Merge remote-tracking branch 'origin/main' into HEAD"}]
+    assert pt.verified_mechanical("octo-user/r", "main", commits) == {bump}
+
+
+def test_commit_record_is_written_atomically(tmp_path):
+    pt.record_own_commits(["a" * 40])
+    pt.record_own_commits(["b" * 40, "a" * 40])
+    path = pt._own_path()
+    assert json.loads(path.read_text()) == ["a" * 40, "b" * 40]
+    assert not path.with_name(path.name + ".lock").exists()
+    assert not list(path.parent.glob("*.tmp"))
+
+
+def test_approval_covers_every_proven_lander_commit():
+    # A -> B -> C, the lander pushed B and C: approving B still holds after C.
+    a, b, c = "a" * 40, "b" * 40, "c" * 40
+    pr = make(author="nick-p", head_oid=c, code_oid=a, mech_oids=[b, c])
+    pt.record_own_commits([c])
+    assert pt.approval_matches(pr, b)[0]
+    assert not pt.approval_matches(pr, "d" * 40)[0]
+    # A merged PR can no longer change: its proven tail counts as it is.
+    merged = make(author="nick-p", head_oid=c, code_oid=a, mech_oids=[b, c],
+                  state="MERGED")
+    assert pt.approval_matches(merged, a)[0]
+
+
+def test_commit_list_behind_the_head_trusts_nothing_but_the_head():
+    a, b = "a" * 40, "b" * 40
+    t = NOW - timedelta(minutes=5)
+    node = _node([(a, "fix: thing", t), (b, "chore(release): v1.2.3", t)])
+    assert _pr(node, {b}).code_oid == a           # list current: a is the code
+    node["pullRequest"]["headRefOid"] = "c" * 40   # a push the list lags
+    pr = _pr(node, {b})
+    assert pr.code_oid == "" and pr.mech_oids == []
+    assert not pt.approval_matches(pr, a)[0]
+
+
+def test_review_of_a_lagging_commit_list_does_not_cover_the_head():
+    # CodeRabbit and Neon on #27: the list still ends at commit A while the
+    # head is already C, so nothing read from the list describes C.
+    a = "a" * 40
+    t = NOW - timedelta(minutes=40)
+    for reviews, checks in (([("coderabbitai", a)], ["ci", "CodeRabbit"]),
+                            ([], ["ci"])):       # with and without a reviewer
+        node = _node([(a, "fix: thing", t)], reviews=reviews,
+                     comments=[("coderabbitai", t + timedelta(minutes=3))]
+                     if reviews else [],
+                     rollup=["ci"], tail=[(a, t, checks)])
+        node["pullRequest"]["updatedAt"] = t.isoformat()
+        node["pullRequest"]["headRefOid"] = "c" * 40
+        pr = _pr(node)
+        assert pr.commits_lagging and not pr.reviewed_head
+        v = pt.classify(pr, NOW, ME)
+        assert v.state == "WAITING", v
+        assert "caught up" in " ".join(v.reasons)
+
+
+def test_bad_trust_config_is_an_error(monkeypatch, tmp_path):
+    cfg = tmp_path / "c.json"
+    cfg.write_text('{"trusted_bots": "copilot"}', encoding="utf-8")
+    monkeypatch.setenv("PR_TOOL_CONFIG", str(cfg))
+    with pytest.raises(pt.ToolError):
+        pt.trusted_bots()
+    cfg.write_text('{"trusted_bots": []}', encoding="utf-8")
+    pt._CACHE.clear()
+    assert pt.trusted_bots() == set()
+
+
+def test_bot_autofix_draft_is_still_cleaned_up():
+    draft = make(author="coderabbitai", author_is_bot=True, draft=True,
+                 head="autofix/pr-5", autofix_source_state="MERGED")
+    assert pt.classify(draft, NOW, ME).state == "SUPERSEDED"
+    person = make(author="nick-p", draft=True, head="autofix/pr-5",
+                  autofix_source_state="MERGED")
+    assert pt.classify(person, NOW, ME).state == "EXTERNAL"
+
+
+def test_parse_proves_lander_commits_on_a_merged_pr_too(monkeypatch):
+    # A land resumed after its merge must still find the approved commit.
+    seen = []
+    monkeypatch.setattr(pt, "verified_mechanical",
+                        lambda repo, base, commits: seen.append(repo) or {"x"})
+    monkeypatch.setattr(pt, "pr_from_node",
+                        lambda repo, node, proven: proven)
+    node = {"pullRequest": {"state": "MERGED", "baseRefName": "main",
+            "commits": {"nodes": [{"commit": {"oid": "a"}},
+                                  {"commit": {"oid": "x", "messageHeadline":
+                                              "chore(release): v1.2.3"}}]}}}
+    assert pt._parse("octo-user/r", node) == {"x"}
+    assert seen == ["octo-user/r"]
+
+
+def test_approval_never_skips_another_gate(monkeypatch):
+    head = "b" * 40
+    calls = _land_env(monkeypatch, [make(author="nick-p", files=CI_ONLY,
+                                         head_oid=head,
+                                         checks=[("ci", "fail")])])
+    assert pt.cmd_land("octo-user/r#7", apply=True, trusted=ME,
+                       approved=head) == 1
+    assert calls == []
+
+
+def test_status_json_carries_what_the_owner_needs_to_decide(monkeypatch, capsys):
+    nick = make(author="nick-p", checks=[("ci", "pass"), ("lint", "fail")],
+                code_oid="e" * 40)
+    monkeypatch.setattr(pt, "survey", lambda owners, repo, trusted:
+                        [(nick, pt.classify(nick, NOW, trusted))])
+    pt.cmd_status(as_json=True)
+    row = json.loads(capsys.readouterr().out)[0]
+    assert row["state"] == "EXTERNAL" and row["author"] == "nick-p"
+    assert row["code_oid"] == "e" * 40 and row["checks"]["failing"] == ["lint"]
+    assert row["reviewed_head"] is True and row["open_threads"] == 0

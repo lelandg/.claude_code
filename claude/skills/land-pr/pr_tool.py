@@ -53,6 +53,16 @@ CONFIG_PATH = "~/.claude/land-pr.json"
 # count as yours to merge in. PRs you authored elsewhere are always listed.
 OWNERS: list[str] = []
 
+# Bot accounts whose PRs count as the owner's own, matched without "[bot]"
+# and ignoring case. A bot opens a PR for whoever set it going: Dependabot for
+# the repository's own config, but Copilot or any other app for whoever
+# assigned it, so only bots listed here skip the author gate. Every other PR
+# is EXTERNAL: explained to the owner, never landed without their approval
+# (`land --approved-head`). Per machine: `trusted_bots` in the config file
+# replaces this list, and `trusted_authors` there adds human accounts (the
+# owner's own agent accounts) to the signed-in one.
+TRUSTED_BOTS: list[str] = ["dependabot"]
+
 # A PR that is not READY and has not moved for this long is STALE: a decision
 # for a person (close or revive), never something the tool settles.
 STALE_DAYS = 14
@@ -170,6 +180,18 @@ def _names(value: object) -> list[str]:
     return [str(x) for x in value if x] if isinstance(value, list) else []
 
 
+def _name_list(key: str) -> list[str] | None:
+    """A config key that must be a list of names: None when absent, an error
+    when malformed (a typo must not quietly change whose PRs land)."""
+    cfg = config()
+    if key not in cfg:
+        return None
+    value = cfg[key]
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise ToolError(f"{key} in the land-pr config must be a list of names")
+    return [x for x in value if x]
+
+
 def run(cmd: list[str], cwd: str | Path | None = None, check: bool = True
         ) -> subprocess.CompletedProcess:
     proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
@@ -281,6 +303,9 @@ class PR:
     base: str = "main"
     head: str = ""
     head_oid: str = ""
+    code_oid: str = ""             # last commit not the lander's own ("": head)
+    mech_oids: list[str] = field(default_factory=list)  # proven lander commits after it
+    commits_lagging: bool = False  # commit list not yet at headRefOid
     mergeable: str = "MERGEABLE"   # MERGEABLE | CONFLICTING | UNKNOWN
     merge_state: str = "CLEAN"
     created: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -495,12 +520,12 @@ def verified_mechanical(repo: str, base: str, commits: list[dict]) -> set[str]:
     proven: set[str] = set()
     # Commits this very run created and pushed need no proof: the lander made
     # them, in a clone that may be temporary and gone from every search path.
-    own: set[str] = _CACHE.get("own_commits", set())  # type: ignore[assignment]
+    own = own_commits()
     for c in reversed(commits[1:]):
         title = c.get("messageHeadline") or ""
         if not MECHANICAL_COMMIT.match(title):
             break
-        if c.get("oid") in own:
+        if (c.get("oid") or "").lower() in own:
             proven.add(c["oid"])
             continue
         parents =[p["oid"] for p in (c.get("parents") or {}).get("nodes", [])]
@@ -629,6 +654,10 @@ def head_facts(n: dict, commits: list[dict],
         is_reviewer_check(name) and b == "pass"
         for c in tail if c.get("oid") in covered for name, b in buckets(c))
     reviewed = by_review or by_check
+    # The commit list can lag a fresh push. Then a review of the last listed
+    # commit says nothing about the real head: wait for the list to catch up.
+    if commits and commits[-1].get("oid") != (n.get("headRefOid") or ""):
+        reviewed = False
 
     # "Active" means a reviewer has actually REVIEWED something on this PR: a
     # written review of any commit, or a reviewer check that passed on one.
@@ -653,7 +682,9 @@ def head_facts(n: dict, commits: list[dict],
     return {"pushed": pushed, "expected": expected, "reviewed": reviewed,
             "running": running, "active": active,
             "review_clock": _when(commits[i]["committedDate"])
-            if mechanical_head else pushed}
+            if mechanical_head else pushed,
+            "code_oid": (commits[i].get("oid") or "") if commits else "",
+            "mech_oids": [c.get("oid") or "" for c in commits[i + 1:]]}
 
 
 def pr_from_node(repo: str, repo_node: dict,
@@ -697,6 +728,8 @@ def pr_from_node(repo: str, repo_node: dict,
         unverifiable.append(f"{head_suites['totalCount']} check suites on the "
                             "head; only the first 100 were read, so not every "
                             "workflow run is known finished")
+    commits_current = bool(commits) and \
+        commits[-1].get("oid") == (n.get("headRefOid") or "")
     methods =[m for m, ok in (("squash", repo_node.get("squashMergeAllowed")),
                                ("merge", repo_node.get("mergeCommitAllowed")),
                                ("rebase", repo_node.get("rebaseMergeAllowed")))
@@ -710,6 +743,11 @@ def pr_from_node(repo: str, repo_node: dict,
         cross_repo=bool(n.get("isCrossRepository")),
         base=n.get("baseRefName") or "main", head=n.get("headRefName") or "",
         head_oid=n.get("headRefOid") or "",
+        # The commit list can lag a fresh push; then nothing in it speaks for
+        # the head, so an approval has to name the head itself.
+        code_oid=(head.get("code_oid") or "") if commits_current else "",
+        mech_oids=list(head.get("mech_oids") or []) if commits_current else [],
+        commits_lagging=bool(n.get("headRefOid")) and not commits_current,
         mergeable=n.get("mergeable") or "UNKNOWN",
         merge_state=n.get("mergeStateStatus") or "UNKNOWN",
         created=_when(n.get("createdAt")), updated=_when(n.get("updatedAt")),
@@ -750,7 +788,9 @@ def _parse(repo: str, repo_node: dict) -> PR:
     n = repo_node.get("pullRequest") or {}
     commits = [c["commit"] for c in (n.get("commits") or {}).get("nodes", [])]
     proven: set[str] = set()
-    if n.get("state") == "OPEN" and commits and MECHANICAL_COMMIT.match(
+    # MERGED too: a land resumed after its merge (tag refused, process
+    # killed) must still see the approved commit behind the lander's own.
+    if n.get("state") in ("OPEN", "MERGED") and commits and MECHANICAL_COMMIT.match(
             commits[-1].get("messageHeadline") or ""):
         proven = verified_mechanical(repo, n.get("baseRefName") or "main",
                                      commits)
@@ -834,7 +874,9 @@ NEXT_STEP = {
     "DRAFT": "finish it or close it",
     "STACKED": "land the PR it is based on first; GitHub then retargets this "
                "one to the default branch and it can land",
-    "EXTERNAL": "outside contributor: the owner decides",
+    "EXTERNAL": "someone else opened it: explain it to the owner (what it "
+                "changes, who opened it, checks, review, a recommendation); "
+                "land only after they approve, with --approved-head <sha>",
     "ELSEWHERE": "your PR in someone else's repo: its owner merges",
 }
 STALE_STEP = "no movement: the owner decides, close or revive"
@@ -856,8 +898,12 @@ def classify(pr: PR, now: datetime, trusted: set[str],
             and idle_days >= STALE_DAYS
         return Verdict(state, list(reasons), stale)
 
-    if not pr.author_is_bot and pr.author.lower() not in trusted:
-        return verdict("EXTERNAL", f"author {pr.author or 'unknown'}")
+    # A bot's autofix draft never lands (it is folded into its source or
+    # closed), so the author gate does not hide it from that cleanup.
+    bot_autofix = pr.author_is_bot and not pr.cross_repo and is_autofix(pr)
+    if not author_trusted(pr, trusted) and not bot_autofix:
+        return verdict("EXTERNAL", f"author {pr.author or 'unknown'}"
+                       + (" (bot)" if pr.author_is_bot else ""))
     # No explicit list means "whatever this run is configured for", so the
     # PR_TOOL_OWNERS override reaches every caller, not just the survey query.
     home = {o.lower() for o in (owners if owners is not None else _owners(None))}
@@ -872,6 +918,12 @@ def classify(pr: PR, now: datetime, trusted: set[str],
                        else "autofix PR with no source in its branch name")
     if pr.draft:
         return verdict("DRAFT")
+    if pr.commits_lagging:
+        # Every head fact (push time, checks, workflows, reviews, even what
+        # could not be verified) was read from an older commit: nothing
+        # about the real head is known yet.
+        return verdict("WAITING", "GitHub's commit list has not caught up "
+                       "with the head yet")
     if pr.unverifiable:
         return verdict("BLOCKED", *(f"cannot verify: {u}" for u in pr.unverifiable))
     if pr.default_branch and pr.base != pr.default_branch:
@@ -1264,8 +1316,136 @@ def signed_in() -> str:
 
 
 def trusted_authors() -> set[str]:
+    """Human accounts whose PRs are the owner's own: the signed-in account
+    plus `trusted_authors` in the config file (the owner's agent accounts)."""
     me = signed_in().lower()
-    return {me} if me else set()
+    extra = {a.lower() for a in (_name_list("trusted_authors") or [])}
+    return ({me} if me else set()) | extra
+
+
+def _bot_name(login: str) -> str:
+    login = login.strip().lower()
+    login = login[4:] if login.startswith("app/") else login
+    return login[:-5] if login.endswith("[bot]") else login
+
+
+def trusted_bots() -> set[str]:
+    """Bot accounts whose PRs are the owner's own (see TRUSTED_BOTS)."""
+    names = _name_list("trusted_bots")
+    chosen = list(TRUSTED_BOTS) if names is None else names
+    return {_bot_name(b) for b in chosen}
+
+
+def author_key(pr: PR) -> str:
+    """How an author appears in a trusted set: bots as `bot:<name>`, so a
+    person who happens to share a bot's name is never taken for it."""
+    return f"bot:{_bot_name(pr.author)}" if pr.author_is_bot \
+        else pr.author.lower()
+
+
+def author_trusted(pr: PR, trusted: set[str]) -> bool:
+    """Did the owner, or automation acting for them, open this PR?"""
+    if not pr.author:
+        return False
+    if pr.author_is_bot and _bot_name(pr.author) in trusted_bots():
+        return True
+    return author_key(pr) in trusted
+
+
+OWN_COMMITS_PATH = "~/.claude/land-pr-own-commits.json"
+OWN_COMMITS_KEEP = 2000
+
+
+def _own_path() -> Path:
+    return Path(os.environ.get("PR_TOOL_OWN_COMMITS")
+                or OWN_COMMITS_PATH).expanduser()
+
+
+def own_commits() -> set[str]:
+    """Commits this machine's lander created and pushed: this run's, plus
+    the ones recorded by earlier runs (a land resumed after a failure)."""
+    seen = {str(x).lower() for x in _CACHE.get("own_commits", set())}  # type: ignore[union-attr]
+    try:
+        data = json.loads(_own_path().read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            seen |= {x.lower() for x in data if isinstance(x, str)}
+    except (OSError, ValueError):
+        pass
+    return seen
+
+
+def record_own_commits(oids: list[str]) -> None:
+    """Remember commits the lander pushed, so an approval survives them.
+
+    The record is shared by every landing on this machine, in any repo, so
+    the read-merge-write runs under its own lock and lands by an atomic
+    replace. A failure here only costs a later re-approval (fail closed)."""
+    _CACHE.setdefault("own_commits", set()).update(oids)  # type: ignore[union-attr]
+    path = _own_path()
+    lock = path.with_name(path.name + ".lock")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.time() + 30
+        while True:
+            try:
+                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                break
+            except FileExistsError:
+                if time.time() - lock.stat().st_mtime > 120:
+                    lock.unlink(missing_ok=True)        # abandoned
+                elif time.time() > deadline:
+                    raise OSError(f"{lock} is held")
+                else:
+                    time.sleep(0.2)
+        try:
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+                old = [x for x in old if isinstance(x, str)] \
+                    if isinstance(old, list) else []
+            except (OSError, ValueError):
+                old = []
+            keep = (old + [o for o in oids if o not in old])[-OWN_COMMITS_KEEP:]
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(keep), encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            lock.unlink(missing_ok=True)
+    except OSError as exc:
+        print(f"  note: could not record the lander's commits in {path}: {exc}")
+
+
+def approval_matches(pr: PR, approved: str) -> tuple[bool, str]:
+    """Is `approved` the commit the owner reviewed, and still the PR's code?
+
+    The approval names one commit by its full SHA (a short prefix can be
+    ground). It covers the head, or a commit followed only by commits this
+    machine's lander pushed itself (a version bump, a merge of the base).
+    A commit's title or content proves nothing: the PR's author can write
+    a "chore(release)" commit too. A merged PR can no longer change, so
+    there any commit of its proven tail counts. Anything else voids it."""
+    sha = approved.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return False, (f"--approved-head {approved!r} is not a full 40-character "
+                       "commit SHA")
+    head = pr.head_oid.lower()
+    if sha == head:
+        return True, f"owner approved the head {sha[:9]}"
+    chain = [o.lower() for o in [pr.code_oid] + pr.mech_oids if o]
+    if sha in chain:
+        after = chain[chain.index(sha) + 1:]
+        if pr.state == "MERGED":
+            return True, f"owner approved {sha[:9]}; the PR is merged"
+        mine = own_commits()
+        foreign = [o for o in after if o not in mine]
+        if not foreign:
+            return True, (f"owner approved {sha[:9]}; only the lander's own "
+                          "commits follow it")
+        return False, (f"the approval is for {sha[:9]}, but {foreign[0][:9]} "
+                       "after it was not pushed by this lander, so the owner "
+                       "must look again")
+    return False, (f"the approval is for {sha[:9]}, but the PR's head is now "
+                   f"{head[:9]}: commits were pushed after it was approved, "
+                   "so the owner must look again")
 
 
 def detect_method(pr: PR) -> str:
@@ -1370,13 +1550,22 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
              clone: str | None = None, wait: float = 8.0,
              trusted: set[str] | None = None,
              owners: list[str] | None = None,
-             accept_missing: bool = False, **_: object) -> int:
+             accept_missing: bool = False, approved: str | None = None,
+             **_: object) -> int:
     repo, number = parse_ref(ref)
     trusted = trusted if trusted is not None else trusted_authors()
     owners = owners if owners is not None else _owners(None)
     _CACHE["clone_hint"] = clone      # so proofs can use the same clone
     pr = fetch_pr(repo, number)
     print(f"{pr.ref}  {pr.title}")
+    if approved and not author_trusted(pr, trusted):
+        # Someone else's PR, approved by the owner at one commit. Trust its
+        # author for this run only; every other gate still applies.
+        ok, why = approval_matches(pr, approved)
+        print(f"  author {pr.author}: {why}")
+        if not ok:
+            return 1
+        trusted = set(trusted) | {author_key(pr)}
     if pr.state == "MERGED":
         return finish_merged(pr, apply, trusted, owners)
     if pr.state != "OPEN":
@@ -1455,9 +1644,12 @@ def cmd_land(ref: str, apply: bool = False, level: str | None = None,
                     version = prepare_branch(vt, vt_path, ws.wt, base_ref,
                                              plan.level, plan.notes, taken,
                                              ws.tmp)
-                    made = git(ws.wt, "rev-list", f"{pr.head_oid}..HEAD").split()
-                    _CACHE.setdefault("own_commits", set()).update(made)  # type: ignore[union-attr]
+                    # First parent only: a merge of the base brings the base's
+                    # own commits along, and those are not the lander's.
+                    made = git(ws.wt, "rev-list", "--first-parent", "--reverse",
+                               f"{pr.head_oid}..HEAD").split()
                     git(ws.wt, "push", "origin", f"HEAD:refs/heads/{pr.head}")
+                    record_own_commits(made)
                     oid = git(ws.wt, "rev-parse", "HEAD").strip()
                     print(f"  pushed bump v{version} ({oid[:9]}); waiting on checks")
                     ok, pr = wait_ready(repo, number, oid, wait, trusted,
@@ -1798,7 +1990,7 @@ def finish_merged(pr: PR, apply: bool, trusted: set[str],
     after the merge (tag refused, process killed) instead of calling it done."""
     # The same trust an open PR needs: your PR, in a repository that is yours.
     home = {o.lower() for o in owners}
-    if (not pr.author_is_bot and pr.author.lower() not in trusted) \
+    if not author_trusted(pr, trusted) \
             or pr.repo.split("/", 1)[0].lower() not in home:
         print("  already merged; not your PR or not your repository, so "
               "nothing is tagged or cleaned up from here")
@@ -1912,6 +2104,17 @@ def _owner_hint(args_owner: list[str] | None, repo: str | None) -> None:
           "PR_TOOL_OWNERS=a,b.", file=sys.stderr)
 
 
+def check_summary(pr: PR) -> dict:
+    """Counts of the head's checks by outcome, and the names of failing ones."""
+    out: dict = {"pass": 0, "fail": 0, "pending": 0, "other": 0, "failing": []}
+    for name, bucket in pr.checks:
+        key = bucket if bucket in ("pass", "fail", "pending") else "other"
+        out[key] += 1
+        if key == "fail":
+            out["failing"].append(name)
+    return out
+
+
 def cmd_status(owner: list[str] | None = None, repo: str | None = None,
                as_json: bool = False, **_: object) -> int:
     trusted = trusted_authors()
@@ -1921,6 +2124,14 @@ def cmd_status(owner: list[str] | None = None, repo: str | None = None,
         print(json.dumps([{"ref": pr.ref, "state": v.state, "stale": v.stale,
                            "reasons": v.reasons, "title": pr.title,
                            "url": pr.url, "author": pr.author,
+                           "author_is_bot": pr.author_is_bot,
+                           "fork": pr.cross_repo, "base": pr.base,
+                           "head_oid": pr.head_oid,
+                           "code_oid": pr.code_oid or pr.head_oid,
+                           "files_total": pr.files_total,
+                           "checks": check_summary(pr),
+                           "reviewed_head": pr.reviewed_head,
+                           "open_threads": len(pr.threads),
                            "updated": pr.updated.isoformat()}
                           for pr, v in rows], indent=2))
     else:
@@ -2018,6 +2229,12 @@ def main(argv: list[str] | None = None) -> int:
                          "this PR earlier has not reviewed the head (it is "
                          "gone, or will not re-review). Never skips a check "
                          "or a running workflow; never implied; never in sweep")
+    la.add_argument("--approved-head", dest="approved", metavar="SHA",
+                    help="the owner approved this PR, opened by someone else, "
+                         "at commit SHA. Lands it only if nothing but the "
+                         "lander's own commits came after SHA, and only past "
+                         "every other gate. The owner's call alone; never "
+                         "implied; never in sweep")
 
     sw = sub.add_parser("sweep", help="close superseded, land everything READY")
     scope(sw)

@@ -436,8 +436,17 @@ read-only until `--apply`.
 2. **Any session may land any READY PR.** Which session opened it does not
    matter, and it needs no go-ahead; do not park a green PR as a decision for
    the user. The exceptions are the states the tool refuses to call READY:
-   an outside contributor, auth/billing/migration paths with no adversarial
-   review recorded in the PR body, and anything idle 14+ days.
+   a PR someone else opened (`EXTERNAL`), auth/billing/migration paths with
+   no adversarial review recorded in the PR body, and anything idle 14+ days.
+   **Someone else's PR never lands without the user's approval.** Only PRs
+   opened by the user, by their own agent accounts (`trusted_authors`) or by
+   their own bots (`trusted_bots`, default Dependabot) are theirs; a partner,
+   a teammate, an outside contributor, or a bot like Copilot (it works for
+   whoever assigned it) is someone else, however green the PR is. Explain
+   each one to the user: who opened it, what it changes, its checks and
+   review status, and a recommendation, naming the commit you explained. Land
+   it only after the user approves that PR, with
+   `land <ref> --apply --approved-head <sha>`.
 3. **Resolve the thread when you fix or answer it.** An unresolved review
    thread is how the tools read "open finding", outdated or not. Reply in the
    thread, then `threads <ref> --resolve <id>`. Never resolve without one.
@@ -445,9 +454,9 @@ read-only until `--apply`.
    land each PR as it turns green, and keep at most five open at once.
 5. **Autofix drafts die with their source PR.** Fold a wanted fix into the
    source PR; the draft is closed when the source merges or closes.
-6. **Stale is a decision, not a state.** Rows `status` marks `STALE`,
-   `EXTERNAL` or `ELSEWHERE` go in the end-of-task report as close-or-revive
-   decisions for the user. Do not close a feature PR on your own.
+6. **Stale is a decision, not a state.** Rows `status` marks `STALE` or
+   `ELSEWHERE` go in the end-of-task report as close-or-revive decisions for
+   the user; `EXTERNAL` rows go there explained, as rule 2 says. Do not close a feature PR on your own.
 7. **A conflict or failure is work, never a status.** Merge the base in and
    resolve it, or fix the failing check, then land. If it looks impossible,
    get a second opinion before stopping: a strongest-tier Claude agent, then
