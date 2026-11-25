@@ -918,13 +918,14 @@ def classify(pr: PR, now: datetime, trusted: set[str],
                        else "autofix PR with no source in its branch name")
     if pr.draft:
         return verdict("DRAFT")
-    if pr.unverifiable:
-        return verdict("BLOCKED", *(f"cannot verify: {u}" for u in pr.unverifiable))
     if pr.commits_lagging:
-        # Every head fact (push time, checks, workflows, reviews) was read
-        # from an older commit: nothing about the real head is known yet.
+        # Every head fact (push time, checks, workflows, reviews, even what
+        # could not be verified) was read from an older commit: nothing
+        # about the real head is known yet.
         return verdict("WAITING", "GitHub's commit list has not caught up "
                        "with the head yet")
+    if pr.unverifiable:
+        return verdict("BLOCKED", *(f"cannot verify: {u}" for u in pr.unverifiable))
     if pr.default_branch and pr.base != pr.default_branch:
         # Landing means reaching the default branch. Merging this one would
         # only fold it into another PR's branch, behind that PR's back, and
