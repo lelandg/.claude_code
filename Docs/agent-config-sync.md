@@ -9,8 +9,10 @@ Skill: `agent-config-sync`.
 
 `config/agent-sync.toml` (schema 2) lists the files:
 
-- **Synced two ways:** `~/.config/agents/AGENTS.md`, `~/.claude/CLAUDE.md`,
-  `~/.claude/tools/config-secrets-guard.py`, `~/.claude/instructions/*.md`.
+- **Synced two ways:** `~/.config/agents/AGENTS.md`,
+  `~/.config/agents/council.toml` (the review council's members),
+  `~/.claude/CLAUDE.md`, `~/.claude/tools/config-secrets-guard.py`,
+  `~/.claude/instructions/*.md`.
 - **Regenerated from AGENTS.md:** `~/.codex/AGENTS.md`,
   `~/.copilot/copilot-instructions.md`, `~/.gemini/AGENTS.md`. A symlink (the
   WSL setup) is left alone.

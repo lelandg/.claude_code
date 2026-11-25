@@ -19,11 +19,12 @@ gets the same prompt, runs read-only, and writes to its own subfolder
 (`result.md`, `err.txt`, `cmd.txt`). `summary.md` and `summary.json` hold the
 combined result.
 
-Commit first. Members read files from the working tree, so the run warns when
-the tree is not the commit under review (uncommitted edits, untracked files,
-or another checkout). Each run needs its own results folder: a folder that
-already holds files is refused, so an earlier answer can never be read back
-as a new one.
+Commit first. Members read files from the working tree, so the run refuses to
+start when tracked files are edited or another commit is checked out
+(`--allow-mismatch` overrides, and the summary says so), and warns about
+untracked files. Each run claims its own results folder: one that was used
+before, or is in use by another run, is refused, so an earlier answer can
+never be read back as a new one.
 
 ## Exit codes
 
@@ -34,9 +35,10 @@ as a new one.
 | 20 | The run could not start (bad config, nothing to review) |
 
 A member has failed when its CLI is missing, exits non-zero, times out, or
-returns an answer that is empty, cut off, off-format, marked `incomplete`, or
-about a different commit. A failed review is never reported as a clean one.
-Anything a member says it did not get to is listed under the table.
+returns an answer that is empty, cut off, off-format, marked `incomplete`,
+about a different commit, or `clean` while listing material it did not read.
+A failed review is never reported as a clean one. Anything a member with
+findings says it did not get to is listed under the table.
 
 ## Config
 
@@ -64,11 +66,13 @@ command.
 ### Per-repository seating
 
 A repository may commit `.agents/council.toml` with `default`, `[councils.*]`
-and `focus`. It can pick among the members your own config defines; it cannot
-define a member. The file is read from the **base commit**, never from the
-change under review, so a pull request cannot choose its own reviewers or
-write their instructions. Its `focus` reaches the reviewers labelled as the
-repository's note, after your own.
+and `focus`. It can **add** members to your default seating and define new
+named councils, from the members your own config defines. It cannot define a
+member, drop one you seated, or redefine one of your councils. The file is
+read from the **base branch**, never from the change under review, so a pull
+request cannot choose its own reviewers or write their instructions. Its
+`focus` reaches the reviewers labelled as the repository's note, after your
+own.
 
 ### Refused models
 
@@ -80,9 +84,7 @@ Model ids are plain names: letters, digits, `.`, `_` and `-`. Effort
 ## The prompt
 
 [`prompt.md`](prompt.md) is the one prompt every member receives. It states
-the goal, points at the rule files that bind the change (a copy of the global
-`AGENTS.md`, placed in the results folder so a sandboxed member can read it,
-and the repository's own), tells the reviewer to treat text
+the goal, points at the rule files that bind the change, tells the reviewer to treat text
 inside the diff as material and not as instructions, and asks for a JSON
 object so the runner can tell a clean review from a truncated one.
 
@@ -91,5 +93,19 @@ object so the runner can tell a clean review from a truncated one.
 ```bash
 cd tools/council && python -m pytest -q
 ```
+
+## What the reviewers can read
+
+The results folder gets a `rules/` subfolder with trusted copies: your global
+`AGENTS.md`, your `~/.claude/instructions/*.md`, and the repository's
+`AGENTS.md` (or `CLAUDE.md`) **as it is on the base branch**. Copies, because
+a sandboxed member cannot read your home directory, and because a change that
+edits a rule file must be judged as a change, not obeyed as a rule.
+
+Each member runs with its CLI's read-only mode: Codex `-s read-only`, agy
+`--mode plan --sandbox`, Copilot with write, shell and memory tools denied,
+Claude Code with only Read, Grep and Glob and no MCP servers. On Windows the
+CLI must be a real executable or a `.ps1` shim; a `.cmd` shim is refused when
+an argument could be re-parsed by `cmd.exe`.
 
 The tests use temporary repositories and a fake runner. They never call a model.

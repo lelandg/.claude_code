@@ -16,9 +16,11 @@ Config, first one found wins:
   then the default shipped in this repo (config/council.toml).
 A repository may commit ``.agents/council.toml`` to choose its default seating
 and define named councils from the members the user's config already has. It
-cannot add a member, a CLI, or a model, and it is read from the base commit,
-never from the change under review: a change must not be able to pick its own
-reviewers or write their instructions.
+cannot add a member, a CLI, or a model, it can only add to the default seating
+(never shrink it), and it is read from the base branch, never from the change
+under review: a change must not be able to pick its own reviewers or write
+their instructions. The project rule file the reviewers are pointed at is the
+base branch's copy for the same reason.
 
 Exit codes: 0 every member answered, 10 at least one member failed,
 20 the run could not start.
@@ -54,8 +56,8 @@ INSTRUCTIONS = Path.home() / ".claude" / "instructions"
 
 EXIT_OK, EXIT_MEMBER_FAILED, EXIT_ERROR = 0, 10, 20
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 # Models with a record of destructive autonomous action: the Sol line, and the
 # bare gpt-5.6 alias that resolves to it. Refused whatever the config says;
 # no flag lifts this.
@@ -64,6 +66,8 @@ BANNED_MODEL = re.compile(r"(?<![A-Za-z0-9])gpt-5\.6(?![A-Za-z0-9._-])|(?<![A-Za
 MEMBER_KEYS = {"cli", "model", "effort", "timeout"}
 OVERLAY_KEYS = {"schema_version", "default", "councils", "focus"}
 VERDICTS = ("clean", "findings", "incomplete")
+SEVERITIES = ("critical", "major", "minor")
+FINDING_TEXT = ("title", "file", "detail")
 PLACEHOLDER = re.compile(r"\{\{([A-Z_]+)\}\}")
 DEFAULT_TIMEOUT = 1800
 ADVERSARIAL = (
@@ -104,7 +108,6 @@ class Job:
     out: Path                 # this member's own folder
     shared: Path              # run folder holding change.diff, commits.txt, prompt.md
     prompt: str
-    read_dirs: list[Path] = field(default_factory=list)   # extra folders the member may read
 
 
 @dataclass
@@ -123,13 +126,6 @@ class Invocation:
 # Each shape was run against the real CLI on 2026-11-25 (codex-cli 0.163.0,
 # agy 1.5.16, Copilot CLI 1.0.112, Claude Code 2.1.332).
 # --------------------------------------------------------------------------
-
-def _add_dirs(job: Job) -> list[str]:
-    out: list[str] = []
-    for d in [job.shared, *job.read_dirs]:
-        out += ["--add-dir", str(d)]
-    return out
-
 
 def drive_codex(job: Job) -> Invocation:
     m = job.member
@@ -154,7 +150,7 @@ def drive_agy(job: Job) -> Invocation:
     # reads need the session-only allow rule. The prompt must be an argument:
     # agy exits 2 when it arrives on stdin.
     argv = ["agy", "--model", model, "--mode", "plan", "--sandbox", "--settings", AGY_READ_RULE,
-            "--add-dir", str(job.repo), *_add_dirs(job),
+            "--add-dir", str(job.repo), "--add-dir", str(job.shared),
             "--print-timeout", f"{m.timeout}s", f"-p={job.prompt}"]
     return Invocation(argv, cwd=job.repo)
 
@@ -166,7 +162,7 @@ def drive_copilot(job: Job) -> Invocation:
     if m.effort:
         argv += ["--reasoning-effort", m.effort]
     argv += ["--deny-tool=write", "--deny-tool=shell", "--deny-tool=memory", "--allow-tool=read",
-             *_add_dirs(job)]
+             "--add-dir", str(job.shared)]
     # An inherited allow-all would undo the deny rules above.
     return Invocation(argv, stdin=job.prompt, cwd=job.repo,
                       env_drop=("COPILOT_ALLOW_ALL", "COPILOT_ALLOW_ALL_TOOLS", "COPILOT_ALLOW_ALL_PATHS"))
@@ -177,8 +173,11 @@ def drive_claude(job: Job) -> Invocation:
     argv = ["claude", "-p", "--model", m.model]
     if m.effort:
         argv += ["--effort", m.effort]
-    argv += ["--permission-mode", "plan", "--tools", "Read", "Grep", "Glob",
-             "--no-session-persistence", *_add_dirs(job)]
+    # --tools limits the built-in tools to the three readers. MCP servers are a
+    # separate channel (mail, drives, payment APIs): load none of them. Not plan
+    # mode: its system text asks for a plan file, which the prompt contradicts.
+    argv += ["--tools", "Read", "Grep", "Glob", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+             "--no-session-persistence", "--add-dir", str(job.shared)]
     return Invocation(argv, stdin=job.prompt, cwd=job.repo)
 
 
@@ -211,7 +210,7 @@ def _names(value, where: str) -> list[str]:
 
 
 def _member(name: str, raw, where: str) -> Member:
-    if not NAME.match(name):
+    if not NAME.fullmatch(name):
         raise CouncilError(f"{where}: member name {name!r} must be lowercase letters, digits, - or _")
     if not isinstance(raw, dict):
         raise CouncilError(f"{where}: [members.{name}] must be a table")
@@ -221,7 +220,7 @@ def _member(name: str, raw, where: str) -> Member:
     cli, model = raw.get("cli"), raw.get("model")
     if cli not in DRIVERS:
         raise CouncilError(f"{where}: member {name!r} has cli {cli!r}; known CLIs: {', '.join(sorted(DRIVERS))}")
-    if not isinstance(model, str) or not MODEL.match(model):
+    if not isinstance(model, str) or not MODEL.fullmatch(model):
         raise CouncilError(f"{where}: member {name!r} needs a plain model id")
     if BANNED_MODEL.search(model):
         raise CouncilError(f"{where}: member {name!r} names {model!r}, which no agent may run")
@@ -239,7 +238,7 @@ def _councils(raw, where: str) -> dict[str, list[str]]:
         raise CouncilError(f"{where}: [councils] must be a table")
     out = {}
     for name, body in raw.items():
-        if not NAME.match(name):
+        if not NAME.fullmatch(name):
             raise CouncilError(f"{where}: council name {name!r} is not valid")
         if not isinstance(body, dict) or set(body) != {"members"}:
             raise CouncilError(f"{where}: [councils.{name}] takes exactly one key, members = [...]")
@@ -285,16 +284,21 @@ def load_config(path: Path, overlay: tuple[str, str] | None = None) -> Config:
 
 
 def apply_overlay(cfg: Config, raw: dict, where: str) -> None:
-    """Let a repository choose seating. It may not define what gets run."""
+    """Let a repository add to the seating. It may not define what gets run, drop a
+    member the user seated, or redefine one of the user's named councils."""
     extra = set(raw) - OVERLAY_KEYS
     if extra:
         raise CouncilError(f"{where}: a project council file may set only "
                            f"{', '.join(sorted(OVERLAY_KEYS - {'schema_version'}))}; "
                            f"found {', '.join(sorted(extra))}. Members are defined in the user's own config.")
     if "default" in raw:
-        cfg.default = _names(raw["default"], f"{where} default")
+        cfg.default = list(dict.fromkeys([*cfg.default, *_names(raw["default"], f"{where} default")]))
     if "councils" in raw:
-        cfg.councils.update(_councils(raw["councils"], where))
+        for name, names in _councils(raw["councils"], where).items():
+            if name in cfg.councils:
+                raise CouncilError(f"{where}: council {name!r} is already defined in the user's config; "
+                                   "a repository may add councils, not redefine them")
+            cfg.councils[name] = names
     if "focus" in raw:
         cfg.repo_focus = str(raw["focus"])
     cfg.sources.append(where)
@@ -348,14 +352,14 @@ def default_base(repo: Path) -> str:
     raise CouncilError("cannot find the base branch; pass --base <remote>/<branch>")
 
 
-def resolve_range(repo: Path, base: str | None, head: str) -> tuple[str, str, str]:
-    """(base ref, merge-base sha, head sha) for the change under review."""
+def resolve_range(repo: Path, base: str | None, head: str) -> tuple[str, str, str, str]:
+    """(base ref, base tip sha, merge-base sha, head sha) for the change under review."""
     base = base or default_base(repo)
     if base.startswith("-") or head.startswith("-"):
         raise CouncilError("base and head must be refs, not options")
     base_sha = git(repo, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
     head_sha = git(repo, "rev-parse", "--verify", f"{head}^{{commit}}").strip()
-    return base, git(repo, "merge-base", base_sha, head_sha).strip(), head_sha
+    return base, base_sha, git(repo, "merge-base", base_sha, head_sha).strip(), head_sha
 
 
 def base_overlay(repo: Path, base_sha: str) -> tuple[str, str] | None:
@@ -366,8 +370,17 @@ def base_overlay(repo: Path, base_sha: str) -> tuple[str, str] | None:
     return git(repo, "show", f"{base_sha}:{path}"), f"{path} at base {base_sha[:12]}"
 
 
-def collect_change(repo: Path, base: str | None, head: str, shared: Path) -> dict:
-    base, merge_base, head_sha = resolve_range(repo, base, head)
+def collect_change(repo: Path, base: str | None, head: str, shared: Path, allow_mismatch: bool = False) -> dict:
+    base, base_tip, merge_base, head_sha = resolve_range(repo, base, head)
+    # Members read files from the working tree. If that is not the commit under
+    # review, they would review something else and still answer about this sha.
+    checked_out = git(repo, "rev-parse", "HEAD").strip()
+    edited = bool(git(repo, "status", "--porcelain", "--untracked-files=no").strip())
+    if (checked_out != head_sha or edited) and not allow_mismatch:
+        what = "has uncommitted changes to tracked files" if checked_out == head_sha else \
+            f"is at {checked_out[:12]}, not the head under review ({head_sha[:12]})"
+        raise CouncilError(f"the working tree {what}. Commit or check out the head first "
+                           "(--allow-mismatch reviews anyway and says so in the summary)")
     diff = git(repo, "diff", "--no-color", "--no-ext-diff", f"{merge_base}..{head_sha}")
     if not diff.strip():
         raise CouncilError(f"nothing to review: {base}...{head} is empty")
@@ -376,9 +389,8 @@ def collect_change(repo: Path, base: str | None, head: str, shared: Path) -> dic
     (shared / "commits.txt").write_text(log + "\n", encoding="utf-8", newline="\n")
     # Untracked files count: a member can read one in place of a file the change deleted.
     dirty = bool(git(repo, "status", "--porcelain").strip())
-    checked_out = git(repo, "rev-parse", "HEAD").strip()
     return {
-        "base": base, "head": head, "base_sha": merge_base, "head_sha": head_sha,
+        "base": base, "head": head, "base_sha": merge_base, "base_tip": base_tip, "head_sha": head_sha,
         "branch": git(repo, "rev-parse", "--abbrev-ref", head, check=False).strip() or head,
         "subject": git(repo, "log", "-1", "--format=%s", head_sha).strip(),
         "diff_bytes": len(diff.encode("utf-8")),
@@ -387,16 +399,31 @@ def collect_change(repo: Path, base: str | None, head: str, shared: Path) -> dic
     }
 
 
-def rule_files(repo: Path, shared: Path) -> list[Path]:
-    """Rule files the reviewers are pointed at. The global one is copied into the
-    run folder, because a sandboxed member may not be able to read the home dir."""
+def rule_files(repo: Path, shared: Path, base_tip: str) -> list[Path]:
+    """Write the rule files the reviewers are pointed at into the run folder.
+
+    Copies, for two reasons. A sandboxed member (Codex) cannot read the home
+    directory. And the project file must be the base branch's version: the
+    change under review may edit AGENTS.md, and an edited rule file must be
+    judged as a change, never obeyed as a rule.
+    """
+    rules = shared / "rules"
+    rules.mkdir()
     out: list[Path] = []
     if GLOBAL_RULES.is_file():
-        copy = shared / "global-AGENTS.md"
-        shutil.copyfile(GLOBAL_RULES, copy)
-        out.append(copy)
-    project = [p for p in (repo / "AGENTS.md", repo / "CLAUDE.md") if p.is_file()]
-    return out + project[:1]      # CLAUDE.md only where there is no AGENTS.md
+        shutil.copyfile(GLOBAL_RULES, rules / "global-AGENTS.md")
+        out.append(rules / "global-AGENTS.md")
+    if INSTRUCTIONS.is_dir():
+        (rules / "instructions").mkdir()
+        for f in sorted(INSTRUCTIONS.glob("*.md")):
+            shutil.copyfile(f, rules / "instructions" / f.name)
+    for name in ("AGENTS.md", "CLAUDE.md"):       # CLAUDE.md only where the base has no AGENTS.md
+        if git(repo, "ls-tree", "--name-only", base_tip, "--", name, check=False).strip():
+            copy = rules / f"project-{name}"
+            copy.write_text(git(repo, "show", f"{base_tip}:{name}"), encoding="utf-8", newline="\n")
+            out.append(copy)
+            break
+    return out
 
 
 def build_prompt(template: str, repo: Path, change: dict, shared: Path, focus: str,
@@ -412,6 +439,7 @@ def build_prompt(template: str, repo: Path, change: dict, shared: Path, focus: s
         "DIFF_FILE": str(shared / "change.diff"),
         "LOG_FILE": str(shared / "commits.txt"),
         "RULE_FILES": "\n".join(f"- {p}" for p in rules) or "- (none found)",
+        "INSTRUCTIONS_DIR": str(shared / "rules" / "instructions"),
         "FOCUS": focus.strip() or "No narrower focus was given for this review.",
     }
     unknown = sorted(set(PLACEHOLDER.findall(template)) - set(values))
@@ -489,9 +517,9 @@ def parse_answer(text: str) -> dict | None:
 
     The answer is the last top-level JSON object in the text that has a
     "verdict". Some CLIs hard-wrap their output, which puts raw newlines
-    inside strings, so decoding is lenient about control characters. If
-    "verdict" appears again after that object, a later answer was started and
-    cut off: that is no answer, never a reason to fall back to an earlier one.
+    inside strings, so decoding is lenient about control characters. If another
+    object starts after it and does not finish, a later answer was cut off:
+    that is no answer, never a reason to fall back to an earlier one.
     """
     decoder = json.JSONDecoder(strict=False)
     found, pos = None, 0
@@ -507,7 +535,7 @@ def parse_answer(text: str) -> dict | None:
         if isinstance(obj, dict) and "verdict" in obj:
             found = (obj, end)
         pos = end
-    if found is None or '"verdict"' in text[found[1]:]:
+    if found is None or re.search(r'\{\s*"', text[found[1]:]):
         return None
     return found[0]
 
@@ -537,10 +565,16 @@ def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, st
     findings = answer.get("findings")
     if not isinstance(findings, list):
         return "failed", "answer has no findings list", answer
-    if not all(isinstance(f, dict) and str(f.get("title", "")).strip() for f in findings):
-        return "failed", "a finding is not an object with a title", answer
+    for f in findings:
+        if not (isinstance(f, dict) and all(isinstance(f.get(k), str) and f[k].strip() for k in FINDING_TEXT)
+                and str(f.get("severity")).lower() in SEVERITIES):
+            return "failed", ("a finding lacks a severity (critical, major or minor) or one of: "
+                              + ", ".join(FINDING_TEXT)), answer
     if verdict == "clean" and findings:
         return "failed", "verdict is clean but findings are listed", answer
+    if verdict == "clean" and not_reviewed:
+        why = "; ".join(str(x) for x in not_reviewed)
+        return "failed", f"verdict is clean but material was not reviewed: {why[:300]}", answer
     if verdict == "findings" and not findings:
         return "failed", "verdict is findings but none are listed", answer
     return "ok", "", answer
@@ -587,19 +621,33 @@ def _last_line(text: str) -> str:
     return lines[-1][:300] if lines else ""
 
 
-def review(cfg: Config, members: list[Member], repo: Path, base: str | None, head: str, out: Path,
-           focus: str = "", purpose: str = "", runner=execute, dry_run: bool = False) -> dict:
-    if out.exists() and any(out.iterdir()):
-        # A reused folder could hand back an earlier run's answer, or another run's diff.
-        raise CouncilError(f"results folder is not empty: {out} (each run needs its own)")
+def reserve(out: Path) -> None:
+    """Claim the results folder for this run only.
+
+    A reused folder could hand back an earlier run's answer or another run's
+    diff. Creating the marker file with O_EXCL is the atomic step: of two runs
+    given the same folder, exactly one gets it.
+    """
     out.mkdir(parents=True, exist_ok=True)
-    change = collect_change(repo, base, head, out)
-    rules = rule_files(repo, out)
+    try:
+        os.close(os.open(out / ".council-run", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        raise CouncilError(f"results folder is already in use or was used before: {out} "
+                           "(each run needs its own)") from None
+    if [p for p in out.iterdir() if p.name != ".council-run"]:
+        raise CouncilError(f"results folder is not empty: {out} (each run needs its own)")
+
+
+def review(cfg: Config, members: list[Member], repo: Path, base: str | None, head: str, out: Path,
+           focus: str = "", purpose: str = "", runner=execute, dry_run: bool = False,
+           allow_mismatch: bool = False) -> dict:
+    reserve(out)
+    change = collect_change(repo, base, head, out, allow_mismatch)
+    rules = rule_files(repo, out, change["base_tip"])
     template = PROMPT_TEMPLATE.read_text(encoding="utf-8")
     prompt = build_prompt(template, repo, change, out, focus, purpose, rules)
     (out / "prompt.md").write_text(prompt, encoding="utf-8", newline="\n")
-    read_dirs = [d for d in (INSTRUCTIONS,) if d.is_dir()]
-    jobs = [Job(m, repo, out / m.name, out, prompt, read_dirs) for m in members]
+    jobs = [Job(m, repo, out / m.name, out, prompt) for m in members]
     if dry_run:
         results = [{"member": j.member.name, "status": "dry-run",
                     "argv": _shown(DRIVERS[j.member.cli](j).argv, prompt)} for j in jobs]
@@ -618,9 +666,9 @@ def render(summary: dict) -> str:
              f"Repository: `{summary['repo']}`  ", f"Head: `{c['head_sha'][:12]}`  ",
              f"Results: `{summary['out']}`", ""]
     if c.get("worktree_differs_from_head"):
-        lines += ["**The working tree is not the reviewed commit (uncommitted changes or another "
-                  "checkout). Members read files from the working tree, so re-run on a clean tree "
-                  "before relying on this.**", ""]
+        lines += ["**The working tree is not exactly the reviewed commit (untracked files, or "
+                  "--allow-mismatch was passed). Members read files from the working tree, so "
+                  "re-run on a clean tree before relying on this.**", ""]
     lines += ["| Member | Model | Status | Verdict | Findings |", "|---|---|---|---|---|"]
     for r in summary["members"]:
         if r["status"] == "dry-run":
@@ -672,6 +720,7 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     ls = sub.add_parser("list", help="show members, the default seating and named councils")
     ls.add_argument("--repo", default=None, help="also apply this repository's .agents/council.toml")
+    ls.add_argument("--base", help="base ref whose council file applies (default: the remote's default branch)")
     rv = sub.add_parser("review", help="send one committed change to every seated member")
     rv.add_argument("--repo", default=".", help="repository to review (default: current directory)")
     rv.add_argument("--base", help="base ref (default: the remote's default branch)")
@@ -685,6 +734,8 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
     rv.add_argument("--out", help="folder for results (default: a new temp folder)")
     rv.add_argument("--allow-max", action="store_true",
                     help="permit effort = \"max\" (costly; needs the owner's approval)")
+    rv.add_argument("--allow-mismatch", action="store_true",
+                    help="review even though the working tree is not the head under review")
     rv.add_argument("--dry-run", action="store_true",
                     help="write the diff and prompt, print the commands, call nobody")
     args = ap.parse_args(argv)
@@ -692,10 +743,8 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
         repo = Path(args.repo).resolve() if args.repo else None
         overlay = None
         if repo is not None:
-            if args.cmd == "list":
-                overlay = base_overlay(repo, git(repo, "rev-parse", default_base(repo)).strip())
-            else:
-                overlay = base_overlay(repo, resolve_range(repo, args.base, args.head)[1])
+            head = "HEAD" if args.cmd == "list" else args.head
+            overlay = base_overlay(repo, resolve_range(repo, args.base, head)[1])
         cfg = load_config(find_config(args.config), overlay)
         if args.cmd == "list":
             return cmd_list(cfg)
@@ -706,7 +755,7 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
         out = Path(args.out).resolve() if args.out else Path(tempfile.mkdtemp(
             prefix="council-" + datetime.now().strftime("%Y%m%d-%H%M%S-")))
         summary = review(cfg, seated, repo, args.base, args.head, out, focus,
-                         _text_arg(args.purpose), runner, args.dry_run)
+                         _text_arg(args.purpose), runner, args.dry_run, args.allow_mismatch)
     except (CouncilError, OSError) as exc:
         print(f"council: {exc}", file=sys.stderr)
         return EXIT_ERROR

@@ -402,8 +402,9 @@ Custom skills extend Claude Code with repeatable workflows:
 ### Agent config sync (two-way, WSL <-> Windows)
 
 `tools/agent-config-sync/sync.py` keeps agent instruction files identical in
-the WSL and Windows homes: the canonical `AGENTS.md`, `CLAUDE.md`,
-`~/.claude/instructions/`, and the config-secrets guard. It regenerates the
+the WSL and Windows homes: the canonical `AGENTS.md`, the review council's
+`council.toml`, `CLAUDE.md`, `~/.claude/instructions/`, and the
+config-secrets guard. It regenerates the
 per-CLI copies of `AGENTS.md` (Codex, Copilot, Gemini).
 
 - Neither side is the authority. A change on one side is copied to the other.

@@ -1,6 +1,6 @@
 ---
 name: agent-config-sync
-description: Check and sync agent instruction files between WSL and Windows — the canonical AGENTS.md, CLAUDE.md, ~/.claude/instructions, the per-CLI AGENTS.md copies (Codex, Copilot, Gemini), and the config-secrets guard — and flag settings/hooks drift. Use when the user asks "are my agent rules in sync", "sync my agent instructions", "check config drift", "is Windows out of date", or why an agent behaves differently on WSL and Windows. Not for skills, plugins, or agents (Claude Code syncs those), and not for the public mirror (/publish-claude-config).
+description: Check and sync agent instruction files between WSL and Windows — the canonical AGENTS.md, the review council's council.toml, CLAUDE.md, ~/.claude/instructions, the per-CLI AGENTS.md copies (Codex, Copilot, Gemini), and the config-secrets guard — and flag settings/hooks drift. Use when the user asks "are my agent rules in sync", "sync my agent instructions", "check config drift", "is Windows out of date", or why an agent behaves differently on WSL and Windows. Not for skills, plugins, or agents (Claude Code syncs those), and not for the public mirror (/publish-claude-config).
 ---
 
 # Agent instruction sync
