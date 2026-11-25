@@ -131,6 +131,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │                                      #   screenshots); cross-platform launcher
 ├── tools/                             # Standalone tooling, installed separately
 │   ├── agent-config-sync/             # Report/reconcile agent-config drift between runtimes
+│   ├── council/                       # Review council: several reviewer models, one config file
 │   ├── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
 │   └── runbook/                       # Central runbook: one local page for every step
 │                                      #   waiting on you, across all repos (stdlib Python)
@@ -414,6 +415,23 @@ per-CLI copies of `AGENTS.md` (Codex, Copilot, Gemini).
 - Skills, plugins and agents are out of scope (Claude Code syncs them).
 
 Skill: `agent-config-sync`. Operator guide: `Docs/agent-config-sync.md`.
+
+### Review council (several reviewer models, one config file)
+
+`tools/council/council.py` sends one committed change to every model on the
+council and collects the answers. The line-up is data: `config/council.toml`
+(or your own `~/.config/agents/council.toml`) names each member, its CLI
+(Codex, Antigravity, Copilot, Claude Code), model and effort, plus the default
+seating and any named councils.
+
+- Every member gets the same prompt and the same diff file, and runs read-only.
+- An empty, truncated or off-format answer is a failed review, never a clean
+  one. Exit code 10 means at least one member did not review the change.
+- A repository can choose its seating in `.agents/council.toml`, but cannot
+  define a member: that file is part of the change under review.
+- Standard library only; runs from PowerShell or WSL.
+
+Guide: [`tools/council/README.md`](tools/council/README.md).
 
 ### Central runbook — every step waiting on you, in one place
 

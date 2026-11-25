@@ -28,6 +28,7 @@ jobs:
           - claude/skills/land-pr
           - claude/skills/version-manager
           - tools/agent-config-sync
+          - tools/council
           - tools/runbook
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

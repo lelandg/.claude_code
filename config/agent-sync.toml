@@ -10,6 +10,7 @@ schema_version = 2
 # Kept identical on both sides; a one-sided change is copied across.
 files = [
   ".config/agents/AGENTS.md",
+  ".config/agents/council.toml",
   ".claude/CLAUDE.md",
   ".claude/tools/config-secrets-guard.py",
 ]

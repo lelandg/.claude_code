@@ -1,0 +1,49 @@
+# The review council: which models review a change, and through which CLI.
+# Read by tools/council/council.py. Copy this to ~/.config/agents/council.toml
+# to change the line-up for every repository on the machine.
+#
+# A member is  [members.<name>]  with:
+#   cli     codex | agy | copilot | claude   (the command shapes live in council.py)
+#   model   the model id that CLI takes. For agy give the id without the
+#           effort suffix; the effort is appended (gemini-4-neon + high).
+#   effort  low | medium | high | xhigh | max   (optional; "max" needs --allow-max)
+#   timeout seconds, 30-7200 (default 1800)
+#
+# A repository may add .agents/council.toml with `default`, `[councils.*]` and
+# `focus` only. It cannot define members: that file is part of the change
+# being reviewed.
+
+schema_version = 1
+
+# Who reviews when neither --members nor --council is given. A member that is
+# defined but not listed here sits only when a council or --members names it.
+default = ["astra", "neon"]
+
+[members.astra]
+cli = "codex"
+model = "gpt-6-astra"
+effort = "high"
+
+[members.neon]
+cli = "agy"
+model = "gemini-4-neon"
+effort = "high"
+
+[members.claude]
+cli = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+
+# Copilot serves its own catalog; Astra and Neon are not in it. Run
+# `copilot` and `/model` to see what the account offers.
+[members.copilot]
+cli = "copilot"
+model = "gpt-6.1-terra"
+effort = "high"
+
+# Named councils: `council review --council security`.
+[councils.security]
+members = ["astra", "neon", "claude"]
+
+[councils.quick]
+members = ["astra"]
