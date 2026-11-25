@@ -707,6 +707,18 @@ def execute(inv: Invocation, timeout: int) -> tuple[int, str, str]:
     return proc.returncode, out, err
 
 
+def _no_constant(name: str):
+    # NaN and Infinity are not JSON; left in, they make summary.json unreadable.
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):          # 1e400 decodes to infinity
+        raise ValueError(f"{text} is out of range")
+    return value
+
+
 def parse_answer(text: str) -> dict | None:
     """The JSON answer the prompt asks for, or None.
 
@@ -720,7 +732,11 @@ def parse_answer(text: str) -> dict | None:
     The prompt asks for the object and nothing else, so a well-formed reply
     never trips this.
     """
-    decoder = json.JSONDecoder(strict=False)
+    decoder = json.JSONDecoder(strict=False, parse_constant=_no_constant, parse_float=_finite_float)
+    # The reply's first structural character decides whether it is an array of answers.
+    body = re.sub(r"^\s*```(?:json)?", "", text).lstrip()
+    if body.startswith("["):
+        return None
     found, pos = None, 0
     while True:
         start = text.find("{", pos)
@@ -731,8 +747,9 @@ def parse_answer(text: str) -> dict | None:
         except (ValueError, RecursionError):        # RecursionError: nested past the decoder's limit
             return None
         if isinstance(obj, dict) and "verdict" in obj:
-            # An answer that is an element of an array is off-format too, closed or not.
-            if text[:start].rstrip().endswith(("[", ",")) or text[end:].lstrip().startswith(("]", ",")):
+            # An answer that is an element of an array is off-format too. Brackets
+            # only: a comma before the answer is ordinary prose ("For this commit,").
+            if text[:start].rstrip().endswith("[") or text[end:].lstrip().startswith("]"):
                 return None
             found = obj
         pos = end
@@ -885,7 +902,7 @@ def review(cfg: Config, members: list[Member], repo: Path, base: str | None, hea
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
             results = list(pool.map(lambda j: run_member(j, change["head_sha"], runner), jobs))
     summary = {"repo": str(repo), "out": str(out), "config": cfg.sources, "change": change, "members": results}
-    (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (out / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     # A member's title can hold a lone surrogate that JSON allows and UTF-8 does not.
     (out / "summary.md").write_text(render(summary), encoding="utf-8", errors="backslashreplace", newline="\n")
     return summary
