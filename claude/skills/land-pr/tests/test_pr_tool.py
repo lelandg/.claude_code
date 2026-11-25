@@ -1581,17 +1581,23 @@ def test_commit_list_behind_the_head_trusts_nothing_but_the_head():
 
 
 def test_review_of_a_lagging_commit_list_does_not_cover_the_head():
-    # CodeRabbit on #27: the list still ends at the reviewed commit A while
-    # the head is already C, so the review says nothing about C.
+    # CodeRabbit and Neon on #27: the list still ends at commit A while the
+    # head is already C, so nothing read from the list describes C.
     a = "a" * 40
-    t = NOW - timedelta(minutes=30)
-    node = _node([(a, "fix: thing", t)], reviews=[("coderabbitai", a)],
-                 comments=[("coderabbitai", t + timedelta(minutes=3))])
-    assert _pr(node).reviewed_head
-    node["pullRequest"]["headRefOid"] = "c" * 40
-    pr = _pr(node)
-    assert not pr.reviewed_head
-    assert pt.classify(pr, NOW, ME).state != "READY"
+    t = NOW - timedelta(minutes=40)
+    for reviews, checks in (([("coderabbitai", a)], ["ci", "CodeRabbit"]),
+                            ([], ["ci"])):       # with and without a reviewer
+        node = _node([(a, "fix: thing", t)], reviews=reviews,
+                     comments=[("coderabbitai", t + timedelta(minutes=3))]
+                     if reviews else [],
+                     rollup=["ci"], tail=[(a, t, checks)])
+        node["pullRequest"]["updatedAt"] = t.isoformat()
+        node["pullRequest"]["headRefOid"] = "c" * 40
+        pr = _pr(node)
+        assert pr.commits_lagging and not pr.reviewed_head
+        v = pt.classify(pr, NOW, ME)
+        assert v.state == "WAITING", v
+        assert "caught up" in " ".join(v.reasons)
 
 
 def test_bad_trust_config_is_an_error(monkeypatch, tmp_path):

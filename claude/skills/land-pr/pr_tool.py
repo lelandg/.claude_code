@@ -305,6 +305,7 @@ class PR:
     head_oid: str = ""
     code_oid: str = ""             # last commit not the lander's own ("": head)
     mech_oids: list[str] = field(default_factory=list)  # proven lander commits after it
+    commits_lagging: bool = False  # commit list not yet at headRefOid
     mergeable: str = "MERGEABLE"   # MERGEABLE | CONFLICTING | UNKNOWN
     merge_state: str = "CLEAN"
     created: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -746,6 +747,7 @@ def pr_from_node(repo: str, repo_node: dict,
         # the head, so an approval has to name the head itself.
         code_oid=(head.get("code_oid") or "") if commits_current else "",
         mech_oids=list(head.get("mech_oids") or []) if commits_current else [],
+        commits_lagging=bool(n.get("headRefOid")) and not commits_current,
         mergeable=n.get("mergeable") or "UNKNOWN",
         merge_state=n.get("mergeStateStatus") or "UNKNOWN",
         created=_when(n.get("createdAt")), updated=_when(n.get("updatedAt")),
@@ -918,6 +920,11 @@ def classify(pr: PR, now: datetime, trusted: set[str],
         return verdict("DRAFT")
     if pr.unverifiable:
         return verdict("BLOCKED", *(f"cannot verify: {u}" for u in pr.unverifiable))
+    if pr.commits_lagging:
+        # Every head fact (push time, checks, workflows, reviews) was read
+        # from an older commit: nothing about the real head is known yet.
+        return verdict("WAITING", "GitHub's commit list has not caught up "
+                       "with the head yet")
     if pr.default_branch and pr.base != pr.default_branch:
         # Landing means reaching the default branch. Merging this one would
         # only fold it into another PR's branch, behind that PR's back, and
