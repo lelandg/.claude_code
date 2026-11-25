@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -379,12 +380,19 @@ def default_base(repo: Path) -> str:
     raise CouncilError("cannot find the base branch; pass --base <remote>/<branch>")
 
 
+def resolve_base(repo: Path, base: str | None) -> tuple[str, str]:
+    """(base ref, base tip sha)."""
+    base = base or default_base(repo)
+    if base.startswith("-"):
+        raise CouncilError("base and head must be refs, not options")
+    return base, git(repo, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
+
+
 def resolve_range(repo: Path, base: str | None, head: str) -> tuple[str, str, str, str]:
     """(base ref, base tip sha, merge-base sha, head sha) for the change under review."""
-    base = base or default_base(repo)
-    if base.startswith("-") or head.startswith("-"):
+    if head.startswith("-"):
         raise CouncilError("base and head must be refs, not options")
-    base_sha = git(repo, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
+    base, base_sha = resolve_base(repo, base)
     head_sha = git(repo, "rev-parse", "--verify", f"{head}^{{commit}}").strip()
     return base, base_sha, git(repo, "merge-base", base_sha, head_sha).strip(), head_sha
 
@@ -405,17 +413,24 @@ def collect_change(repo: Path, base: str | None, head: str, shared: Path,
     base, base_tip, merge_base, head_sha = resolved or resolve_range(repo, base, head)
     # No external diff and no textconv: either could show the reviewers something
     # other than the committed change.
-    diff = git(repo, "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{merge_base}..{head_sha}")
+    # Submodule pointer changes are shown whatever diff.ignoreSubmodules says.
+    # Bytes, not text: a change of line endings must stay visible.
+    proc = subprocess.run(["git", "-C", str(repo), "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+                           "--ignore-submodules=none", "--submodule=short", f"{merge_base}..{head_sha}"],
+                          capture_output=True)
+    if proc.returncode != 0:
+        raise CouncilError(f"git diff failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
+    diff = proc.stdout
     if not diff.strip():
         raise CouncilError(f"nothing to review: {base}...{head} is empty")
     log = git(repo, "log", "--no-decorate", "--format=%h %s%n%n%b", f"{merge_base}..{head_sha}").strip()
-    (shared / "change.diff").write_text(diff, encoding="utf-8", newline="\n")
+    (shared / "change.diff").write_bytes(diff)
     (shared / "commits.txt").write_text(log + "\n", encoding="utf-8", newline="\n")
     return {
         "base": base, "head": head, "base_sha": merge_base, "base_tip": base_tip, "head_sha": head_sha,
         "branch": git(repo, "rev-parse", "--abbrev-ref", head, check=False).strip() or head,
         "subject": git(repo, "log", "-1", "--format=%s", head_sha).strip(),
-        "diff_bytes": len(diff.encode("utf-8")),
+        "diff_bytes": len(diff),
         # Only committed work is reviewed; say so when the checkout holds more.
         "uncommitted_work_not_reviewed": bool(git(repo, "status", "--porcelain").strip()),
     }
@@ -539,8 +554,21 @@ Returns the snapshot folder and the auto-loaded paths the change touched;
     # Restore from the base under the spelling the base tree actually uses.
     at_base = [path.decode("utf-8", "surrogateescape") for _m, _o, path in _ls_tree(repo, base)
                if autoloaded(path.decode("utf-8", "surrogateescape"))]
+    for path in at_base:
+        # The head may hold a file where the base has a folder (".claude" as a
+        # file, say): move it aside so the base's files can be written.
+        for parent in reversed(Path(path).parents[:-1]):
+            blocker = tree / parent
+            if blocker.exists() and not blocker.is_dir():
+                target = kept / parent
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(blocker), str(target))
     if at_base:
-        skipped += _export(repo, base, at_base, tree)
+        unrestored = _export(repo, base, at_base, tree)
+        if unrestored:
+            # Without them a reviewer's CLI would load the change's own settings or rules.
+            raise CouncilError("could not put the base branch's version of these auto-loaded files into "
+                               "the snapshot, so no reviewer was started: " + ", ".join(unrestored))
     change["snapshot_skipped"] = skipped
     return tree, touched
 
@@ -703,6 +731,9 @@ def parse_answer(text: str) -> dict | None:
         except (ValueError, RecursionError):        # RecursionError: nested past the decoder's limit
             return None
         if isinstance(obj, dict) and "verdict" in obj:
+            # An answer that is an element of an array is off-format too, closed or not.
+            if text[:start].rstrip().endswith(("[", ",")) or text[end:].lstrip().startswith(("]", ",")):
+                return None
             found = obj
         pos = end
     return found
@@ -740,6 +771,10 @@ def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, st
                 and str(f.get("severity")).lower() in SEVERITIES):
             return "failed", ("a finding lacks a severity (critical, major or minor) or one of: "
                               + ", ".join(FINDING_TEXT)), answer
+        line = f.get("line")
+        if isinstance(line, float) and not math.isfinite(line):
+            # JSON's NaN and Infinity decode fine and then make summary.json unreadable.
+            return "failed", "a finding has a line number that is not a finite number", answer
     if verdict == "clean" and findings:
         return "failed", "verdict is clean but findings are listed", answer
     if verdict == "clean" and not_reviewed:
@@ -752,9 +787,9 @@ def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, st
 
 def run_member(job: Job, head_sha: str, runner=execute) -> dict:
     m = job.member
-    job.out.mkdir(parents=True, exist_ok=True)
     code, text, err, early = None, "", "", ""
     try:
+        job.out.mkdir(parents=True, exist_ok=True)   # can fail on a path too long for this member
         inv = DRIVERS[m.cli](job)        # a driver may refuse (an over-long prompt, say)
         (job.out / "cmd.txt").write_text(" ".join(_shown(inv.argv, job.prompt)) + "\n", encoding="utf-8")
         code, text, err = runner(inv, m.timeout)
@@ -802,6 +837,9 @@ def reserve(out: Path) -> None:
     diff. Creating the marker file with O_EXCL is the atomic step: of two runs
     given the same folder, exactly one gets it.
     """
+    for parent in out.parents:
+        if (parent / ".council-run").exists():
+            raise CouncilError(f"results folder {out} is inside another run's folder ({parent})")
     existing = next(p for p in (out, *out.parents) if p.exists())
     inside = subprocess.run(["git", "-C", str(existing), "rev-parse", "--show-toplevel"],
                             capture_output=True, text=True)
@@ -937,9 +975,11 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
         repo = Path(args.repo).resolve() if args.repo else None
         overlay = resolved = None
         if repo is not None:
-            head = "HEAD" if args.cmd == "list" else args.head
-            resolved = resolve_range(repo, args.base, head)
-            overlay = base_overlay(repo, resolved[1])
+            if args.cmd == "list":       # only the base's council file matters; no head, no merge base
+                overlay = base_overlay(repo, resolve_base(repo, args.base)[1])
+            else:
+                resolved = resolve_range(repo, args.base, args.head)
+                overlay = base_overlay(repo, resolved[1])
         cfg = load_config(find_config(args.config), overlay)
         if args.cmd == "list":
             return cmd_list(cfg)

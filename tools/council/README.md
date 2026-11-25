@@ -34,7 +34,7 @@ extra pass (the adversarial one, say), not in place of the default review.
 
 | Code | Meaning |
 |---|---|
-| 0 | Every seated member returned a usable answer (clean or with findings) |
+| 0 | Every seated member returned a usable answer (clean or with findings). Also `list`, and `review --dry-run`, which calls nobody: a dry run's 0 is not a review |
 | 10 | At least one member failed. The others' answers are still there |
 | 20 | The run could not start (bad config, nothing to review) |
 

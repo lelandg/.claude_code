@@ -57,11 +57,11 @@ def repo(tmp_path: Path) -> Path:
     # A workstation's global hooks (a secret scanner, say) must not run in fixtures.
     (tmp_path / "no-hooks").mkdir()
     sh(r, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
-    (r / "a.txt").write_text("one\n", encoding="utf-8")
+    (r / "a.txt").write_bytes(b"one\n")            # bytes: write_text would make CRLF on Windows
     sh(r, "add", "-A")
     sh(r, "commit", "-q", "-m", "base")
     sh(r, "branch", "base")
-    (r / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+    (r / "a.txt").write_bytes(b"one\ntwo\n")
     sh(r, "commit", "-q", "-am", "add two")
     return r
 
@@ -363,7 +363,7 @@ def test_collect_change_writes_diff_and_log(repo, tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     change = council.collect_change(repo, "base", "HEAD", out)
-    assert "+two" in (out / "change.diff").read_text(encoding="utf-8")
+    assert b"+two" in (out / "change.diff").read_bytes()
     assert "add two" in (out / "commits.txt").read_text(encoding="utf-8")
     assert change["head_sha"] == head_of(repo) and change["subject"] == "add two"
     assert change["uncommitted_work_not_reviewed"] is False
@@ -408,7 +408,7 @@ def test_snapshot_uses_the_base_tips_rules_when_only_the_base_changed_them(repo,
     sh(repo, "add", "-A")
     sh(repo, "commit", "-q", "-m", "branch carries the old rules")       # in both: this is the merge base
     sh(repo, "branch", "-f", "base")
-    (repo / "a.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (repo / "a.txt").write_bytes(b"one\ntwo\nthree\n")
     sh(repo, "commit", "-q", "-am", "the change: a.txt only")
     sh(repo, "checkout", "-q", "base")
     (repo / "AGENTS.md").write_text("# new rules\n", encoding="utf-8")
@@ -486,13 +486,50 @@ def test_snapshot_reports_names_the_filesystem_cannot_tell_apart(repo, tmp_path)
     assert change["snapshot_skipped"] == (["auth.py"] if folds_case else [])
 
 
+def test_diff_keeps_line_endings_and_submodule_pointers(repo, tmp_path):
+    (repo / "a.txt").write_bytes(b"one\r\ntwo\r\n")
+    sh(repo, "-c", "core.autocrlf=false", "commit", "-q", "-am", "LF to CRLF")
+    sh(repo, "config", "diff.ignoreSubmodules", "all")
+    sh(repo, "update-index", "--add", "--cacheinfo", "160000," + "1" * 40 + ",vendor/lib")
+    sh(repo, "commit", "-q", "-m", "add a submodule pointer")
+    council.collect_change(repo, "base", "HEAD", tmp_path)
+    diff = (tmp_path / "change.diff").read_bytes()
+    assert b"+one\r\n" in diff and b"1" * 40 in diff
+
+
+def test_a_base_settings_file_blocked_by_the_head_is_still_restored(repo, tmp_path):
+    sh(repo, "checkout", "-q", "base")
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "settings.json").write_bytes(b'{"base": true}')
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "settings on base")
+    sh(repo, "checkout", "-q", "main")
+    sh(repo, "rebase", "-q", "base")
+    sh(repo, "rm", "-q", "-r", ".claude")
+    (repo / ".claude").write_bytes(b"now a file")
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "replace the folder with a file")
+    out = tmp_path / "run"
+    out.mkdir()
+    change = council.collect_change(repo, "base", "HEAD", out)
+    tree, touched = council.snapshot(repo, change, out)
+    assert (tree / ".claude" / "settings.json").read_bytes() == b'{"base": true}'
+    assert (out / "changed-autoloaded" / ".claude").read_bytes() == b"now a file"
+
+
+def test_list_needs_only_the_base(cfg_file, repo, capsys):
+    sh(repo, "checkout", "-q", "--orphan", "unrelated")
+    sh(repo, "commit", "-q", "--allow-empty", "-m", "no common ancestor")
+    assert council.main(["--config", str(cfg_file), "list", "--repo", str(repo), "--base", "base"]) == council.EXIT_OK
+
+
 def test_diff_ignores_a_textconv_driver(repo, tmp_path):
     (repo / ".gitattributes").write_text("*.txt diff=hide\n", encoding="utf-8")
     sh(repo, "config", "diff.hide.textconv", "git hash-object --stdin <")      # would hide the real lines
     sh(repo, "add", "-A")
     sh(repo, "commit", "-q", "-m", "attributes")
     council.collect_change(repo, "base", "HEAD", tmp_path)
-    assert "+two" in (tmp_path / "change.diff").read_text(encoding="utf-8")
+    assert b"+two" in (tmp_path / "change.diff").read_bytes()
 
 
 def test_snapshot_catches_a_differently_cased_rule_file(repo, tmp_path):
@@ -614,6 +651,13 @@ GOOD = {"severity": "major", "file": "a.txt", "line": 2, "title": "second line i
     (0, answer(HEAD, not_reviewed="all of it"), ("failed", "missing or not a list")),
     (0, answer(HEAD, not_reviewed=None), ("failed", "missing or not a list")),
     (0, answer(HEAD) + "\n```json\n{", ("failed", "no complete JSON")),
+    (0, "[" + json.dumps({"verdict": "clean", "reviewed_head": HEAD, "findings": [], "not_reviewed": []}) + "]",
+     ("failed", "no complete JSON")),
+    (0, "[" + json.dumps({"verdict": "clean", "reviewed_head": HEAD, "findings": [], "not_reviewed": []}),
+     ("failed", "no complete JSON")),
+    (0, '```json\n{"verdict": "findings", "reviewed_head": "' + HEAD + '", "not_reviewed": [], "findings": '
+        '[{"severity": "major", "file": "a", "title": "t", "detail": "d", "line": NaN}]}\n```',
+     ("failed", "not a finite number")),
     (0, json.dumps({"verdict": "clean", "reviewed_head": HEAD, "findings": [], "not_reviewed": []}) + '{"verdict": "findings", "cut',
      ("failed", "no complete JSON")),
     (0, '{"review": ' + json.dumps({"verdict": "clean", "reviewed_head": HEAD, "findings": [], "not_reviewed": []}),
@@ -634,7 +678,7 @@ def test_parse_answer_takes_the_last_complete_answer():
     assert council.parse_answer('note {not json} {"verdict": "clean", "findings": []}') is None
     wrapped = '{"metadata": {"a": 1}, "review": {"verdict": "clean", "findings": []}'
     assert council.parse_answer(wrapped) is None
-    assert council.parse_answer("[" * 100000 + '{"verdict": "clean"}') is not None      # arrays are not scanned
+    assert council.parse_answer("[" * 100000 + '{"verdict": "clean"}') is None          # an array wrapper
     assert council.parse_answer('{"a": ' * 100000) is None                              # decoder limit, no crash
     assert council.parse_answer('```json\n{"other": 1}\n```') is None
     # a finding may quote a code fence or braces
@@ -732,6 +776,8 @@ def test_only_one_run_can_claim_a_folder(tmp_path):
         council.reserve(tmp_path / "r")
     (tmp_path / "used").mkdir()
     (tmp_path / "used" / "old.md").write_text("x", encoding="utf-8")
+    with pytest.raises(council.CouncilError, match="inside another run"):
+        council.reserve(tmp_path / "r" / "tree")
     with pytest.raises(council.CouncilError, match="not empty"):
         council.reserve(tmp_path / "used")
     assert not (tmp_path / "used" / ".council-run").exists()

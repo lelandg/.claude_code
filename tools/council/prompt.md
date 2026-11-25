@@ -30,11 +30,11 @@ In priority order when no narrower focus is given:
 3. Contracts outside the diff: other callers of a changed function, and any policy, environment variable, migration, deploy step or doc the change needs but does not update.
 4. Tests: new behaviour with no test, or a test that cannot fail.
 5. Rules and docs that agents follow: report only a rule that contradicts another file or the repo's configuration, a claimed enforcement that nothing enforces, or a procedure that cannot be followed as written.
-Leave out formatting, naming, wording, and anything a linter reports. Those cost the author a round trip and change nothing.
+Leave out formatting, naming, wording, and style-only points a linter would raise. Those cost the author a round trip and change nothing. A real defect stays in even when a linter would also catch it (an undefined name on a path that runs, say).
 </focus>
 
 <evidence>
-Before reporting a finding, open the file and confirm it against the code as it is at {{HEAD_SHA}}; quote the line or lines. Check whether the case is already handled somewhere else. If you could not confirm a suspicion, either drop it or report it with confidence "medium" and say what you could not check. Say which concrete input, sequence of events or state makes it go wrong.
+Before reporting a finding, open the file and confirm it against the code as it is at {{HEAD_SHA}}; quote the line or lines. For a file or lines the change deletes, the snapshot no longer has them: quote the removed lines from the diff instead, and that is full evidence. Check whether the case is already handled somewhere else. If you could not confirm a suspicion, either drop it or report it with confidence "medium" and say what you could not check. Say which concrete input, sequence of events or state makes it go wrong.
 </evidence>
 
 <output>
