@@ -13,18 +13,22 @@ python tools/council/council.py review --repo /path/to/repo --dry-run
 ```
 
 `review` diffs `HEAD` against the remote's default branch (override with
-`--base` / `--head`), writes `change.diff`, `commits.txt` and `prompt.md` to a
-results folder, and runs every seated member at the same time. Each member
-gets the same prompt, runs read-only, and writes to its own subfolder
-(`result.md`, `err.txt`, `cmd.txt`). `summary.md` and `summary.json` hold the
-combined result.
+`--base` / `--head`), writes `change.diff`, `commits.txt`, `prompt.md` and a
+snapshot of the head commit (`tree/`) to a results folder, and runs every
+seated member at the same time. Each member gets the same prompt, runs
+read-only inside the snapshot, and writes to its own subfolder (`result.md`,
+`err.txt`, `cmd.txt`). `summary.md` and `summary.json` hold the combined
+result.
 
-Commit first. Members read files from the working tree, so the run refuses to
-start when tracked files are edited or another commit is checked out
-(`--allow-mismatch` overrides, and the summary says so), and warns about
-untracked files. Each run claims its own results folder: one that was used
+Commit first: only committed work is reviewed. Members read the snapshot, not
+your checkout, so uncommitted edits, untracked files and anything you do while
+the review runs stay out of it (the summary says when the checkout held more
+than the commit). Each run claims its own results folder: one that was used
 before, or is in use by another run, is refused, so an earlier answer can
 never be read back as a new one.
+
+A named council replaces the default seating for that run. Use one for an
+extra pass (the adversarial one, say), not in place of the default review.
 
 ## Exit codes
 
@@ -96,16 +100,30 @@ cd tools/council && python -m pytest -q
 
 ## What the reviewers can read
 
-The results folder gets a `rules/` subfolder with trusted copies: your global
-`AGENTS.md`, your `~/.claude/instructions/*.md`, and the repository's
-`AGENTS.md` (or `CLAUDE.md`) **as it is on the base branch**. Copies, because
-a sandboxed member cannot read your home directory, and because a change that
-edits a rule file must be judged as a change, not obeyed as a rule.
+- `tree/` is an export of the head commit. Agent CLIs load some files by
+  themselves at start-up: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+  `.github/copilot-instructions.md`, `.claude/settings*.json`, `.mcp.json`,
+  `.vscode/mcp.json`, `.codex/`, `.gemini/`, `.copilot/`. In the snapshot
+  those root-level paths hold the **base branch's** versions, so a change
+  cannot rewrite its reviewers' instructions, add a hook, or add an MCP
+  server. What the change proposes for them is in `changed-autoloaded/` and
+  in the diff, and the prompt says so. Nested instruction files in
+  subfolders are not swapped.
+- `rules/` holds trusted copies of your global `AGENTS.md`, your
+  `~/.claude/instructions/*.md`, and the repository's rule files from the
+  base branch. Copies, because a sandboxed member cannot read your home
+  directory.
 
-Each member runs with its CLI's read-only mode: Codex `-s read-only`, agy
-`--mode plan --sandbox`, Copilot with write, shell and memory tools denied,
-Claude Code with only Read, Grep and Glob and no MCP servers. On Windows the
-CLI must be a real executable or a `.ps1` shim; a `.cmd` shim is refused when
-an argument could be re-parsed by `cmd.exe`.
+Each member runs with its CLI's read-only mode: Codex `-s read-only` with no
+MCP servers; agy `--mode plan --sandbox`; Copilot with only the read tool
+allowed, no custom instructions and nothing it can ask to approve; Claude
+Code with only Read, Grep and Glob, no MCP servers and user settings only.
+These are the CLIs' own controls: the runner cannot make a CLI safer than its
+read-only mode is. agy and Copilot have no switch that turns off every
+user-configured MCP server; they rely on the tool allow-list.
+
+On Windows a `.cmd` shim is refused when an argument could be re-parsed by
+`cmd.exe`; the `.ps1` shim npm installs beside it is used instead when it
+exists.
 
 The tests use temporary repositories and a fake runner. They never call a model.

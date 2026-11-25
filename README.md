@@ -425,11 +425,13 @@ council and collects the answers. The line-up is data: `config/council.toml`
 (Codex, Antigravity, Copilot, Claude Code), model and effort, plus the default
 seating and any named councils.
 
-- Every member gets the same prompt and the same diff file, and runs read-only.
+- Every member gets the same prompt and the same diff file, and runs read-only
+  in a snapshot of the commit, where the files a CLI loads by itself
+  (`AGENTS.md`, settings, MCP configs) are the base branch's versions.
 - An empty, truncated or off-format answer is a failed review, never a clean
   one. Exit code 10 means at least one member did not review the change.
-- A repository can choose its seating in `.agents/council.toml`, but cannot
-  define a member: that file is part of the change under review.
+- A repository can add members to the seating in `.agents/council.toml`, read
+  from the base branch. It cannot define a member or drop one you seated.
 - Standard library only; runs from PowerShell or WSL.
 
 Guide: [`tools/council/README.md`](tools/council/README.md).
