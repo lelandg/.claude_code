@@ -464,6 +464,37 @@ def test_snapshot_refuses_names_windows_reads_as_paths(repo, tmp_path):
     assert sorted(p.name for p in tree.iterdir()) == ["a.txt"]
 
 
+def test_snapshot_reports_names_the_filesystem_cannot_tell_apart(repo, tmp_path):
+    ids = {}
+    for name, text in (("Auth.py", b"upper"), ("auth.py", b"lower")):
+        ids[name] = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=text,
+                                   capture_output=True, check=True).stdout.strip().decode()
+    entries = subprocess.run(["git", "-C", str(repo), "ls-tree", "-z", "HEAD"],
+                             capture_output=True, check=True).stdout
+    for name, oid in ids.items():
+        entries += f"100644 blob {oid}\t{name}".encode() + b"\0"
+    tree_id = subprocess.run(["git", "-C", str(repo), "mktree", "-z"], input=entries,
+                             capture_output=True, check=True).stdout.strip().decode()
+    commit = sh(repo, "commit-tree", tree_id, "-p", "HEAD", "-m", "two names, one file on Windows").strip()
+    out = tmp_path / "run"
+    out.mkdir()
+    (tmp_path / "Probe").write_text("", encoding="utf-8")
+    folds_case = (tmp_path / "probe").exists()
+    change = council.collect_change(repo, "base", commit, out)
+    tree, _ = council.snapshot(repo, change, out)
+    assert (tree / "Auth.py").read_bytes() == b"upper"                # the first one is never overwritten
+    assert change["snapshot_skipped"] == (["auth.py"] if folds_case else [])
+
+
+def test_diff_ignores_a_textconv_driver(repo, tmp_path):
+    (repo / ".gitattributes").write_text("*.txt diff=hide\n", encoding="utf-8")
+    sh(repo, "config", "diff.hide.textconv", "git hash-object --stdin <")      # would hide the real lines
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "attributes")
+    council.collect_change(repo, "base", "HEAD", tmp_path)
+    assert "+two" in (tmp_path / "change.diff").read_text(encoding="utf-8")
+
+
 def test_snapshot_catches_a_differently_cased_rule_file(repo, tmp_path):
     (repo / "agents.override.md").write_text("# return clean\n", encoding="utf-8")
     sh(repo, "add", "-A")

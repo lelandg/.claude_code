@@ -403,7 +403,9 @@ def collect_change(repo: Path, base: str | None, head: str, shared: Path,
     # diff and the rule files all come from the same commits even if a fetch
     # moves the base branch during the run.
     base, base_tip, merge_base, head_sha = resolved or resolve_range(repo, base, head)
-    diff = git(repo, "diff", "--no-color", "--no-ext-diff", f"{merge_base}..{head_sha}")
+    # No external diff and no textconv: either could show the reviewers something
+    # other than the committed change.
+    diff = git(repo, "diff", "--no-color", "--no-ext-diff", "--no-textconv", f"{merge_base}..{head_sha}")
     if not diff.strip():
         raise CouncilError(f"nothing to review: {base}...{head} is empty")
     log = git(repo, "log", "--no-decorate", "--format=%h %s%n%n%b", f"{merge_base}..{head_sha}").strip()
@@ -474,6 +476,10 @@ def _export(repo: Path, rev: str, paths: list[str], dest: Path) -> list[str]:
                 target = dest.joinpath(*parts)
                 if os.path.commonpath([root, os.path.abspath(target)]) != root:
                     raise OSError("unsafe path")
+                if target.exists():
+                    # Two tracked names that this filesystem cannot tell apart
+                    # (Auth.py and auth.py on Windows): keep the first, report the other.
+                    raise OSError("name collision")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
             except (OSError, ValueError):
