@@ -234,7 +234,7 @@ cloud and project sessions do not have them. Every call pins
   run's `tree/` snapshot). `<effort>` is `high`, or `xhigh`
   for the adversarial pass.
 - **Quick manual review** — commit first, then the built-in reviewer:
-  `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high --ephemeral -o <result.md> --base <remote>/<base>`
+  `codex exec -s read-only -C <repo> review -m gpt-6-astra -c model_reasoning_effort=high -c mcp_servers={} --ephemeral -o <result.md> --base <remote>/<base>`
   `<base>` is the PR's real base branch (`main` or `master`). `--commit <sha>`
   reviews one commit; `--uncommitted` is a pre-commit look only, never the gate.
 - **Rescue** (investigation / fix delegation, writes) — clean `git status`,
@@ -347,8 +347,13 @@ Without the runner at all (the `.claude_code` checkout predates
 a self-contained read-only review prompt that names those two files, the
 base and head, and the rule files that bind the change (the `{{FIELDS}}` of
 `tools/council/prompt.md`, filled by hand, when you have that file), and
-pass `--add-dir` for the repo, that folder, `~/.config/agents` and
-`~/.claude/instructions`. `<base>` is the PR's real base branch (`main`,
+pass `--add-dir` for a clean checkout of the head commit, that folder,
+`~/.config/agents` and `~/.claude/instructions`. The checkout must hold
+exactly the commit the diff describes: a working tree with uncommitted
+edits would be read as if it were the change, so use one where
+`git status` is clean, or a detached one made for the review
+(`git -C <repo> worktree add --detach <new folder> HEAD`, removed
+afterwards). `<base>` is the PR's real base branch (`main`,
 `master`, ...), never assumed; stop if the fetch or the diff fails, because
 an empty diff still produces an answer.
 

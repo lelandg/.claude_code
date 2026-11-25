@@ -113,4 +113,6 @@ the level and drafts notes from commit subjects; that lands, but reads worse.
   <abs-path> check`, then `backfill --apply` once per repo. A repo with no
   version location lands without a bump and the lander says so; backfill it.
   Full workflow: the `version-manager` skill.
-- A non-functional change (rule 4) needs no bump and skips the PR altogether.
+- A non-functional change that qualifies for a direct commit under rule 4
+  (its conditions are in `~/.claude/instructions/git-workflow.md`) needs no
+  bump and no PR. One that does not qualify is a PR like any other.

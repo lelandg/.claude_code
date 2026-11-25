@@ -117,18 +117,25 @@ scanners still run. Report what ran and what it found in the PR body.
 PR, not a separate chore. Two commands, both free:
 
 ```bash
-gh pr list --author app/dependabot --state open --json number,title,mergeStateStatus
+gh pr list --author app/dependabot --state open --limit 200 --json number,title,mergeStateStatus
 ```
 
 ```bash
-gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/dependabot/alerts" --paginate --jq '.[] | select(.state=="open") | [.security_advisory.severity, .dependency.package.name, .security_vulnerability.vulnerable_version_range, .security_vulnerability.first_patched_version.identifier, .dependency.manifest_path] | @tsv' | sort -u
+alerts=$(gh api "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/dependabot/alerts" --paginate --jq '.[] | select(.state=="open") | [.security_advisory.severity, .dependency.package.name, .security_vulnerability.vulnerable_version_range, .security_vulnerability.first_patched_version.identifier, .dependency.manifest_path] | @tsv') && printf '%s\n' "$alerts" | sort -u
 ```
+
+The first lists up to 200 PRs (the default is 30); if it returns 200, raise
+the limit. The second prints nothing but the error when the API call or its
+pagination fails, so a failed query cannot pass for an empty alert list.
 
 Then:
 
 - **Merge the green ones as you go.** A Dependabot PR that is green and does
   not touch a deployed artifact is a merge, not a review (`pr_tool.py land`;
-  bot PRs land without a version bump). Letting twenty pile up makes each one
+  bot PRs land without a version bump), once its version passes the rules
+  above: a security PR takes the lowest version that clears the advisory
+  (third bullet below), and a plain version-update PR's release is at least
+  7 days old. Letting twenty pile up makes each one
   riskier, not safer.
 - **"No PR" never means "no vulnerability."** Security PRs go missing for
   real reasons: a transitive-only dependency in a lockfile Dependabot cannot

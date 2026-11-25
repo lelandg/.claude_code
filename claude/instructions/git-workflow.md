@@ -43,8 +43,11 @@ Moved from `~/.config/agents/AGENTS.md` on 2026-11-24 so that file stays under a
    `core.hooksPath` — Husky, lefthook, the `pre-commit` framework — takes
    precedence over the global one, so git never starts the global hook and the
    gate is silently absent exactly where you assumed it was present.
-   `git config --local core.hooksPath` must come back empty, or that local hook
-   must invoke the global `pre-commit` itself. Until one of those is true, this
+   Check the effective value, not one scope: a worktree-level setting
+   (`config.worktree`) overrides them all, and `--local` alone does not show
+   it. `git config --show-origin --get core.hooksPath`, run in this checkout,
+   must name your global hooks directory, or the hook it names must invoke
+   the global `pre-commit` (the secret scan) itself. Until one of those is true, this
    repo is a PR-only repo whatever the paths say.
 
    For the same reason, a commit
