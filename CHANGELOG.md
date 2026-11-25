@@ -3,6 +3,12 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.17.0] - 2026-11-25
+
+- The shared `AGENTS.md` is now under 21 KB, so every agent CLI loads all of it; the full text of the scanning, git-workflow and landing rules moved to three new files under `instructions/`.
+- Reviews before a pull request are described as a review council of several models, chosen in one config file, instead of a fixed Codex review.
+- New rules: no agent runs the Sol model; every new repository starts from a secure template and is private; the guide records what each CLI loads at start-up and where it cuts a file.
+
 ## [0.16.0] - 2026-11-25
 
 - New `tools/council`: run a configurable council of reviewer models (Codex, Antigravity, Copilot, Claude Code) over one committed change.
