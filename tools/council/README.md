@@ -100,12 +100,15 @@ python -m pytest -q tools/council/tests
 
 ## What the reviewers can read
 
-- `tree/` is an export of the head commit. Agent CLIs load some files by
+- `tree/` is an export of the head commit: every tracked file as the
+  committed blob, byte for byte (no checkout filters, no line-ending
+  conversion). Agent CLIs load some files by
   themselves at start-up: `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md`,
   `CLAUDE.local.md`, `GEMINI.md`, `.github/copilot-instructions.md`,
   `.claude/settings*.json`, `.mcp.json`, `.vscode/mcp.json`, `.codex/`,
   `.gemini/`, `.copilot/` (matched without regard to case). In the snapshot
-  those root-level paths hold the **base branch's** versions, so a change
+  those root-level paths always hold the **base branch's current** versions
+  (also when only the base branch changed them), so a change
   cannot rewrite its reviewers' instructions, add a hook, or add an MCP
   server. What the change proposes for them is in `changed-autoloaded/` and
   in the diff, and the prompt says so. Nested instruction files in
@@ -136,7 +139,11 @@ checkout loads that checkout's rule files from the parent folders.
 - The snapshot swaps root-level auto-loaded files only. A nested `AGENTS.md`
   in a subfolder is the head's version.
 - Symlinks are written as text files holding their target, so a reviewer sees
-  that a link exists but cannot follow it.
+  that a link exists but cannot follow it. Submodules are not exported.
+- A tracked path the local filesystem cannot hold (a Windows-reserved name,
+  say) is left out of the snapshot and named in the summary.
+- agy takes the prompt as a command-line argument, so `--purpose` plus
+  `--focus` must stay under about 28,000 characters.
 - The Claude member still runs the hooks in *your* user settings (not the
   repository's). A hook that writes into its working folder writes into the
   snapshot the members share.

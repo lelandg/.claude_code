@@ -82,7 +82,11 @@ AUTOLOADED = ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md",
               ".github/copilot-instructions.md", ".claude/settings.json", ".claude/settings.local.json",
               ".mcp.json", ".vscode/mcp.json", ".codex", ".gemini", ".copilot")
 # Folders the runner itself creates in the results folder; a member cannot be named after one.
-RESERVED_NAMES = {"tree", "rules", "changed-autoloaded"}
+RESERVED_NAMES = {"tree", "rules", "changed-autoloaded", "con", "prn", "aux", "nul",
+                  *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+# Windows caps a whole command line at 32,767 characters, and agy takes the
+# prompt as an argument.
+MAX_ARG_PROMPT = 28000
 RULE_NAMES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
 ADVERSARIAL = (
     "Adversarial pass. Assume the change is wrong and look for the way it fails: a caller who is "
@@ -161,6 +165,9 @@ AGY_READ_RULE = '{"permissions":{"allow":["read_file(*)","list_dir(*)"]}}'
 def drive_agy(job: Job) -> Invocation:
     m = job.member
     model = f"{m.model}-{m.effort}" if m.effort else m.model   # agy carries the effort in the id
+    if len(job.prompt) > MAX_ARG_PROMPT:
+        raise CouncilError(f"the prompt is {len(job.prompt):,} characters; agy takes it as a command-line "
+                           f"argument and the limit is {MAX_ARG_PROMPT:,}. Shorten --purpose or --focus")
     # Plan mode plus the sandbox is agy's read-only mode. In it every shell
     # command is refused, so the diff reaches the model as a file, and file
     # reads need the session-only allow rule. The prompt must be an argument:
@@ -230,7 +237,8 @@ def _names(value, where: str) -> list[str]:
 def _member(name: str, raw, where: str) -> Member:
     if not NAME.fullmatch(name) or name in RESERVED_NAMES:
         raise CouncilError(f"{where}: member name {name!r} must be lowercase letters, digits, - or _, "
-                           f"and not one of {', '.join(sorted(RESERVED_NAMES))}")
+                           "and not a folder the runner creates (tree, rules, changed-autoloaded) "
+                           "or a Windows device name (nul, con, com1, ...)")
     if not isinstance(raw, dict):
         raise CouncilError(f"{where}: [members.{name}] must be a table")
     unknown = set(raw) - MEMBER_KEYS
@@ -389,8 +397,12 @@ def base_overlay(repo: Path, base_sha: str) -> tuple[str, str] | None:
     return git(repo, "show", f"{base_sha}:{path}"), f"{path} at base {base_sha[:12]}"
 
 
-def collect_change(repo: Path, base: str | None, head: str, shared: Path) -> dict:
-    base, base_tip, merge_base, head_sha = resolve_range(repo, base, head)
+def collect_change(repo: Path, base: str | None, head: str, shared: Path,
+                   resolved: tuple[str, str, str, str] | None = None) -> dict:
+    # main() resolves the refs once and passes them in, so the seating, the
+    # diff and the rule files all come from the same commits even if a fetch
+    # moves the base branch during the run.
+    base, base_tip, merge_base, head_sha = resolved or resolve_range(repo, base, head)
     diff = git(repo, "diff", "--no-color", "--no-ext-diff", f"{merge_base}..{head_sha}")
     if not diff.strip():
         raise CouncilError(f"nothing to review: {base}...{head} is empty")
@@ -407,35 +419,62 @@ def collect_change(repo: Path, base: str | None, head: str, shared: Path) -> dic
     }
 
 
-def _export(repo: Path, rev: str, paths: list[str], dest: Path, scratch: Path) -> None:
+def _ls_tree(repo: Path, rev: str, paths: list[str] | None = None) -> list[tuple[str, str, bytes]]:
+    """(mode, object id, path as bytes) for every blob of a commit, or those under paths."""
+    proc = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "-z", rev, "--", *(paths or [])],
+                          capture_output=True)
+    if proc.returncode != 0:
+        raise CouncilError(f"git ls-tree failed for {rev[:12]}: "
+                           f"{proc.stderr.decode('utf-8', 'replace').strip()}")
+    out = []
+    for entry in proc.stdout.split(b"\0"):
+        if entry:
+            meta, _, path = entry.partition(b"\t")
+            mode, kind, oid = meta.decode("ascii").split()
+            if kind == "blob":                      # a submodule ("commit") has no content here
+                out.append((mode, oid, path))
+    return out
+
+
+def _export(repo: Path, rev: str, paths: list[str], dest: Path) -> list[str]:
     """Write the files of one commit (all of them, or those under paths) into dest.
 
-    Uses a throwaway index and checkout-index, not git archive: archive leaves
-    out export-ignore paths, and the reviewers must see every tracked file.
-    Symlinks are written as small text files holding their target, so a link
-    in the change cannot point a reviewer outside the snapshot.
+    Each file is the committed blob, byte for byte: no smudge filter, no
+    line-ending conversion, no export-ignore, so the snapshot is exactly what
+    the diff describes. A symlink's blob is its target, so a link becomes a
+    small text file and cannot point a reviewer outside the snapshot. Names
+    are handled as bytes end to end. Returns the paths that could not be
+    written on this filesystem.
     """
-    env = dict(os.environ, GIT_INDEX_FILE=str(scratch / "snapshot.index"))
-    base = ["git", "-C", str(repo), "-c", "core.symlinks=false"]
-
-    def run(*args: str, stdin: str | None = None) -> str:
-        proc = subprocess.run([*base, *args], input=stdin, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", env=env)
-        if proc.returncode != 0:
-            raise CouncilError(f"git {args[0]} failed while exporting {rev[:12]}: {proc.stderr.strip()}")
-        return proc.stdout
-
+    entries = _ls_tree(repo, rev, paths)
+    if not entries:
+        return []
+    proc = subprocess.Popen(["git", "-C", str(repo), "cat-file", "--batch"],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    skipped: list[str] = []
     try:
-        run("read-tree", rev)
-        prefix = "--prefix=" + dest.as_posix() + "/"
-        if paths:
-            names = run("ls-files", "-z", "--", *paths)
-            if names:
-                run("checkout-index", prefix, "-z", "--stdin", stdin=names)
-        else:
-            run("checkout-index", prefix, "-a")
+        for _mode, oid, raw_path in entries:
+            proc.stdin.write(oid.encode("ascii") + b"\n")
+            proc.stdin.flush()
+            header = proc.stdout.readline().split()
+            if len(header) != 3 or header[1] != b"blob":
+                raise CouncilError(f"git cat-file could not read {oid} while exporting {rev[:12]}")
+            data = proc.stdout.read(int(header[2]))
+            proc.stdout.read(1)                     # the newline after the content
+            name = raw_path.decode("utf-8", "surrogateescape")
+            parts = name.split("/")
+            try:
+                if any(part in ("", ".", "..") for part in parts):
+                    raise OSError("unsafe path")
+                target = dest.joinpath(*parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            except (OSError, ValueError):
+                skipped.append(name.encode("utf-8", "backslashreplace").decode("ascii", "backslashreplace"))
     finally:
-        (scratch / "snapshot.index").unlink(missing_ok=True)
+        proc.stdin.close()
+        proc.wait()
+    return skipped
 
 
 def _tracked(repo: Path, rev: str, path: str) -> bool:
@@ -445,35 +484,51 @@ def _tracked(repo: Path, rev: str, path: str) -> bool:
 def snapshot(repo: Path, change: dict, shared: Path) -> tuple[Path, list[str]]:
     """Export the head commit to <shared>/tree, with auto-loaded files from the base.
 
-    Returns the snapshot folder and the auto-loaded paths the change touched;
+Returns the snapshot folder and the auto-loaded paths the change touched;
     the head's versions of those are kept in <shared>/changed-autoloaded for
-    the reviewers to read as material.
+    the reviewers to read as material. Records in change["snapshot_skipped"]
+    any tracked path this filesystem could not hold.
     """
     tree = shared / "tree"
     tree.mkdir()
     head, base = change["head_sha"], change["base_tip"]
-    _export(repo, head, [], tree, shared)
-    # What the change itself edited (from the merge base, so a base branch that
-    # moved on is not blamed on the change). Names are compared without case:
-    # on Windows and macOS "agents.md" is the file a CLI opens as AGENTS.md.
-    changed = git(repo, "diff", "--name-only", "-z", change["base_sha"], head).split("\0")
-    lowered = [c.lower() for c in changed if c]
-    touched = [p for p in AUTOLOADED
-               if any(c == p.lower() or c.startswith(p.lower() + "/") for c in lowered)]
-    if touched:
-        kept = shared / "changed-autoloaded"
-        kept.mkdir()
-        wanted = {p.lower() for p in touched}
-        for entry in list(tree.iterdir()) + [e for d in (".github", ".claude", ".vscode")
-                                             if (tree / d).is_dir() for e in (tree / d).iterdir()]:
-            rel = entry.relative_to(tree).as_posix()
-            if rel.lower() in wanted:            # move the head's version out, whatever its case
-                target = kept / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(entry), str(target))
-        at_base = [p for p in touched if _tracked(repo, base, p)]
-        if at_base:
-            _export(repo, base, at_base, tree, shared)
+    skipped = _export(repo, head, [], tree)
+
+    def autoloaded(path: str) -> str | None:
+        low = path.lower()      # no case: on Windows and macOS "agents.md" opens as AGENTS.md
+        return next((p for p in AUTOLOADED if low == p.lower() or low.startswith(p.lower() + "/")), None)
+
+    # What the change itself edited, from the merge base, so a base branch that
+    # moved on is not blamed on the change. --no-renames: a rule file renamed
+    # away still counts as touched.
+    changed = git(repo, "diff", "--name-only", "--no-renames", "-z", change["base_sha"], head).split("\0")
+    touched = sorted({a for a in map(autoloaded, changed) if a}, key=AUTOLOADED.index)
+    # Every auto-loaded path ends up as the base tip has it, touched or not: if
+    # only the base branch changed AGENTS.md since the branch was cut, the head
+    # still carries the old copy, and the rules that bind the review are the
+    # base's current ones.
+    kept = shared / "changed-autoloaded"
+    wanted = {p.lower() for p in AUTOLOADED}
+    for entry in list(tree.iterdir()) + [e for d in tree.iterdir() if d.is_dir() and
+                                         d.name.lower() in (".github", ".claude", ".vscode")
+                                         for e in d.iterdir()]:
+        rel = entry.relative_to(tree).as_posix()
+        if rel.lower() not in wanted or not entry.exists():
+            continue
+        if autoloaded(rel) in touched:               # keep what the change proposes, as material
+            target = kept / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(target))
+        elif entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    # Restore from the base under the spelling the base tree actually uses.
+    at_base = [path.decode("utf-8", "surrogateescape") for _m, _o, path in _ls_tree(repo, base)
+               if autoloaded(path.decode("utf-8", "surrogateescape"))]
+    if at_base:
+        skipped += _export(repo, base, at_base, tree)
+    change["snapshot_skipped"] = skipped
     return tree, touched
 
 
@@ -573,7 +628,12 @@ def resolve(argv: list[str]) -> list[str]:
                                "(a native executable, or the .ps1 shim plus PowerShell 7, is needed)")
         return [pwsh, "-NoProfile", "-NonInteractive", "-File", str(ps1), *argv[1:]]
     if low.endswith(".ps1"):
-        shell = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+        pwsh = shutil.which("pwsh")
+        if not pwsh and any(CMD_UNSAFE.search(a) for a in argv[1:]):
+            # Windows PowerShell 5.1 mangles embedded quotes on the way to the CLI.
+            raise CouncilError(f"{argv[0]} is a .ps1 shim and an argument needs PowerShell 7 (pwsh) "
+                               "to pass through intact")
+        shell = pwsh or shutil.which("powershell") or "powershell"
         return [shell, "-NoProfile", "-NonInteractive", "-File", exe, *argv[1:]]
     return [exe, *argv[1:]]
 
@@ -611,34 +671,28 @@ def parse_answer(text: str) -> dict | None:
 
     The answer is the last top-level JSON object in the text that has a
     "verdict". Some CLIs hard-wrap their output, which puts raw newlines
-    inside strings, so decoding is lenient about control characters. If a
-    brace opens after it and never closes into valid JSON, a later answer was
-    cut off: that is no answer, never a reason to fall back to an earlier one.
+    inside strings, so decoding is lenient about control characters.
+
+    Any brace that opens and does not close into valid JSON voids the whole
+    reply. It means an answer was cut off, or the answer sits inside a broken
+    wrapper; neither is a reason to fall back to some other complete object.
+    The prompt asks for the object and nothing else, so a well-formed reply
+    never trips this.
     """
     decoder = json.JSONDecoder(strict=False)
-    found, pos, failed = None, 0, []
+    found, pos = None, 0
     while True:
         start = text.find("{", pos)
         if start == -1:
             break
         try:
             obj, end = decoder.raw_decode(text, start)
-        except ValueError:
-            failed.append(start)
-            pos = start + 1
-            continue
+        except (ValueError, RecursionError):        # RecursionError: nested past the decoder's limit
+            return None
         if isinstance(obj, dict) and "verdict" in obj:
-            found = (obj, start, end)
+            found = obj
         pos = end
-    if found is None:
-        return None
-    obj, start, end = found
-    for f in failed:
-        if f >= end:                                  # a later object was started and cut off
-            return None
-        if f < start and "}" not in text[f:start]:    # the answer sits inside an unclosed object
-            return None
-    return obj
+    return found
 
 
 def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, str, dict | None]:
@@ -660,9 +714,11 @@ def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, st
     if verdict == "incomplete":
         why = "; ".join(str(x) for x in not_reviewed) or "no reason given"
         return "failed", f"review incomplete: {why[:300]}", answer
-    reviewed = str(answer.get("reviewed_head", ""))
-    if len(reviewed) < 7 or not head_sha.startswith(reviewed[:40]):
-        return "failed", f"answer is about {reviewed or 'no commit'}, not {head_sha[:12]}", answer
+    reviewed = answer.get("reviewed_head")
+    if not (isinstance(reviewed, str) and re.fullmatch(r"[0-9a-f]{7,40}", reviewed)
+            and head_sha.startswith(reviewed)):
+        shown = str(reviewed)[:60] if reviewed else "no commit"
+        return "failed", f"answer is about {shown}, not {head_sha[:12]}", answer
     findings = answer.get("findings")
     if not isinstance(findings, list):
         return "failed", "answer has no findings list", answer
@@ -693,8 +749,8 @@ def run_member(job: Job, head_sha: str, runner=execute) -> dict:
             # stdout of such a CLI is its transcript, never the answer
             text = inv.result_file.read_text(encoding="utf-8", errors="replace") \
                 if inv.result_file.is_file() else ""
-        (job.out / "result.md").write_text(text, encoding="utf-8")
-        (job.out / "err.txt").write_text(err, encoding="utf-8")
+        (job.out / "result.md").write_text(text, encoding="utf-8", errors="backslashreplace")
+        (job.out / "err.txt").write_text(err, encoding="utf-8", errors="backslashreplace")
     except FileNotFoundError:
         early = f"{m.cli} is not installed or not on PATH"
     except subprocess.TimeoutExpired:
@@ -731,7 +787,10 @@ def reserve(out: Path) -> None:
     diff. Creating the marker file with O_EXCL is the atomic step: of two runs
     given the same folder, exactly one gets it.
     """
-    out.mkdir(parents=True, exist_ok=True)
+    # The folder will hold the diff and an export of a possibly private repository.
+    out.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        out.chmod(0o700)
     inside = subprocess.run(["git", "-C", str(out), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     if inside.returncode == 0:
         raise CouncilError(f"results folder {out} is inside a git checkout ({inside.stdout.strip()}); "
@@ -749,9 +808,10 @@ def reserve(out: Path) -> None:
 
 
 def review(cfg: Config, members: list[Member], repo: Path, base: str | None, head: str, out: Path,
-           focus: str = "", purpose: str = "", runner=execute, dry_run: bool = False) -> dict:
+           focus: str = "", purpose: str = "", runner=execute, dry_run: bool = False,
+           resolved: tuple[str, str, str, str] | None = None) -> dict:
     reserve(out)
-    change = collect_change(repo, base, head, out)
+    change = collect_change(repo, base, head, out, resolved)
     rules = rule_files(repo, out, change["base_tip"])
     tree, touched = snapshot(repo, change, out)
     change["autoloaded_files_changed"] = touched
@@ -767,7 +827,8 @@ def review(cfg: Config, members: list[Member], repo: Path, base: str | None, hea
             results = list(pool.map(lambda j: run_member(j, change["head_sha"], runner), jobs))
     summary = {"repo": str(repo), "out": str(out), "config": cfg.sources, "change": change, "members": results}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    (out / "summary.md").write_text(render(summary), encoding="utf-8", newline="\n")
+    # A member's title can hold a lone surrogate that JSON allows and UTF-8 does not.
+    (out / "summary.md").write_text(render(summary), encoding="utf-8", errors="backslashreplace", newline="\n")
     return summary
 
 
@@ -776,6 +837,10 @@ def render(summary: dict) -> str:
     lines = [f"# Council review: {c['base']}...{c['head']}", "",
              f"Repository: `{summary['repo']}`  ", f"Head: `{c['head_sha'][:12]}`  ",
              f"Results: `{summary['out']}`", ""]
+    if c.get("snapshot_skipped"):
+        lines += [f"{len(c['snapshot_skipped'])} tracked path(s) could not be written to the snapshot on "
+                  "this filesystem and were not readable by the members: "
+                  + ", ".join(f"`{p}`" for p in c["snapshot_skipped"][:10]), ""]
     if c.get("uncommitted_work_not_reviewed"):
         lines += ["The checkout has uncommitted or untracked work. It is not part of this review: "
                   "members read a snapshot of the commit above.", ""]
@@ -849,10 +914,11 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
     args = ap.parse_args(argv)
     try:
         repo = Path(args.repo).resolve() if args.repo else None
-        overlay = None
+        overlay = resolved = None
         if repo is not None:
             head = "HEAD" if args.cmd == "list" else args.head
-            overlay = base_overlay(repo, resolve_range(repo, args.base, head)[1])
+            resolved = resolve_range(repo, args.base, head)
+            overlay = base_overlay(repo, resolved[1])
         cfg = load_config(find_config(args.config), overlay)
         if args.cmd == "list":
             return cmd_list(cfg)
@@ -863,7 +929,7 @@ def main(argv: list[str] | None = None, runner=execute) -> int:
         out = Path(args.out).resolve() if args.out else Path(tempfile.mkdtemp(
             prefix="council-" + datetime.now().strftime("%Y%m%d-%H%M%S-")))
         summary = review(cfg, seated, repo, args.base, args.head, out, focus,
-                         _text_arg(args.purpose), runner, args.dry_run)
+                         _text_arg(args.purpose), runner, args.dry_run, resolved)
     except (CouncilError, OSError) as exc:
         print(f"council: {exc}", file=sys.stderr)
         return EXIT_ERROR

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +54,9 @@ def repo(tmp_path: Path) -> Path:
     sh(r, "config", "user.email", "t@example.com")
     sh(r, "config", "user.name", "T")
     sh(r, "config", "commit.gpgsign", "false")
+    # A workstation's global hooks (a secret scanner, say) must not run in fixtures.
+    (tmp_path / "no-hooks").mkdir()
+    sh(r, "config", "core.hooksPath", str(tmp_path / "no-hooks"))
     (r / "a.txt").write_text("one\n", encoding="utf-8")
     sh(r, "add", "-A")
     sh(r, "commit", "-q", "-m", "base")
@@ -147,7 +151,10 @@ def test_bad_member_fields_are_refused(tmp_path, body, match):
 
 def test_member_cannot_take_a_reserved_folder_name(tmp_path):
     p = write_cfg(tmp_path, 'default=["tree"]\n[members.tree]\ncli="codex"\nmodel="m"\n')
-    with pytest.raises(council.CouncilError, match="not one of"):
+    with pytest.raises(council.CouncilError, match="folder the runner creates"):
+        council.load_config(p)
+    p = write_cfg(tmp_path, 'default=["nul"]\n[members.nul]\ncli="codex"\nmodel="m"\n')
+    with pytest.raises(council.CouncilError, match="Windows device name"):
         council.load_config(p)
 
 
@@ -298,6 +305,8 @@ def test_agy_driver_is_plan_sandbox_with_prompt_as_argument(cfg_file, tmp_path):
     assert a[a.index("--model") + 1] == "gemini-4-neon-high"
     assert a[a.index("--mode") + 1] == "plan" and "--sandbox" in a
     assert a[-1] == "-p=PROMPT TEXT" and inv.stdin is None
+    with pytest.raises(council.CouncilError, match="command-line"):
+        council.drive_agy(job_for(council.load_config(cfg_file), "neon", tmp_path, "x" * 40000))
     assert a[a.index("--mode"):].count("--add-dir") == 2 and str(tmp_path / "out") in a
 
 
@@ -315,6 +324,11 @@ def test_cmd_shim_refuses_arguments_cmd_would_reparse(monkeypatch, tmp_path):
     argv = council.resolve(["agy", '-p=say "hi" & del x'])
     assert argv[0] == "C:\\pwsh.exe" and argv[-2].endswith("agy.ps1") and argv[-1] == '-p=say "hi" & del x'
     assert council.resolve(["agy", "--version"])[0].endswith("agy.cmd")
+    # a CLI that resolves straight to a .ps1 needs PowerShell 7 for the same arguments
+    which.update({"pwsh": None, "agy": str(tmp_path / "agy.ps1"), "powershell": "C:\\ps5.exe"})
+    with pytest.raises(council.CouncilError, match="PowerShell 7"):
+        council.resolve(["agy", '-p=say "hi"'])
+    assert council.resolve(["agy", "--version"])[0] == "C:\\ps5.exe"
 
 
 def test_copilot_driver_denies_write_and_shell(cfg_file, tmp_path):
@@ -362,7 +376,7 @@ def test_snapshot_is_the_commit_not_the_working_tree(repo, tmp_path):
     tree, touched = council.snapshot(repo, change, tmp_path)
     assert (tree / "a.txt").read_text(encoding="utf-8") == "one\ntwo\n"
     assert not (tree / "new.txt").exists() and touched == []
-    assert not (tmp_path / "snapshot.index").exists()
+    assert change["snapshot_skipped"] == []
     assert sh(repo, "status", "--porcelain").count("\n") == 2          # the user's index is untouched
 
 
@@ -379,6 +393,46 @@ def test_snapshot_includes_export_ignored_files_and_flattens_symlinks(repo, tmp_
     tree, _ = council.snapshot(repo, change, tmp_path)
     assert (tree / "tests" / "t.txt").is_file()
     assert not (tree / "link").is_symlink() and (tree / "link").read_text(encoding="utf-8") == "../../outside"
+
+
+def test_snapshot_uses_the_base_tips_rules_when_only_the_base_changed_them(repo, tmp_path):
+    (repo / "AGENTS.md").write_text("# old rules\n", encoding="utf-8")
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "branch carries the old rules")       # in both: this is the merge base
+    sh(repo, "branch", "-f", "base")
+    (repo / "a.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    sh(repo, "commit", "-q", "-am", "the change: a.txt only")
+    sh(repo, "checkout", "-q", "base")
+    (repo / "AGENTS.md").write_text("# new rules\n", encoding="utf-8")
+    sh(repo, "commit", "-q", "-am", "base moves on")
+    sh(repo, "checkout", "-q", "main")
+    change = council.collect_change(repo, "base", "HEAD", tmp_path)
+    tree, touched = council.snapshot(repo, change, tmp_path)
+    assert touched == []                                                # not blamed on the change
+    assert (tree / "AGENTS.md").read_bytes() == b"# new rules\n"        # but the snapshot has the current rules
+    assert not (tmp_path / "changed-autoloaded").exists()
+
+
+def test_snapshot_treats_a_renamed_away_rule_file_as_touched(repo, tmp_path):
+    (repo / "AGENTS.md").write_text("# rules\n" * 20, encoding="utf-8")
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "rules")
+    sh(repo, "branch", "-f", "base")
+    sh(repo, "mv", "AGENTS.md", "review-notes.md")
+    sh(repo, "commit", "-q", "-m", "rename the rules away")
+    change = council.collect_change(repo, "base", "HEAD", tmp_path)
+    tree, touched = council.snapshot(repo, change, tmp_path)
+    assert touched == ["AGENTS.md"] and (tree / "AGENTS.md").is_file()
+
+
+def test_snapshot_is_the_committed_bytes(repo, tmp_path):
+    sh(repo, "config", "core.autocrlf", "true")
+    (repo / ".gitattributes").write_text("*.txt text eol=crlf\n", encoding="utf-8")
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "attributes that rewrite files on checkout")
+    change = council.collect_change(repo, "base", "HEAD", tmp_path)
+    tree, _ = council.snapshot(repo, change, tmp_path)
+    assert (tree / "a.txt").read_bytes() == b"one\ntwo\n"
 
 
 def test_snapshot_catches_a_differently_cased_rule_file(repo, tmp_path):
@@ -489,6 +543,9 @@ GOOD = {"severity": "major", "file": "a.txt", "line": 2, "title": "second line i
     (0, answer(HEAD, "incomplete", not_reviewed=["shell refused"]), ("failed", "incomplete: shell refused")),
     (0, answer("b" * 40), ("failed", "not aaaaaaaaaaaa")),
     (0, answer(""), ("failed", "no commit")),
+    (0, answer(HEAD + "-extra"), ("failed", "not aaaaaaaaaaaa")),
+    (0, answer(HEAD[:6]), ("failed", "not aaaaaaaaaaaa")),
+    (0, answer(12345678), ("failed", "not aaaaaaaaaaaa")),
     (0, answer(HEAD, "approved"), ("failed", "unknown verdict")),
     (0, answer(HEAD, "clean", [GOOD]), ("failed", "clean but findings")),
     (0, answer(HEAD, "findings"), ("failed", "none are listed")),
@@ -512,7 +569,13 @@ def test_judge(code, text, expect):
 def test_parse_answer_takes_the_last_complete_answer():
     two = '```json\n{"verdict": "findings"}\n```\ntext\n```json\n{"verdict": "clean"}\n```'
     assert council.parse_answer(two)["verdict"] == "clean"
-    assert council.parse_answer('note {not json} {"verdict": "clean", "findings": []} suffix')["verdict"] == "clean"
+    assert council.parse_answer('note {"k": 1} {"verdict": "clean", "findings": []} suffix')["verdict"] == "clean"
+    # a brace that never closes into JSON voids the reply, wherever it is
+    assert council.parse_answer('note {not json} {"verdict": "clean", "findings": []}') is None
+    wrapped = '{"metadata": {"a": 1}, "review": {"verdict": "clean", "findings": []}'
+    assert council.parse_answer(wrapped) is None
+    assert council.parse_answer("[" * 100000 + '{"verdict": "clean"}') is not None      # arrays are not scanned
+    assert council.parse_answer('{"a": ' * 100000) is None                              # decoder limit, no crash
     assert council.parse_answer('```json\n{"other": 1}\n```') is None
     # a finding may quote a code fence or braces
     quoted = json.dumps({"verdict": "findings", "findings": [{"title": "t", "evidence": "```py\n{\"x\"}\n```"}]})
@@ -585,6 +648,21 @@ def test_codex_exiting_0_without_its_result_file_is_a_failed_review(cfg_file, re
     def runner(inv, timeout):
         return 0, "transcript with " + answer(head_of(repo)), ""
     assert run(cfg_file, repo, tmp_path, runner, "--members", "astra") == council.EXIT_MEMBER_FAILED
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_results_folder_is_private(tmp_path):
+    council.reserve(tmp_path / "priv")
+    assert (tmp_path / "priv").stat().st_mode & 0o077 == 0
+
+
+def test_a_title_json_allows_but_utf8_does_not_still_gets_a_summary(cfg_file, repo, tmp_path):
+    bad = dict(GOOD, title="lone \ud800 surrogate")
+    raw = "```json\n" + json.dumps({"verdict": "findings", "reviewed_head": head_of(repo), "findings": [bad],
+                                     "not_reviewed": [], "summary": "s"}) + "\n```"
+    runner = FakeRunner({"codex": (0, raw, "")})
+    assert run(cfg_file, repo, tmp_path, runner, "--members", "astra") == council.EXIT_OK
+    assert (tmp_path / "out" / "summary.md").is_file()
 
 
 def test_only_one_run_can_claim_a_folder(tmp_path):

@@ -426,8 +426,12 @@ council and collects the answers. The line-up is data: `config/council.toml`
 seating and any named councils.
 
 - Every member gets the same prompt and the same diff file, and runs read-only
-  in a snapshot of the commit, where the files a CLI loads by itself
-  (`AGENTS.md`, settings, MCP configs) are the base branch's versions.
+  in a snapshot of the commit. In it, a fixed list of root-level files that a
+  CLI loads by itself (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, settings, MCP
+  configs) are the base branch's versions. A rule file nested in a subfolder
+  is not on that list and stays as the change has it, so read
+  `tools/council/README.md` ("Known limits") before relying on this for a
+  change you do not trust.
 - An empty, truncated or off-format answer is a failed review, never a clean
   one. Exit code 10 means at least one member did not review the change.
 - A repository can add members to the seating in `.agents/council.toml`, read

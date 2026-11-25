@@ -38,7 +38,7 @@ Before reporting a finding, open the file and confirm it against the code as it 
 </evidence>
 
 <output>
-Reply with one JSON object inside a single ```json fence. Anything outside the fence is ignored by the script that reads this.
+Reply with one JSON object inside a single ```json fence and nothing else: no text before or after it. A script reads the whole reply, and stray braces or a second object make it reject the answer.
 
 {
   "verdict": "clean | findings | incomplete",
@@ -61,5 +61,5 @@ Reply with one JSON object inside a single ```json fence. Anything outside the f
   "summary": "one or two sentences"
 }
 
-Use "clean" with an empty findings array and an empty not_reviewed array when you read everything and found nothing. Use "incomplete" when you could not read the diff or a tool was refused, and say why in not_reviewed; an incomplete review is reported as a failed review, never as a clean one. not_reviewed is only for material you were asked to review and could not; put any other caveat (tests you did not run, say) in summary. Every finding needs severity, file, title and detail. severity: critical = data loss, a security hole, or money moved wrongly; major = wrong behaviour a user or operator will hit; minor = real but contained.
+Use "clean" with an empty findings array and an empty not_reviewed array when you read everything and found nothing. Use "incomplete" only when you could not inspect something the review needs (the diff, a changed file, a rule file) by any tool you have, and say what and why in not_reviewed; a refused shell command is not a reason when you could read the material another way; an incomplete review is reported as a failed review, never as a clean one. not_reviewed is only for material you were asked to review and could not; put any other caveat (tests you did not run, say) in summary. Every finding needs severity, file, title and detail. severity: critical = data loss, a security hole, or money moved wrongly; major = wrong behaviour a user or operator will hit; minor = real but contained.
 </output>
