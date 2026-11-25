@@ -9,9 +9,9 @@
 #   effort  low | medium | high | xhigh | max   (optional; "max" needs --allow-max)
 #   timeout seconds, 30-7200 (default 1800)
 #
-# A repository may add .agents/council.toml with `default`, `[councils.*]` and
-# `focus` only. It cannot define members: that file is part of the change
-# being reviewed.
+# A repository may commit .agents/council.toml with `default`, `[councils.*]`
+# and `focus` only. It cannot define members, and it is read from the base
+# commit, never from the change being reviewed.
 
 schema_version = 1
 
@@ -41,9 +41,21 @@ cli = "copilot"
 model = "gpt-6.1-terra"
 effort = "high"
 
-# Named councils: `council review --council security`.
+# The same two models one step up, for the adversarial pass on auth, billing
+# and data-migration changes, where a missed defect is expensive.
+[members.astra-x]
+cli = "codex"
+model = "gpt-6-astra"
+effort = "xhigh"
+
+[members.neon-x]
+cli = "agy"
+model = "gemini-4-neon"
+effort = "xhigh"
+
+# Named councils: `council review --council security --adversarial`.
 [councils.security]
-members = ["astra", "neon", "claude"]
+members = ["astra-x", "neon-x", "claude"]
 
 [councils.quick]
 members = ["astra"]

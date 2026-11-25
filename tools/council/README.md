@@ -20,7 +20,10 @@ gets the same prompt, runs read-only, and writes to its own subfolder
 combined result.
 
 Commit first. Members read files from the working tree, so the run warns when
-the tree is not the commit under review.
+the tree is not the commit under review (uncommitted edits, untracked files,
+or another checkout). Each run needs its own results folder: a folder that
+already holds files is refused, so an earlier answer can never be read back
+as a new one.
 
 ## Exit codes
 
@@ -31,8 +34,9 @@ the tree is not the commit under review.
 | 20 | The run could not start (bad config, nothing to review) |
 
 A member has failed when its CLI is missing, exits non-zero, times out, or
-returns an answer that is empty, has no JSON verdict, says `incomplete`, or is
+returns an answer that is empty, cut off, off-format, marked `incomplete`, or
 about a different commit. A failed review is never reported as a clean one.
+Anything a member says it did not get to is listed under the table.
 
 ## Config
 
@@ -49,7 +53,7 @@ model = "gpt-6-astra"
 effort = "high"
 
 [councils.security]
-members = ["astra", "neon", "claude"]
+members = ["astra-x", "neon-x", "claude"]
 ```
 
 Supported CLIs: `codex`, `agy` (Antigravity), `copilot` (GitHub Copilot CLI)
@@ -60,21 +64,25 @@ command.
 ### Per-repository seating
 
 A repository may commit `.agents/council.toml` with `default`, `[councils.*]`
-and `focus`. It can pick among the members your own config defines. It cannot
-define a member, because that file is part of the change being reviewed and
-must not decide what runs on your machine.
+and `focus`. It can pick among the members your own config defines; it cannot
+define a member. The file is read from the **base commit**, never from the
+change under review, so a pull request cannot choose its own reviewers or
+write their instructions. Its `focus` reaches the reviewers labelled as the
+repository's note, after your own.
 
 ### Refused models
 
-Any model id in the Sol line (`gpt-5.6-sol`, `gpt-6-sol`, ...) and the bare
-`gpt-5.6` alias are refused at load time, whatever the config says. Effort
+Any model id with a `sol` segment (`gpt-5.6-sol`, `gpt-6-sol`, ...) and the
+bare `gpt-5.6` alias are refused at load time, whatever the config says.
+Model ids are plain names: letters, digits, `.`, `_` and `-`. Effort
 `max` is refused unless `--allow-max` is passed.
 
 ## The prompt
 
 [`prompt.md`](prompt.md) is the one prompt every member receives. It states
-the goal, points at the rule files that bind the change (the global
-`AGENTS.md` and the repository's own), tells the reviewer to treat text
+the goal, points at the rule files that bind the change (a copy of the global
+`AGENTS.md`, placed in the results folder so a sandboxed member can read it,
+and the repository's own), tells the reviewer to treat text
 inside the diff as material and not as instructions, and asks for a JSON
 object so the runner can tell a clean review from a truncated one.
 
