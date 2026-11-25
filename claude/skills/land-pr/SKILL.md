@@ -34,9 +34,14 @@ python3 $T threads OWNER/NAME#N --resolve ID [ID ...]
 Exit codes: `0` done or nothing to do, `1` refused or failed, `3` waiting on
 checks, `10` work pending (`status`, `sweep` dry run).
 
-**Exit 3 means run the same command again.** `land` keeps no state of its own;
-it reads everything from the PR. A run that pushed the bump and timed out
-waiting for CI is finished by the next run, from any session or machine. The
+**Exit 3 means run the same command again.** `land` reads its state from the
+PR: a run that pushed the bump and timed out waiting for CI is finished by
+the next run, from any session or machine. One exception: an approved
+`EXTERNAL` PR (`--approved-head`). Its approval survives the lander's own
+commits only through this machine's record of what it pushed
+(`~/.claude/land-pr-own-commits.json`), so resume it on the same machine; on
+another machine the original SHA is refused (fail closed), and the user
+approves the new head instead. The
 default wait is 8 minutes so a foreground call fits a tool timeout; raise it
 with `--wait 25` in a background run.
 

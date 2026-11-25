@@ -653,6 +653,10 @@ def head_facts(n: dict, commits: list[dict],
         is_reviewer_check(name) and b == "pass"
         for c in tail if c.get("oid") in covered for name, b in buckets(c))
     reviewed = by_review or by_check
+    # The commit list can lag a fresh push. Then a review of the last listed
+    # commit says nothing about the real head: wait for the list to catch up.
+    if commits and commits[-1].get("oid") != (n.get("headRefOid") or ""):
+        reviewed = False
 
     # "Active" means a reviewer has actually REVIEWED something on this PR: a
     # written review of any commit, or a reviewer check that passed on one.

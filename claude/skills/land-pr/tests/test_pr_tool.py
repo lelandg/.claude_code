@@ -1580,6 +1580,20 @@ def test_commit_list_behind_the_head_trusts_nothing_but_the_head():
     assert not pt.approval_matches(pr, a)[0]
 
 
+def test_review_of_a_lagging_commit_list_does_not_cover_the_head():
+    # CodeRabbit on #27: the list still ends at the reviewed commit A while
+    # the head is already C, so the review says nothing about C.
+    a = "a" * 40
+    t = NOW - timedelta(minutes=30)
+    node = _node([(a, "fix: thing", t)], reviews=[("coderabbitai", a)],
+                 comments=[("coderabbitai", t + timedelta(minutes=3))])
+    assert _pr(node).reviewed_head
+    node["pullRequest"]["headRefOid"] = "c" * 40
+    pr = _pr(node)
+    assert not pr.reviewed_head
+    assert pt.classify(pr, NOW, ME).state != "READY"
+
+
 def test_bad_trust_config_is_an_error(monkeypatch, tmp_path):
     cfg = tmp_path / "c.json"
     cfg.write_text('{"trusted_bots": "copilot"}', encoding="utf-8")
