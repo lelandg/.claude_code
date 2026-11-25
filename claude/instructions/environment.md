@@ -99,7 +99,7 @@ configuration says:
 `sudo apt-get -o APT::Get::Upgrade-Allow-New=false upgrade --no-remove`.
 Anything it holds back needs `full-upgrade`, which can remove packages and
 pull in new ones: show the user the simulated plan
-(`apt-get -s full-upgrade`, which needs no sudo) and leave that run to them, because a package
+(`sudo apt-get -s full-upgrade`; a simulation changes nothing) and leave that run to them, because a package
 added as a new dependency is a new machine-scope install like any other.
 New machine-scope installs, removals, and sudoers, user, key, firewall or
 VPN changes still go to the user. Pin
