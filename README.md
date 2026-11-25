@@ -131,6 +131,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │                                      #   screenshots); cross-platform launcher
 ├── tools/                             # Standalone tooling, installed separately
 │   ├── agent-config-sync/             # Report/reconcile agent-config drift between runtimes
+│   ├── council/                       # Review council: several reviewer models, one config file
 │   ├── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
 │   └── runbook/                       # Central runbook: one local page for every step
 │                                      #   waiting on you, across all repos (stdlib Python)
@@ -401,8 +402,9 @@ Custom skills extend Claude Code with repeatable workflows:
 ### Agent config sync (two-way, WSL <-> Windows)
 
 `tools/agent-config-sync/sync.py` keeps agent instruction files identical in
-the WSL and Windows homes: the canonical `AGENTS.md`, `CLAUDE.md`,
-`~/.claude/instructions/`, and the config-secrets guard. It regenerates the
+the WSL and Windows homes: the canonical `AGENTS.md`, the review council's
+`council.toml`, `CLAUDE.md`, `~/.claude/instructions/`, and the
+config-secrets guard. It regenerates the
 per-CLI copies of `AGENTS.md` (Codex, Copilot, Gemini).
 
 - Neither side is the authority. A change on one side is copied to the other.
@@ -414,6 +416,29 @@ per-CLI copies of `AGENTS.md` (Codex, Copilot, Gemini).
 - Skills, plugins and agents are out of scope (Claude Code syncs them).
 
 Skill: `agent-config-sync`. Operator guide: `Docs/agent-config-sync.md`.
+
+### Review council (several reviewer models, one config file)
+
+`tools/council/council.py` sends one committed change to every model on the
+council and collects the answers. The line-up is data: `config/council.toml`
+(or your own `~/.config/agents/council.toml`) names each member, its CLI
+(Codex, Antigravity, Copilot, Claude Code), model and effort, plus the default
+seating and any named councils.
+
+- Every member gets the same prompt and the same diff file, and runs read-only
+  in a snapshot of the commit. In it, a fixed list of root-level files that a
+  CLI loads by itself (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, settings, MCP
+  configs) are the base branch's versions. A rule file nested in a subfolder
+  is not on that list and stays as the change has it, so read
+  `tools/council/README.md` ("Known limits") before relying on this for a
+  change you do not trust.
+- An empty, truncated or off-format answer is a failed review, never a clean
+  one. Exit code 10 means at least one member did not review the change.
+- A repository can add members to the seating in `.agents/council.toml`, read
+  from the base branch. It cannot define a member or drop one you seated.
+- Standard library only; runs from PowerShell or WSL.
+
+Guide: [`tools/council/README.md`](tools/council/README.md).
 
 ### Central runbook — every step waiting on you, in one place
 

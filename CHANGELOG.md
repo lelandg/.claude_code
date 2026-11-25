@@ -3,6 +3,11 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.16.0] - 2026-11-25
+
+- New `tools/council`: run a configurable council of reviewer models (Codex, Antigravity, Copilot, Claude Code) over one committed change.
+- `agent-config-sync` now keeps `~/.config/agents/council.toml` in step between WSL and Windows.
+
 ## [0.15.0] - 2026-11-24
 
 - `land-pr` no longer lands a PR opened by anyone other than you, your listed agent accounts or your listed bots (default: Dependabot). Copilot and other bots no longer pass automatically. Such PRs are shown as `EXTERNAL`, explained to you, and land only with `land <ref> --apply --approved-head <full sha>` after you approve that exact commit.
