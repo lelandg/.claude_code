@@ -91,9 +91,17 @@ when to trigger, not what it is. Reference detail goes to
 `~/.claude/instructions/<topic>.md` (global) or the project's docs dir, with a
 1–2 line pointer left behind. Cross-CLI caveat: if the file is shared with
 non-Claude CLIs (Codex/Copilot/agy/Pi via symlinks or aliases), pointers must
-be plain backticked paths — never `@`-prefixed lines (Claude/Gemini inline
-those at load time), never skill-only references (other CLIs can't invoke
-skills; name the script/file instead).
+be plain backticked paths — never `@`-prefixed lines (Claude Code and
+Gemini CLI inline those at load time; Codex, agy and Copilot do not follow
+them. The one `@` line to keep is `@AGENTS.md` at the top of a repo's
+`CLAUDE.md` and `GEMINI.md`: it is how Claude Code and Gemini CLI reach the
+rules; agy ignores the line and loads `AGENTS.md` itself), never skill-only references (other
+CLIs can't invoke skills; name the script/file instead). Copilot loads a
+repo's `AGENTS.md`, `CLAUDE.md` **and** `GEMINI.md`, so text in `CLAUDE.md`
+is not Claude-only, and a rule every CLI needs belongs in `AGENTS.md`.
+Size: agy cuts any single rule file at 22,035 bytes (working-tree bytes, so
+CRLF counts; measured 2026-11-25) — keep every `AGENTS.md` and `GEMINI.md`
+under 21 KB (`wc -c`) and move new detail to an `instructions/` file.
 
 ### 6. Memory pass
 
@@ -111,6 +119,7 @@ rules even if flagged.
 
 ```bash
 wc -c -w <files>                        # report before/after tokens
+# agy cuts a rule file at 22,035 bytes: every AGENTS.md / GEMINI.md < 21000
 # every pointer target must exist:
 grep -o '~/[A-Za-z./_-]*\.md' <file> | sort -u | while read p; do
   f="${p/#\~/$HOME}"; [ -f "$f" ] || echo "MISSING $p"; done

@@ -1,6 +1,7 @@
 # Environment & tooling details
 
-The always-loaded rules (no `cd`, the support-window version rule) live in
+The always-loaded rules (no `cd`, the support-window version rule, the
+install and update rule in brief) live in
 `~/.config/agents/AGENTS.md`. This file holds the rest — customize each
 section for your machine.
 
@@ -72,3 +73,28 @@ pin per-project with `.nvmrc` + `nvm use`.
 - **Dubious-ownership errors** (repo owned by another user or reached through
   a network path): use a checkout-scoped override, never a global one:
   `git -c safe.directory='<abs path>' -C '<abs path>' status`.
+
+## Updates and installs
+
+Moved from `~/.config/agents/AGENTS.md` on 2026-11-24 so that file stays under agy's rule-file cut (22,035 bytes, measured 2026-11-25). AGENTS.md keeps the rule in brief and points here; this text is the full version and is equally binding.
+
+### System dependencies
+
+Machine-scope installs stay with the user: anything needing `sudo`, `apt`, an
+elevated PowerShell, `winget --scope machine`, or a global `pip install`. Say
+what's needed and let them run it.
+
+**User-scope installs are yours to run** when the tool is free, the release
+clears the minimum-age rule, and nothing runs elevated:
+`winget install --scope user`, `uv tool install`, `pipx install`, `npm i -g`
+under a user prefix. Security tooling installed this way: `osv-scanner`,
+`gitleaks`, `pip-audit`. Say what you installed and where.
+
+**Updates are yours to run.** Upgrading software that is already installed,
+on this machine and on the hosts you administer for the user: global npm
+tools, `claude update`, and `apt-get full-upgrade` where the login has sudo,
+plus a reboot when the machine is idle. New machine-scope installs, removals,
+and sudoers, user, key, firewall or VPN changes still go to the user. Pin
+exact versions (`npm install -g <pkg>@<v>`), never `npm update -g`: with
+`min-release-age` it downgrades. Production hosts reboot only per their
+runbook. A scheduled routine is a good home for this.

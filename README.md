@@ -72,16 +72,20 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │   │       └── CLAUDE_CodeMap.md      # CodeMap spec (copy for agent access)
 │   ├── instructions/                  # On-demand reference docs
 │   │   ├── credentials.md             # Secrets management patterns
-│   │   ├── environment.md             # IDEs, Python/.NET/Node, debugging, screenshots
+│   │   ├── environment.md             # IDEs, Python/.NET/Node, debugging, screenshots,
+│   │   │                              #   installs and updates
 │   │   ├── file-dispositions.md       # Standing approvals for working-tree files (template)
 │   │   ├── file-operations.md         # File operation guidelines
+│   │   ├── git-workflow.md            # Rule 4 in full (what may go straight to main) + new-repo rules
 │   │   ├── github-issues.md           # Issue workflow mechanics + label conventions
-│   │   ├── model-delegation.md        # Cross-provider routing: Claude + Codex (GPT-6 Astra / GPT-5.6)
-│   │   │                              #   (ratings, effort ladder, Astra default, Sol review-only)
+│   │   ├── landing-and-versioning.md  # Every PR ends merged or closed; the lander cuts the version
+│   │   ├── model-delegation.md        # Review council + cross-provider routing (Codex, Gemini via agy,
+│   │   │                              #   Copilot): ratings, effort ladder, what each CLI loads, Sol ban
 │   │   ├── package-min-age.md         # Vuln fixes beat the 7-day age floor: per-manager config
 │   │   ├── plan-templates.md          # Implementation plan format
-│   │   ├── pr-review-automation.md    # GitHub App PR review + autofix inspection procedure
-│   │   └── runbook-standards.md       # Central runbook + fully-specified (zero-inference) steps
+│   │   ├── pr-review-automation.md    # Waiting on the repo's automated reviewers + autofix inspection
+│   │   ├── runbook-standards.md       # Central runbook + fully-specified (zero-inference) steps
+│   │   └── security-scanning.md       # Vulnerability fixes, no-fix tiers, scanner tiers, Dependabot sweep
 │   ├── hookify-rules/                 # Hookify guard rules (symlink into a project's .claude/)
 │   │   ├── hookify.block-unpinned-codex-rescue.local.md  # Blocks Codex rescue/exec pinned to
 │   │   │                              #   Sol or the bare gpt-5.6 alias (Sol lockdown)
@@ -465,11 +469,16 @@ On-demand reference files that Claude Code reads only when needed (reduces conte
 - **credentials.md** - Platform-specific secret storage patterns
 - **file-operations.md** - Absolute path conventions and parallel search patterns
 - **plan-templates.md** - Implementation checklist format with status markers
-- **pr-review-automation.md** - Waiting for and inspecting the GitHub App review and autofix PRs
+- **pr-review-automation.md** - Waiting for and inspecting the repo's automated reviewers and autofix PRs, with the review council before the push
 - **runbook-standards.md** - Where pending steps go (the central runbook) and how to write steps that run exactly as written
+- **security-scanning.md** - Full text of the dependency rules: remediation beats the age floor, the four tiers for an advisory with no fix, scanner tiers, the Dependabot sweep
+- **git-workflow.md** - Full text of rule 4 (what may be committed straight to `main`, and what that assumes) and the new-repository rules
+- **landing-and-versioning.md** - Full text of the landing rules (every PR ends merged or closed) and versioning (the lander cuts the bump at merge time)
 
-### Cross-Provider Model Delegation (Claude + Codex: GPT-6 Astra / GPT-5.6)
-`instructions/model-delegation.md` is a full routing guide for pairing Claude with OpenAI's Codex through the `codex` CLI (run from the Bash tool; the plugin's `/codex:*` slash commands are user-only, so the guide gives no slash commands): per-model routing scores (quota/intelligence/taste), a reasoning-effort ladder with quota impact, and the shipping loop — *write with Claude, audit with Codex, reconcile the findings*. Since 2026-09-22 the standing default is **`gpt-6-astra` at `high`** (preferred over Terra for every task, including reviews), and Astra may run write-capable `codex exec -s workspace-write` jobs on a committed tree. It keeps a hard safety policy: **`gpt-5.6-sol` is review-only** and never run by agents (a Sol review is the user's, in their own terminal); it never runs on the rescue path. `hookify-rules/hookify.block-unpinned-codex-rescue.local.md` enforces that mechanically — it denies any Bash invocation of the Codex rescue/exec path pinned to Sol or the bare `gpt-5.6` alias (symlink it into a project's `.claude/` to arm it; `test-codex-guard.sh` verifies all 26 allow/deny cases). The Sol rule itself lives in `CLAUDE.md` § "Codex delegation"; the compact routing rule is in `AGENTS.md` § "Model delegation & cross-provider review", and the auth-expiry procedure (prompt for `codex login`, wait for confirm or a reason to skip) is in the guide.
+`config/agents/AGENTS.md` is deliberately short (under 21 KB): it states each rule in brief and points at these files, whose text is equally binding. The size is a measured limit, not a style choice: the Antigravity CLI (`agy`) silently cuts a rule file at 22,035 bytes (measured 2026-11-25), so a longer `AGENTS.md` loses its last rules for that CLI without any error. Two more measured facts shape the layout: Gemini CLI loads only `GEMINI.md` and reaches `AGENTS.md` through an `@AGENTS.md` line there, and Copilot CLI loads a repo's `CLAUDE.md` and `GEMINI.md` as well as its `AGENTS.md`, so "Claude-only" text is not private to Claude. The table is in `instructions/model-delegation.md` ("What each CLI loads at start-up").
+
+### Cross-Provider Model Delegation and the Review Council
+`instructions/model-delegation.md` is the full guide to cross-provider review, written for every agent CLI. Its shipping loop is *one model writes, the review council audits, the author reconciles the findings*: every PR is reviewed before it opens by each seated council member, read-only. Who sits on the council is data (`~/.config/agents/council.toml`, default Codex GPT-6 Astra and Gemini 4 Neon through `agy`), run by `tools/council/council.py`, so no rule file names a fixed pair of reviewers; a member that cannot run is named in the PR body and is never a gate. The guide also carries per-model routing scores (quota/intelligence/taste), a reasoning-effort ladder with quota impact, the measured read-only recipes for Neon through `agy` and for Copilot, and a table of what each CLI loads at start-up. Codex is reached through the `codex` CLI (the plugin's `/codex:*` slash commands are user-only, so the guide gives no slash commands). Since 2026-09-22 the standing default is **`gpt-6-astra` at `high`** (preferred over Terra for every task, including reviews), and Astra may run write-capable `codex exec -s workspace-write` jobs on a committed tree. It keeps a hard safety policy: **no agent ever runs `gpt-5.6-sol`** or the bare `gpt-5.6` alias, review or not (a Sol review is the user's, in their own terminal); the council runner refuses a Sol model id at load time. `hookify-rules/hookify.block-unpinned-codex-rescue.local.md` enforces that mechanically — it denies any Bash invocation of the Codex rescue/exec path pinned to Sol or the bare `gpt-5.6` alias (symlink it into a project's `.claude/` to arm it; `test-codex-guard.sh` verifies all 26 allow/deny cases). The Sol ban itself lives in `AGENTS.md` § "Security", so every CLI sees it; the compact routing rule is in `AGENTS.md` § "Model delegation & cross-provider review", and the auth-expiry procedure (name `codex login` to the user, record the review as owed, go on with the other members) is in the guide.
 
 ### Output Styles
 Three output styles for different contexts:

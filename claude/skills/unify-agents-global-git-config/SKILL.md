@@ -40,6 +40,16 @@ Any other git statement in the repo that duplicates or contradicts the block
 is removed or reworded, so nothing is left that can drift. This follows the
 shared rule: "update every copy in the same commit".
 
+Review rules in the block name the **review council**
+(`~/.claude/instructions/model-delegation.md`, "Review council"; members in
+`~/.config/agents/council.toml`), never a fixed list of reviewer models. A
+repo's own reviewers (CodeRabbit, GrepTile, a pre-PR script) are kept as
+additions to the council, worded so they cannot read as replacing or closing
+it. When a repo's text says "PR reviewers configured for this repo: ..." or
+otherwise lists its reviewers as the whole set, reword it to the additive
+form as part of the apply. Never write a rule that lets an agent run
+`gpt-5.6-sol` or the bare `gpt-5.6` alias; correct one you find to the ban.
+
 ## Arguments
 
 | Arg | Meaning |

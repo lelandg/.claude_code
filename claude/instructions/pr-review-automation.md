@@ -1,36 +1,37 @@
-# PR review automation — the Claude Code GitHub App
+# PR review through the repo's automated reviewers
 
 Referenced from `~/.config/agents/AGENTS.md` → "PR review through the repo's
-configured automated reviewer". Standing rule since 2026-09-13.
+configured automated reviewer". Standing rule since 2026-09-13; review
+council 2026-11-25.
 
 ## When it applies
 
 The user asks to commit, push, or open a PR on one of their repos, and the
-Claude Code GitHub App is the reviewer configured on that repo. The autofix
-behaviour below is specific to that App.
+repo has at least one automated reviewer (named in its own `AGENTS.md`; it is
+not necessarily a Claude Code GitHub App). The review council runs before the
+push on every repo either way (`~/.claude/instructions/model-delegation.md`,
+"Review council"). On a repo with no automated reviewer, the council review
+of the committed diff stands in for the wait; the last section of this file
+says how, and what to do when no council member can run.
 
-- **No automated reviewer configured:** use the local-review sequence in
-  AGENTS.md instead (the repo's own pre-PR reviewer, or the built-in
-  `/code-review <remote>/<base>...HEAD`, `<base>` being the PR's actual base
-  branch and `<remote>` the remote that hosts it (`origin`, or `upstream` in
-  a fork workflow; fetch it first), over the PR's whole range, before push). Never a bare
-  `/code-review`: it reviews only the commits ahead of the
-  branch's upstream plus uncommitted edits, which on a pushed branch omits the
-  PR's earlier commits.
-- **A different automated reviewer:** the procedure below does not transfer.
-  Establish the two things AGENTS.md calls out before you gate on it — whether
-  it re-reviews a push, and whether a passing check means "no findings" — and
-  record the answers in that repo's own `AGENTS.md`.
+- **A reviewer other than the Claude Code GitHub App:** the autofix steps
+  below are specific to that App and do not transfer. Establish the two
+  things the last section of this file calls out before you gate on it —
+  whether it re-reviews a push, and whether a passing check means "no
+  findings" — and record the answers in that repo's own `AGENTS.md`.
 
 ## Procedure
 
-1. Complete local checks, commit the feature, run the Codex review against the
-   committed branch, push, and open the PR with a `## Release notes` section
-   in its body. Do not cut a version bump: the lander cuts it at merge time
-   (see "Landing" and "Versioning" in `~/.config/agents/AGENTS.md`). The
+1. Complete local checks, commit the feature, run the review council
+   against the committed branch
+   (`~/.claude/instructions/model-delegation.md`, "Review council"), push,
+   and open the PR with a `## Release notes` section in its body. A council
+   member that cannot run is never a gate: name it and the reason in the PR
+   body and go on. Do not cut a version bump: the lander cuts it at merge time
+   (`~/.claude/instructions/landing-and-versioning.md`). The
    request authorizes the automation to review the PR; no further confirmation is needed before opening it.
-2. After opening the PR, wait for the automated Claude Code review. It normally
-   arrives in 2-5 minutes. Autofix is conditional and can create a separate
+2. After opening the PR, wait for each automated reviewer the repo names. A
+   review normally arrives in 2-5 minutes. Autofix is conditional and can create a separate
    draft PR without adding a comment or changing the original PR head.
 3. To find review and autofix results, inspect all of these locations:
    - PR issue comments, submitted reviews, and inline review comments.
@@ -78,7 +79,69 @@ behaviour below is specific to that App.
 
 ## Notes
 
-- Any additional local review runs before push; it does not replace waiting
-  for the automated PR review.
-- To watch a PR without triggering autofix, end the PR description with
-  `skip-auto-fix` (Codex convention recorded in Codex memory, 2026-09).
+- The council review, and any additional local review, runs before push; it
+  does not replace waiting for the automated PR review.
+- CodeRabbit retries are commands, not new commits: `@coderabbitai full
+  review` for a failed, cancelled or missing review on a head,
+  `@coderabbitai resume` for a paused one. A plain `@coderabbitai review` is
+  incremental and does nothing on a head it has already recorded.
+- To watch a PR without triggering autofix, put `skip-auto-fix` on its own
+  line in the PR body (`~/.claude/instructions/github-issues.md`).
+
+## From AGENTS.md: PR review through the repo's configured automated reviewer
+
+Moved from `~/.config/agents/AGENTS.md` on 2026-11-24 so that file stays under agy's rule-file cut (22,035 bytes, measured 2026-11-25); reworded for the review council on 2026-11-25. AGENTS.md keeps the rule in brief and points here; this text is the full version and is equally binding.
+
+When the user asks to commit, push, or open a PR (or gives a shipping
+go-ahead), run the local checks, commit, run the review council (see
+"Shipping autonomy" in `~/.config/agents/AGENTS.md`; runner and commands in
+`~/.claude/instructions/model-delegation.md`, "Review council"), push, and
+open the PR with its `## Release notes` section; the version bump is cut when
+the PR lands, not before. That request authorizes whatever automated reviewer
+the repo has configured to review the PR. After opening, wait for that review
+(2-5 minutes) and inspect its results and any autofix PR by the procedure
+above. The council review runs before push; it does not replace the wait for
+the automated review. On a repo with no automated reviewer configured, the
+council review of the committed diff stands in for it. A repo's own pre-PR
+reviewer (a script the repo ships) runs beside the council, not instead of
+it.
+
+A council member that cannot run is never a gate: name it and the reason in
+the PR body and go on. Only when no member can run at all, review the PR's
+full range, `git diff <remote>/<base>...HEAD`, with the running CLI's own
+reviewer (Claude Code: `/code-review <remote>/<base>...HEAD`; other CLIs:
+write the diff to a file and review it), with `<base>` the PR's actual base
+branch (`main`, `master`, ...) and `<remote>` the remote that hosts it
+(`origin`, or `upstream` in a fork workflow; fetch it first). Never a bare
+`/code-review`: it reviews only the commits ahead of the branch's upstream
+plus uncommitted edits, so once the branch is pushed it skips the PR's
+earlier commits.
+
+Sequence: implement → tests green → commit → review council → reconcile/fix →
+commit the fixes and review them again → push → PR → the repo's automated
+reviewers → land.
+
+**Which automated reviewer that is varies by repo, so read the repo's own
+`AGENTS.md` rather than assuming.** A repo's `AGENTS.md` adds reviewers to
+the council; it never replaces or closes it. It is not necessarily a Claude
+Code GitHub App. Two properties decide which one you actually gate on,
+and they differ by vendor:
+
+- **Does it re-review a push?** Some reviewers review on PR *open* only, so
+  after you add commits their check goes missing and a fresh review has to be
+  triggered by hand — otherwise the commits you actually merge are unreviewed.
+  Others re-review every push, but only while the settings that control that
+  are right: watch for one that pauses automatic review after N reviewed
+  commits, because it goes quiet *later*, on a long PR, with a green check.
+- **Does its check passing mean "no findings"?** Usually not — it means the
+  review ran. Findings arrive as inline comments while the summary body stays
+  empty, so the check is green and the conversation tab looks clear with a
+  real finding sitting in a thread. A passing check can also mean the review
+  was rate-limited or skipped rather than performed, so read the check run's
+  output title, not just its conclusion.
+
+The gate is therefore the check reporting **on the head you are merging** *and*
+the inline comments read — never the check alone. Know, too, whether these
+reviewers are required status checks at all: if the ruleset does not require
+them, waiting on them is your rule rather than enforcement, which is exactly
+why it has to be written down.

@@ -411,12 +411,15 @@ After installation, verify everything works:
 │   ├── environment.md                 # IDEs, runtimes, version-support windows (template)
 │   ├── file-dispositions.md           # Standing approvals for working-tree files (template)
 │   ├── file-operations.md             # File operation guidelines
+│   ├── git-workflow.md                # Rule 4 in full + new-repository rules
 │   ├── github-issues.md               # Issue triage, labels, needs-info flow
-│   ├── model-delegation.md            # Cross-provider routing (Claude + Codex)
+│   ├── landing-and-versioning.md      # Landing every PR; the lander cuts the version
+│   ├── model-delegation.md            # Review council + cross-provider routing
 │   ├── package-min-age.md             # Minimum-package-age floor, per manager
 │   ├── plan-templates.md              # Implementation plan format
-│   ├── pr-review-automation.md        # Claude Code GitHub App review + autofix inspection
-│   └── runbook-standards.md           # Zero-inference instructions for a human to run
+│   ├── pr-review-automation.md        # The repo's automated reviewers + autofix inspection
+│   ├── runbook-standards.md           # Zero-inference instructions for a human to run
+│   └── security-scanning.md           # Vulnerability fixes, no-fix tiers, scanner tiers
 ├── tools/                             # Hook scripts wired in settings.json
 │   ├── config-secrets-guard.py        # PreToolUse hook: blocks printing secrets
 │   ├── config-secrets-guard.pi.ts     # Same guard as a Pi extension
