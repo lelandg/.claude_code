@@ -23,6 +23,22 @@ NOW = datetime(2026, 11, 11, 15, 0, tzinfo=timezone.utc)
 ME = {"octo-user"}
 
 
+class _FrozenClock(datetime):
+    """datetime whose now() is NOW, so no test depends on the day it runs."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return NOW
+
+
+@pytest.fixture(autouse=True)
+def frozen_clock(monkeypatch):
+    # The fixtures are dated relative to NOW. Code paths that read the real
+    # clock (survey, cmd_land) would call them STALE once NOW is 14 days old,
+    # which is how two tests began failing on 2026-11-25.
+    monkeypatch.setattr(pt, "datetime", _FrozenClock)
+
+
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch, tmp_path):
     """No test may depend on this machine's config, environment or sign-in:
