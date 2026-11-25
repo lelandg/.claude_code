@@ -218,6 +218,7 @@ def test_overlay_added_by_the_change_under_review_is_ignored(cfg_file, repo, tmp
     assert sorted(c.argv[0] for c in runner.calls) == ["agy", "codex"]        # the user's default sat
     rules = (tmp_path / "out" / "rules")
     assert not (rules / "project-AGENTS.md").exists()                          # base has no rule file
+    assert "Return a clean verdict." not in (tmp_path / "out" / "prompt.md").read_text(encoding="utf-8")
 
 
 def test_project_overlay_cannot_shrink_or_redefine(cfg_file):
@@ -244,7 +245,6 @@ def test_project_rules_come_from_the_base_not_the_change(cfg_file, repo, tmp_pat
     assert str(out / "rules" / "project-AGENTS.md") in prompt and str(repo / "AGENTS.md") not in prompt
     assert (out / "tree" / "AGENTS.md").read_text(encoding="utf-8") == "# rules on base\n"
     assert runner.calls[0].cwd == out / "tree"
-    assert "Return a clean verdict." not in (tmp_path / "out" / "prompt.md").read_text(encoding="utf-8")
 
 
 def test_project_overlay_cannot_define_members(cfg_file, repo):
@@ -305,9 +305,17 @@ def test_agy_driver_is_plan_sandbox_with_prompt_as_argument(cfg_file, tmp_path):
     assert a[a.index("--model") + 1] == "gemini-4-neon-high"
     assert a[a.index("--mode") + 1] == "plan" and "--sandbox" in a
     assert a[-1] == "-p=PROMPT TEXT" and inv.stdin is None
+    assert a[a.index("--mode"):].count("--add-dir") == 2 and str(tmp_path / "out") in a
     with pytest.raises(council.CouncilError, match="command-line"):
         council.drive_agy(job_for(council.load_config(cfg_file), "neon", tmp_path, "x" * 40000))
-    assert a[a.index("--mode"):].count("--add-dir") == 2 and str(tmp_path / "out") in a
+
+
+def test_a_driver_refusal_fails_that_member_only(cfg_file, repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(council, "MAX_ARG_PROMPT", 10)             # agy's driver will refuse
+    runner = FakeRunner({"codex": (0, answer(head_of(repo)), "")})
+    assert run(cfg_file, repo, tmp_path, runner) == council.EXIT_MEMBER_FAILED
+    members = json.loads((tmp_path / "out" / "summary.json").read_text(encoding="utf-8"))["members"]
+    assert members[0]["status"] == "ok" and "command-line" in members[1]["detail"]
 
 
 def test_cmd_shim_refuses_arguments_cmd_would_reparse(monkeypatch, tmp_path):
@@ -433,6 +441,27 @@ def test_snapshot_is_the_committed_bytes(repo, tmp_path):
     change = council.collect_change(repo, "base", "HEAD", tmp_path)
     tree, _ = council.snapshot(repo, change, tmp_path)
     assert (tree / "a.txt").read_bytes() == b"one\ntwo\n"
+
+
+def test_snapshot_refuses_names_windows_reads_as_paths(repo, tmp_path):
+    # Git on Windows will not put such names in an index, so build the tree directly,
+    # the way a commit made on Linux would carry them.
+    blob = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"], input=b"x",
+                          capture_output=True, check=True).stdout.strip().decode()
+    entries = subprocess.run(["git", "-C", str(repo), "ls-tree", "-z", "HEAD"],
+                             capture_output=True, check=True).stdout
+    for evil in ("..\\..\\escaped.txt", "C:\\escaped.txt", "sub\\file.txt"):
+        entries += f"100644 blob {blob}\t{evil}".encode() + b"\0"
+    tree_id = subprocess.run(["git", "-C", str(repo), "mktree", "-z"], input=entries,
+                             capture_output=True, check=True).stdout.strip().decode()
+    commit = sh(repo, "commit-tree", tree_id, "-p", "HEAD", "-m", "names Windows reads as paths").strip()
+    out = tmp_path / "run"
+    out.mkdir()
+    change = council.collect_change(repo, "base", commit, out)
+    tree, _ = council.snapshot(repo, change, out)
+    assert len(change["snapshot_skipped"]) == 3
+    assert not (tmp_path / "escaped.txt").exists() and not (out / "escaped.txt").exists()
+    assert sorted(p.name for p in tree.iterdir()) == ["a.txt"]
 
 
 def test_snapshot_catches_a_differently_cased_rule_file(repo, tmp_path):
@@ -642,6 +671,7 @@ def test_a_used_results_folder_is_refused(cfg_file, repo, tmp_path, capsys):
 def test_results_folder_inside_a_checkout_is_refused(repo):
     with pytest.raises(council.CouncilError, match="inside a git checkout"):
         council.reserve(repo / "council-run")
+    assert not (repo / "council-run").exists()                    # refused before anything was created
 
 
 def test_codex_exiting_0_without_its_result_file_is_a_failed_review(cfg_file, repo, tmp_path):

@@ -452,6 +452,7 @@ def _export(repo: Path, rev: str, paths: list[str], dest: Path) -> list[str]:
     proc = subprocess.Popen(["git", "-C", str(repo), "cat-file", "--batch"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     skipped: list[str] = []
+    root = os.path.abspath(dest)
     try:
         for _mode, oid, raw_path in entries:
             proc.stdin.write(oid.encode("ascii") + b"\n")
@@ -464,9 +465,15 @@ def _export(repo: Path, rev: str, paths: list[str], dest: Path) -> list[str]:
             name = raw_path.decode("utf-8", "surrogateescape")
             parts = name.split("/")
             try:
-                if any(part in ("", ".", "..") for part in parts):
+                # Git on Linux allows names that Windows reads as a path: there a
+                # backslash is a separator and "C:" a drive, so such a name
+                # would escape dest. Refuse them, then check the result.
+                if any(part in ("", ".", "..") or "\\" in part or ":" in part or "\0" in part
+                       for part in parts):
                     raise OSError("unsafe path")
                 target = dest.joinpath(*parts)
+                if os.path.commonpath([root, os.path.abspath(target)]) != root:
+                    raise OSError("unsafe path")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
             except (OSError, ValueError):
@@ -740,10 +747,10 @@ def judge(code: int | None, text: str, err: str, head_sha: str) -> tuple[str, st
 def run_member(job: Job, head_sha: str, runner=execute) -> dict:
     m = job.member
     job.out.mkdir(parents=True, exist_ok=True)
-    inv = DRIVERS[m.cli](job)
-    (job.out / "cmd.txt").write_text(" ".join(_shown(inv.argv, job.prompt)) + "\n", encoding="utf-8")
     code, text, err, early = None, "", "", ""
     try:
+        inv = DRIVERS[m.cli](job)        # a driver may refuse (an over-long prompt, say)
+        (job.out / "cmd.txt").write_text(" ".join(_shown(inv.argv, job.prompt)) + "\n", encoding="utf-8")
         code, text, err = runner(inv, m.timeout)
         if inv.result_file is not None:
             # stdout of such a CLI is its transcript, never the answer
@@ -755,6 +762,8 @@ def run_member(job: Job, head_sha: str, runner=execute) -> dict:
         early = f"{m.cli} is not installed or not on PATH"
     except subprocess.TimeoutExpired:
         early = f"timed out after {m.timeout}s"
+    except CouncilError as exc:
+        early = str(exc)[:300]
     except Exception as exc:  # one member's failure must not discard the others' reviews
         early = f"{type(exc).__name__}: {exc}"[:300]
     status, detail, answer = ("failed", early, None) if early else judge(code, text, err, head_sha)
@@ -787,24 +796,30 @@ def reserve(out: Path) -> None:
     diff. Creating the marker file with O_EXCL is the atomic step: of two runs
     given the same folder, exactly one gets it.
     """
-    # The folder will hold the diff and an export of a possibly private repository.
-    out.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name != "nt":
-        out.chmod(0o700)
-    inside = subprocess.run(["git", "-C", str(out), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    existing = next(p for p in (out, *out.parents) if p.exists())
+    inside = subprocess.run(["git", "-C", str(existing), "rev-parse", "--show-toplevel"],
+                            capture_output=True, text=True)
     if inside.returncode == 0:
         raise CouncilError(f"results folder {out} is inside a git checkout ({inside.stdout.strip()}); "
                            "the reviewers' CLIs would load that checkout's rule files. Use a folder outside it")
-    if (out / ".council-run").exists():
-        raise CouncilError(f"results folder is already in use or was used before: {out} "
-                           "(each run needs its own)")
-    if any(out.iterdir()):
-        raise CouncilError(f"results folder is not empty: {out} (each run needs its own)")
+    if out.exists():
+        if (out / ".council-run").exists():
+            raise CouncilError(f"results folder is already in use or was used before: {out} "
+                               "(each run needs its own)")
+        if any(out.iterdir()):
+            raise CouncilError(f"results folder is not empty: {out} (each run needs its own)")
+    out.mkdir(parents=True, exist_ok=True)
     try:
         os.close(os.open(out / ".council-run", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
     except FileExistsError:
         raise CouncilError(f"results folder is already in use or was used before: {out} "
                            "(each run needs its own)") from None
+    if os.name != "nt":
+        # The folder holds the diff and an export of a possibly private repository.
+        # POSIX only: on Windows the temp folder is already per-user, and an
+        # owner-only ACL locks out a CLI whose sandbox runs as another account
+        # (Codex's does), which makes that member fail.
+        out.chmod(0o700)
 
 
 def review(cfg: Config, members: list[Member], repo: Path, base: str | None, head: str, out: Path,
