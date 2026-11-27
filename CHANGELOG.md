@@ -3,6 +3,10 @@
 A plain-English history of what changed in this repository and why. Newest first.
 (Dates match the git history; run `git log --oneline` for the commit-level detail.)
 
+## [0.18.0] - 2026-11-27
+
+- New `tools/ci-local`: run a repository's GitHub Actions workflows locally with act and Docker before you push. It is matched to a GitHub runner: the committed head merged into base, 2 CPUs and 7 GB, Ubuntu 24.04. A run passes only when every planned job succeeds.
+
 ## [0.17.0] - 2026-11-25
 
 - The shared `AGENTS.md` is now under 21 KB, so no agent CLI cuts it short (agy stops reading a rule file at 22,035 bytes). Each CLI still has to be wired to load it, as the README's cross-CLI section describes. The full text of the scanning, git-workflow and landing rules moved to three new files under `instructions/`.
