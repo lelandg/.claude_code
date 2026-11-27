@@ -67,6 +67,7 @@ case "$*" in
   "network ls --filter name=^act- --format {{.ID}} {{.Name}}") printf '%s\n' "net1 act-tests-unit-abc-unit-network" "net2 act-other-run-xyz-other-network" ;;
   "network inspect -f "*" net1") echo "service1 " ;;
   "network inspect -f "*) echo "foreign1 " ;;
+  "container inspect "*|"network inspect "*) [ -n "${CI_LOCAL_TEST_STUCK:-}" ] || exit 1 ;;
 esac
 exit 0
 """
@@ -276,3 +277,11 @@ def test_a_second_run_on_the_machine_is_refused(env):
         assert "another ci-local run is in progress" in r.stderr
     finally:
         holder.kill()
+
+
+def test_a_container_docker_cannot_remove_is_reported(env):
+    r = run(env, CI_LOCAL_TEST_STUCK="1")
+    assert r.returncode == 0
+    assert "could not remove this run's" in r.stderr
+    leftovers = list((Path(env["env"]["HOME"]) / "ci-local" / "logs").glob("leftover-*.txt"))
+    assert leftovers and "container:jobcontainer1" in leftovers[0].read_text()

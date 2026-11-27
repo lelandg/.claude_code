@@ -121,21 +121,25 @@ WATCHER=""
 # the IDs of the containers on that network. Cleanup deletes those IDs only, so
 # a later act run that reuses the same names is never touched.
 record_owned() {
+  # Docker can race act here (a network gone between listing and inspecting
+  # it), so nothing in this function may stop the watcher or the cleanup.
   local id name nid nname
-  docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.ID}} {{.Names}}' 2>/dev/null |
+  { docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.ID}} {{.Names}}' 2>/dev/null || true; } |
   while read -r id name; do
     [ -n "$id" ] || continue
     echo "container $id"
-    docker network ls --filter name=^act- --format '{{.ID}} {{.Name}}' 2>/dev/null |
+    { docker network ls --filter name=^act- --format '{{.ID}} {{.Name}}' 2>/dev/null || true; } |
     while read -r nid nname; do
       case "$nname" in "$name"-*-network)
         echo "network $nid"
-        docker network inspect -f '{{range $cid, $c := .Containers}}{{$cid}} {{end}}' "$nid" 2>/dev/null | tr ' ' '\n' | sed -n 's/^\(..*\)$/container \1/p' ;;
+        { docker network inspect -f '{{range $cid, $c := .Containers}}{{$cid}} {{end}}' "$nid" 2>/dev/null || true; } |
+          tr ' ' '\n' | sed -n 's/^\(..*\)$/container \1/p' ;;
       esac
     done
-  done >> "$TMP/owned"
+  done >> "$TMP/owned" || true
 }
 watch_run_containers() {
+  set +e +o pipefail  # a background subshell: errors here must not end it
   local sleeper=""
   trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
   while :; do
@@ -145,18 +149,31 @@ watch_run_containers() {
   done
 }
 remove_run_containers() {
-  local kind id
-  [ -z "$WATCHER" ] || { kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null || true; }
+  set +e +o pipefail  # runs on exit: every step must get its chance
+  local kind id left=""
+  if [ -n "$WATCHER" ]; then kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null; fi
   record_owned
   [ -s "$TMP/owned" ] || return 0
-  sort -u "$TMP/owned" | while read -r kind id; do
-    [ "$kind" = container ] && docker rm -f "$id" >/dev/null 2>&1 || true
-  done
-  sort -u "$TMP/owned" | while read -r kind id; do
-    [ "$kind" = network ] && docker network rm "$id" >/dev/null 2>&1 || true
-  done
+  sort -u "$TMP/owned" -o "$TMP/owned"
+  while read -r kind id; do
+    [ "$kind" = container ] && docker rm -f "$id" >/dev/null 2>&1
+  done < "$TMP/owned"
+  while read -r kind id; do
+    [ "$kind" = network ] && docker network rm "$id" >/dev/null 2>&1
+  done < "$TMP/owned"
+  # Anything still there is reported, and the ledger kept, so it can be found.
+  while read -r kind id; do
+    if [ "$kind" = container ]; then docker container inspect "$id" >/dev/null 2>&1 && left="$left $kind:$id"
+    else docker network inspect "$id" >/dev/null 2>&1 && left="$left $kind:$id"; fi
+  done < "$TMP/owned"
+  if [ -n "$left" ]; then
+    LEFTOVER="$ROOT/logs/leftover-$(date +%Y%m%d-%H%M%S).txt"
+    printf '%s\n' $left > "$LEFTOVER"
+    echo "ci-local: WARNING: could not remove this run's$left; remove them with docker rm -f / docker network rm (list: $LEFTOVER)" >&2
+  fi
+  return 0
 }
-cleanup() { [ -d "$TMP" ] && remove_run_containers; rm -rf "$TMP"; }
+cleanup() { if [ -d "$TMP" ]; then remove_run_containers; fi; rm -rf "$TMP"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 

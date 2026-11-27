@@ -84,6 +84,20 @@ class Ports:
         return self.next
 
 
+def split_comment(value: str) -> tuple[str, str]:
+    """('--user 1001', '# why') from '--user 1001 # why'; a '#' inside quotes stays."""
+    quote = ""
+    for i, ch in enumerate(value):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "#" and (i == 0 or value[i - 1].isspace()):
+            return value[:i].rstrip(), value[i:]
+    return value, ""
+
+
 def indent_of(line: str) -> int:
     return len(line) - len(line.lstrip())
 
@@ -261,16 +275,18 @@ def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str]
             if opt is None:
                 out.insert(c_at + 1, f"{' ' * inner}options: {container_options}\n")
             else:
-                value = KEY_LINE.match(out[opt])["rest"].strip()
+                value, comment = split_comment(KEY_LINE.match(out[opt])["rest"].strip())
+                tail = f" {comment}" if comment else ""
                 if value.startswith((">", "|")):  # a block scalar: one more line inside it
-                    body = [j for j in range(opt + 1, c_end) if meaningful(out[j]) and indent_of(out[j]) > inner]
+                    opt_end = block_end(out, opt, inner)  # only the scalar's own lines
+                    body = [j for j in range(opt + 1, opt_end) if meaningful(out[j])]
                     at = (body[-1] + 1) if body else opt + 1
                     deeper = indent_of(out[body[0]]) if body else inner + 2
                     out.insert(at, f"{' ' * deeper}{container_options}\n")
-                elif value[:1] in ("'", '"') and value[-1:] == value[:1]:
-                    out[opt] = f"{' ' * inner}options: {value[:-1]} {container_options}{value[-1]}\n"
+                elif value[:1] in ("'", '"') and value[-1:] == value[:1] and len(value) > 1:
+                    out[opt] = f"{' ' * inner}options: {value[:-1]} {container_options}{value[-1]}{tail}\n"
                 else:
-                    out[opt] = f"{' ' * inner}options: {value} {container_options}\n"
+                    out[opt] = f"{' ' * inner}options: {value} {container_options}{tail}\n"
             report.append(f"act-compat: {label}: job container gets the runner's CPU, memory and /proc settings")
         child, keys = child_keys(out)
 
@@ -278,6 +294,11 @@ def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str]
     if "strategy" in keys:
         s_at = keys["strategy"]
         s_end = block_end(out, s_at, child)
+        inline = split_comment(KEY_LINE.match(out[s_at])["rest"].strip())[0]
+        if inline and re.search(r"\bmatrix\b", inline):
+            # `strategy: {matrix: ...}` cannot be edited safely line by line.
+            why = "its instances share its service ports" if published else "jobs here share one disk"
+            report.append(f"act-compat: {label}: inline matrix strategy left as written; max-parallel not applied ({why})")
         has_matrix = any(KEY_LINE.match(out[j]) and KEY_LINE.match(out[j])["key"] == "matrix" for j in range(s_at + 1, s_end))
         if has_matrix:
             limit = 1 if published else max_parallel

@@ -228,3 +228,34 @@ def test_an_inline_job_container_is_reported():
     out, report = act_compat.remap_text(text, ports(), "x.yml", container_options=OPTS)
     assert out == text
     assert any("written inline" in r for r in report)
+
+
+def test_container_options_go_before_a_trailing_comment():
+    plain = "jobs:\n  a:\n    container:\n      image: node:22\n      options: --user 1001 # non-root\n"
+    out, _ = act_compat.remap_text(plain, ports(), "x.yml", container_options=OPTS)
+    assert f"options: --user 1001 {OPTS} # non-root\n" in out
+    quoted = 'jobs:\n  a:\n    container:\n      image: node:22\n      options: "--user 1001" # non-root\n'
+    out, _ = act_compat.remap_text(quoted, ports(), "x.yml", container_options=OPTS)
+    assert f'options: "--user 1001 {OPTS}" # non-root\n' in out
+
+
+def test_a_block_scalar_followed_by_another_key_stays_valid():
+    text = (
+        "jobs:\n  a:\n    container:\n      image: node:22\n      options: >-\n        --user 1001\n"
+        "      env:\n        A: b\n    steps: []\n"
+    )
+    out, _ = act_compat.remap_text(text, ports(), "x.yml", container_options=OPTS)
+    assert f"      options: >-\n        --user 1001\n        {OPTS}\n      env:\n        A: b\n" in out
+
+
+def test_split_comment_respects_quotes():
+    assert act_compat.split_comment("a # b") == ("a", "# b")
+    assert act_compat.split_comment('"a # b" # c') == ('"a # b"', "# c")
+    assert act_compat.split_comment("a#b") == ("a#b", "")
+
+
+def test_an_inline_matrix_is_reported_not_edited():
+    text = "jobs:\n  a:\n    strategy: {matrix: {n: [1, 2]}}\n    steps: []\n"
+    out, report = act_compat.remap_text(text, ports(), "x.yml")
+    assert out == text
+    assert any("inline matrix strategy" in r for r in report)

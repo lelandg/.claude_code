@@ -32,14 +32,14 @@ DONE = re.compile(r"^\[(?P<id>[^\]]+?)\s*\]\s+🏁\s+Job (?P<result>succeeded|fa
 CLEANUP_ONLY = re.compile(r"^Error: Error occurred running finally: .*\(original error: <nil>\)\s*$")
 
 
-def planned_jobs(listing: str) -> list[tuple[str, str]]:
-    """[(job id, "workflow/job name")] from `act --list`'s column table."""
+def planned_jobs(listing: str) -> list[tuple[str, str, str]]:
+    """[(job id, "workflow/job name", workflow file)] from `act --list`'s column table."""
     lines = listing.splitlines()
     head = next((i for i, l in enumerate(lines) if l.startswith("Stage") and "Job ID" in l), None)
     if head is None:
         return []
     h = lines[head]
-    cols = [h.index("Job ID"), h.index("Job name"), h.index("Workflow name"), h.index("Workflow file")]
+    cols = [h.index("Job ID"), h.index("Job name"), h.index("Workflow name"), h.index("Workflow file"), h.index("Events")]
     jobs = []
     for line in lines[head + 1:]:
         if not line.strip():
@@ -47,13 +47,14 @@ def planned_jobs(listing: str) -> list[tuple[str, str]]:
         job_id = line[cols[0]:cols[1]].strip()
         name = line[cols[1]:cols[2]].strip()
         workflow = line[cols[2]:cols[3]].strip()
+        wf_file = line[cols[3]:cols[4]].strip()
         if job_id:
-            jobs.append((job_id, f"{workflow}/{name}"))
+            jobs.append((job_id, f"{workflow}/{name}", wf_file))
     return jobs
 
 
-def job_kinds(workflow_dir: str | None) -> tuple[set[str], set[str]]:
-    """(ids of matrix jobs, ids of jobs that call a reusable workflow)."""
+def job_kinds(workflow_dir: str | None) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """((workflow file, id) of matrix jobs, (workflow file, id) of reusable-workflow callers)."""
     matrix, reusable = set(), set()
     if not workflow_dir:
         return matrix, reusable
@@ -63,12 +64,15 @@ def job_kinds(workflow_dir: str | None) -> tuple[set[str], set[str]]:
             block = lines[start:end]
             child, keys = act_compat.child_keys(block)
             if "uses" in keys:
-                reusable.add(job)
+                reusable.add((path.name, job))
             if "strategy" in keys:
                 s_at = keys["strategy"]
                 s_end = act_compat.block_end(block, s_at, child)
-                if any((m := act_compat.KEY_LINE.match(block[j])) and m["key"] == "matrix" for j in range(s_at + 1, s_end)):
-                    matrix.add(job)
+                inline = act_compat.KEY_LINE.match(block[s_at])["rest"]
+                # An inline `strategy: {...}` cannot be read line by line: assume a matrix.
+                if act_compat.split_comment(inline.strip())[0] or any(
+                        (m := act_compat.KEY_LINE.match(block[j])) and m["key"] == "matrix" for j in range(s_at + 1, s_end)):
+                    matrix.add((path.name, job))
     return matrix, reusable
 
 
@@ -80,15 +84,17 @@ def decide(listing: str, log: str, rc: int, workflow_dir: str | None = None) -> 
         m = DONE.match(line)
         if m:
             results.setdefault(m["id"], set()).add(m["result"])
-    names = dict(planned)
+    names = {job_id: name for job_id, name, _ in planned}
     unique = len(names) == len(planned)  # two workflows sharing a job id cannot be told apart
     # A reusable workflow's jobs report under their own ids, which `act --list` does not show.
     delegated: set[str] = set().union(*(results[j] for j in results if j not in names)) if results else set()
 
     out: list[str] = []
     confirmed = bool(planned) and unique
-    for job_id, name in planned:
-        got = delegated if job_id in reusable else results.get(job_id, set())
+    for job_id, name, wf_file in planned:
+        kind = (wf_file, job_id)
+        # A caller's called job may share its id, so both count.
+        got = (results.get(job_id, set()) | delegated) if kind in reusable else results.get(job_id, set())
         if "failed" in got:
             state = "failed"
         elif got:
@@ -96,7 +102,7 @@ def decide(listing: str, log: str, rc: int, workflow_dir: str | None = None) -> 
         else:
             state = "skipped" if rc == 0 else "not run"
         out.append(f"{state:<10} {name}")
-        if state != "succeeded" or job_id in matrix or job_id in reusable:
+        if state != "succeeded" or kind in matrix or kind in reusable:
             confirmed = False
     for job_id in sorted(set(results) - set(names)):
         state = "failed" if "failed" in results[job_id] else "succeeded"
