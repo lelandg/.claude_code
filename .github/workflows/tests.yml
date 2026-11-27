@@ -28,6 +28,7 @@ jobs:
           - claude/skills/land-pr
           - claude/skills/version-manager
           - tools/agent-config-sync
+          - tools/ci-local
           - tools/council
           - tools/runbook
     steps:
