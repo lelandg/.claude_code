@@ -135,6 +135,7 @@ Any skill prefixed with `cl-` (e.g. `cl-project-init`) is a **sanitized example 
 │                                      #   screenshots); cross-platform launcher
 ├── tools/                             # Standalone tooling, installed separately
 │   ├── agent-config-sync/             # Report/reconcile agent-config drift between runtimes
+│   ├── ci-local/                      # Run a repo's GitHub Actions workflows locally (act + Docker)
 │   ├── council/                       # Review council: several reviewer models, one config file
 │   ├── githooks/                      # Global git hooks: fail-closed secret gate + dep scans
 │   └── runbook/                       # Central runbook: one local page for every step
@@ -443,6 +444,22 @@ seating and any named councils.
 - Standard library only; runs from PowerShell or WSL.
 
 Guide: [`tools/council/README.md`](tools/council/README.md).
+
+### Local CI — your workflow files, on your machine, before you push
+
+`tools/ci-local/ci-local.sh` runs a repository's own GitHub Actions workflows
+with act and Docker, so a push only goes up once its jobs pass, and fixes go up
+in one batch instead of one CI run each.
+
+- Tests the committed head merged into the base branch, like GitHub's
+  `refs/pull/N/merge`, in a clean clone: uncommitted edits never count.
+- Each job gets a GitHub runner's 2 vCPU / 7 GB, on Ubuntu 24.04.
+- Service ports already taken on your machine move to free ones in the
+  throwaway clone; your workflow files are never changed.
+- No Actions minutes, no check posted to the pull request, no repository
+  secrets.
+
+Guide: [`tools/ci-local/README.md`](tools/ci-local/README.md).
 
 ### Central runbook — every step waiting on you, in one place
 
