@@ -285,3 +285,10 @@ def test_a_container_docker_cannot_remove_is_reported(env):
     assert "could not remove this run's" in r.stderr
     leftovers = list((Path(env["env"]["HOME"]) / "ci-local" / "logs").glob("leftover-*.txt"))
     assert leftovers and "container:jobcontainer1" in leftovers[0].read_text()
+
+
+@pytest.mark.parametrize("flag", ["--ref", "--base", "--event", "--pr", "-j", "-W"])
+def test_an_option_without_a_value_is_a_setup_error(env, flag):
+    r = run(env, flag)
+    assert r.returncode == 2
+    assert f"{flag} needs a value" in r.stderr

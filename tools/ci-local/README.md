@@ -75,8 +75,9 @@ more than makes up for running fewer of them.
   d=$(mktemp -d) && cd "$d"
   base=https://github.com/nektos/act/releases/download/v0.2.98
   curl -fsSLO "$base/act_Linux_x86_64.tar.gz" && curl -fsSLO "$base/checksums.txt"
-  grep ' act_Linux_x86_64.tar.gz$' checksums.txt | sha256sum -c -
-  tar -xzf act_Linux_x86_64.tar.gz act && install -m 0755 act ~/.local/bin/act
+  grep ' act_Linux_x86_64.tar.gz$' checksums.txt | sha256sum -c - \
+    && tar -xzf act_Linux_x86_64.tar.gz act \
+    && mkdir -p ~/.local/bin && install -m 0755 act ~/.local/bin/act
   cd - && rm -rf "$d"
   ```
 
