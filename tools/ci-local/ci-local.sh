@@ -17,7 +17,7 @@
 #   * Actions come from act's new action cache (a copy per job), offline once
 #     cached when every action is SHA-pinned; the classic cache shares one
 #     checkout between parallel jobs, which then delete each other's files.
-#   * At most 4 jobs run at once (CI_LOCAL_JOBS), because here they share one
+#   * At most 2 jobs run at once (CI_LOCAL_JOBS), because here they share one
 #     disk that GitHub gives each job to itself.
 #   * Service host ports already taken on this machine, or by another job of
 #     the same run, move to free ones in the throwaway clone (act_compat.py).
@@ -37,11 +37,13 @@ die() { echo "ci-local: $*" >&2; exit 2; }
 HERE=$(dirname "$(readlink -f "$0")")
 RUNNER_IMAGE=${CI_LOCAL_IMAGE:-catthehacker/ubuntu:act-24.04}
 JOB_CPUS=2 JOB_MEMORY=7g
-# GitHub gives every job its own VM and disk; here jobs share one disk. Eight
-# `npm ci`s at once starved a Postgres service of I/O past its health check,
-# which never happens on GitHub. Four at a time keeps each job close to a
-# runner's conditions; raise it on a fast disk.
-CONCURRENT_JOBS=${CI_LOCAL_JOBS:-4}
+# GitHub gives every job its own VM and disk; here jobs share one disk. With
+# eight jobs at once, and still with four, `npm ci`s starved a Postgres service
+# of I/O past its health check, which never happens on GitHub. Two at a time
+# kept every job within its checks and was also the fastest: 8m47s for eight
+# jobs, against 10.5-12.5 min with four and 9.9 min on GitHub. Raise it on a
+# fast disk.
+CONCURRENT_JOBS=${CI_LOCAL_JOBS:-2}
 [[ "$CONCURRENT_JOBS" =~ ^[1-9][0-9]*$ ]] || die "CI_LOCAL_JOBS must be a positive number"
 
 [ $# -ge 1 ] || die "usage: ci-local.sh <repo-path> [--ref REF] [--base BRANCH] [--event pull_request|push] [--pr N] [-j JOB] [-W WORKFLOW] [-- act args]"
@@ -111,35 +113,47 @@ TMP=$(mktemp -d "$ROOT/.run.XXXXXX")
 WATCHER=""
 # act's own --rm gives up when Docker is slow ("context deadline exceeded"),
 # and a container left running holds its port or database for the next run.
-# So ci-local removes what THIS run provably created, and nothing else:
+# So ci-local removes what THIS run provably created, by immutable ID:
 #   * job containers carry this run's own /proc mount ($TMP/proc/cpuinfo);
 #   * act names each job's service network after that job's container
-#     ("<job container>-<job id>-network"), and the services sit on it.
-# A watcher records the job containers' names while act runs, because act may
-# remove a job container before ci-local gets to clean up its network.
+#     ("<job container>-<job id>-network"), and its services sit on it.
+# While a job container exists, a watcher records its ID, its network's ID and
+# the IDs of the containers on that network. Cleanup deletes those IDs only, so
+# a later act run that reuses the same names is never touched.
+record_owned() {
+  local id name nid nname
+  docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.ID}} {{.Names}}' 2>/dev/null |
+  while read -r id name; do
+    [ -n "$id" ] || continue
+    echo "container $id"
+    docker network ls --filter name=^act- --format '{{.ID}} {{.Name}}' 2>/dev/null |
+    while read -r nid nname; do
+      case "$nname" in "$name"-*-network)
+        echo "network $nid"
+        docker network inspect -f '{{range $cid, $c := .Containers}}{{$cid}} {{end}}' "$nid" 2>/dev/null | tr ' ' '\n' | sed -n 's/^\(..*\)$/container \1/p' ;;
+      esac
+    done
+  done >> "$TMP/owned"
+}
 watch_run_containers() {
+  local sleeper=""
+  trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM
   while :; do
-    docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.Names}}' >> "$TMP/names" 2>/dev/null || true
-    sleep 2
+    record_owned
+    sleep 5 & sleeper=$!
+    wait "$sleeper"
   done
 }
 remove_run_containers() {
-  local ids net name
+  local kind id
   [ -z "$WATCHER" ] || { kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null || true; }
-  docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.Names}}' >> "$TMP/names" 2>/dev/null || true
-  ids=$(docker ps -aq --filter "volume=$TMP/proc/cpuinfo" 2>/dev/null || true)
-  [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
-  [ -s "$TMP/names" ] || return 0
-  sort -u "$TMP/names" -o "$TMP/names"
-  for net in $(docker network ls --filter name=^act- --format '{{.Name}}' 2>/dev/null); do
-    while read -r name; do
-      case "$net" in "$name"-*-network)
-        ids=$(docker network inspect -f '{{range $id, $c := .Containers}}{{$id}} {{end}}' "$net" 2>/dev/null || true)
-        [ -z "${ids// /}" ] || docker rm -f $ids >/dev/null 2>&1 || true
-        docker network rm "$net" >/dev/null 2>&1 || true
-        break ;;
-      esac
-    done < "$TMP/names"
+  record_owned
+  [ -s "$TMP/owned" ] || return 0
+  sort -u "$TMP/owned" | while read -r kind id; do
+    [ "$kind" = container ] && docker rm -f "$id" >/dev/null 2>&1 || true
+  done
+  sort -u "$TMP/owned" | while read -r kind id; do
+    [ "$kind" = network ] && docker network rm "$id" >/dev/null 2>&1 || true
   done
 }
 cleanup() { [ -d "$TMP" ] && remove_run_containers; rm -rf "$TMP"; }
@@ -177,10 +191,16 @@ else
   BASE_SHA=""
 fi
 
+# What a job sees as its CPUs: the first $JOB_CPUS processors of this machine.
+mkdir -p "$TMP/proc"
+awk -v n="$JOB_CPUS" 'BEGIN { RS = ""; ORS = "\n\n" } /^processor/ && c < n { c++; print }' /proc/cpuinfo > "$TMP/proc/cpuinfo"
+awk -v n="$JOB_CPUS" '/^cpu[0-9]+ / { if (substr($1, 4) + 0 >= n) next } { print }' /proc/stat > "$TMP/proc/stat"
+CONTAINER_OPTS="--cpus $JOB_CPUS --memory $JOB_MEMORY -v $TMP/proc/cpuinfo:/proc/cpuinfo:ro -v $TMP/proc/stat:/proc/stat:ro"
+
 # Service ports taken here or by another job move to free ones, in the
 # throwaway clone only (act_compat.py says why).
 [ -d "$WORK/.github/workflows" ] || die "no .github/workflows in ${HEAD_SHA:0:7}"
-python3 "$HERE/act_compat.py" "$WORK/.github/workflows" --max-parallel "$CONCURRENT_JOBS"
+python3 "$HERE/act_compat.py" "$WORK/.github/workflows" --max-parallel "$CONCURRENT_JOBS" --container-options "$CONTAINER_OPTS"
 
 # Actions: act's classic cache checks every action out into ONE shared folder
 # per job, so jobs that start together delete each other's files ("remove
@@ -197,11 +217,6 @@ if grep -qvE '@[0-9a-f]{40}$' "$TMP/uses"; then
   echo "ci-local: an action is pinned to a tag or branch; act fetches actions fresh this run" >&2
 fi
 
-# What a job sees as its CPUs: the first $JOB_CPUS processors of this machine.
-mkdir -p "$TMP/proc"
-awk -v n="$JOB_CPUS" 'BEGIN { RS = ""; ORS = "\n\n" } /^processor/ && c < n { c++; print }' /proc/cpuinfo > "$TMP/proc/cpuinfo"
-awk -v n="$JOB_CPUS" '/^cpu[0-9]+ / { if (substr($1, 4) + 0 >= n) next } { print }' /proc/stat > "$TMP/proc/stat"
-CONTAINER_OPTS="--cpus $JOB_CPUS --memory $JOB_MEMORY -v $TMP/proc/cpuinfo:/proc/cpuinfo:ro -v $TMP/proc/stat:/proc/stat:ro"
 
 EV="$TMP/event.json"
 if [ "$EVENT" = pull_request ]; then
@@ -241,17 +256,18 @@ fi
 LOG="$ROOT/logs/$NAME-${HEAD_SHA:0:7}-$EVENT-$(date +%Y%m%d-%H%M%S).log"
 echo "ci-local: $NAME ${HEAD_SHA:0:7} ($HEAD_BRANCH) $EVENT${BASE_SHA:+, merged into $BASE ${BASE_SHA:0:7}}${OFFLINE[*]:+, actions offline}"
 echo "ci-local: log $LOG"
-watch_run_containers & WATCHER=$!
+# The watcher must not hold the lock (fd 9) or the caller's output open.
+watch_run_containers 9>&- </dev/null >/dev/null 2>&1 & WATCHER=$!
 set +e
-(cd "$WORK" && "${ACT[@]}" --log-prefix-job-id) > "$LOG" 2>&1
+(cd "$WORK" && "${ACT[@]}" --log-prefix-job-id) > "$LOG" 2>&1 9>&-
 RC=$?
-python3 "$HERE/ci_summary.py" "$TMP/list" "$LOG" "$RC"
+python3 "$HERE/ci_summary.py" "$TMP/list" "$LOG" "$RC" "$WORK/.github/workflows"
 VERDICT=$?
 set -e
 case "$VERDICT" in
   0) ;;
   10) echo "ci-local: every planned job succeeded; act's exit $RC came only from removing a finished container, which ci-local does itself"; RC=0 ;;
-  *) [ "$RC" -ne 0 ] || RC=1 ;;  # a planned job that never reported is not a pass
+  *) [ "$RC" -ne 0 ] || RC=1 ;;  # the summary itself failed
 esac
 echo "ci-local: exit $RC"
 exit $RC

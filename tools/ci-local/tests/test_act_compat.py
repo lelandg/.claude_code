@@ -179,3 +179,52 @@ def test_other_matrices_are_capped_at_max_parallel():
 def test_main_rejects_bad_arguments():
     assert act_compat.main([]) == 2
     assert act_compat.main(["dir", "--max-parallel", "0"]) == 2
+    assert act_compat.main(["dir", "--container-options"]) == 2
+
+
+def test_inherited_env_follows_the_jobs_own_indentation_and_reports_only_added_keys():
+    text = (
+        "env:\n  URL: postgresql://localhost:5432/app\n  OTHER_URL: http://localhost:5432/x\n"
+        "jobs:\n  a:\n    env:\n        OTHER_URL: mine\n    services:\n      pg:\n        ports:\n          - 5432:5432\n"
+    )
+    out, report = act_compat.remap_text(text, ports(taken={5432}), "x.yml")
+    assert "    env:\n        URL: postgresql://localhost:45432/app\n        OTHER_URL: mine\n" in out
+    assert [r for r in report if "copied" in r] == ["act-compat: x.yml:a: workflow env URL copied into the job with the new port"]
+
+
+def test_inline_job_env_is_reported_not_broken():
+    text = "env:\n  URL: localhost:5432\njobs:\n  a:\n    env: {A: b}\n    services:\n      pg:\n        ports: [5432:5432]\n"
+    out, report = act_compat.remap_text(text, ports(taken={5432}), "x.yml")
+    assert "env: {A: b}\n" in out
+    assert any("written inline" in r for r in report)
+
+
+OPTS = "--cpus 2 -v /r/proc/cpuinfo:/proc/cpuinfo:ro"
+
+
+def test_a_string_job_container_gets_the_runner_options():
+    text = "jobs:\n  a:\n    container: node:22\n    steps: []\n"
+    out, _ = act_compat.remap_text(text, ports(), "x.yml", container_options=OPTS)
+    assert f"    container:\n      image: node:22\n      options: {OPTS}\n    steps: []\n" in out
+
+
+def test_a_mapping_job_container_keeps_its_options_and_gains_ours():
+    plain = "jobs:\n  a:\n    container:\n      image: node:22\n      options: --user 1001\n"
+    out, _ = act_compat.remap_text(plain, ports(), "x.yml", container_options=OPTS)
+    assert f"options: --user 1001 {OPTS}\n" in out
+    quoted = 'jobs:\n  a:\n    container:\n      image: node:22\n      options: "--user 1001"\n'
+    out, _ = act_compat.remap_text(quoted, ports(), "x.yml", container_options=OPTS)
+    assert f'options: "--user 1001 {OPTS}"\n' in out
+    block = "jobs:\n  a:\n    container:\n      image: node:22\n      options: >-\n        --user 1001\n    steps: []\n"
+    out, _ = act_compat.remap_text(block, ports(), "x.yml", container_options=OPTS)
+    assert f"      options: >-\n        --user 1001\n        {OPTS}\n    steps: []\n" in out
+    none = "jobs:\n  a:\n    container:\n      image: node:22\n"
+    out, _ = act_compat.remap_text(none, ports(), "x.yml", container_options=OPTS)
+    assert f"    container:\n      options: {OPTS}\n      image: node:22\n" in out
+
+
+def test_an_inline_job_container_is_reported():
+    text = "jobs:\n  a:\n    container: {image: node:22}\n"
+    out, report = act_compat.remap_text(text, ports(), "x.yml", container_options=OPTS)
+    assert out == text
+    assert any("written inline" in r for r in report)

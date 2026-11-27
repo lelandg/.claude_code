@@ -58,9 +58,39 @@ def test_job_output_that_mentions_success_is_not_a_result():
     assert "not run    tests/node --test (needs build)" in lines
 
 
-def test_exit_zero_with_a_missing_job_is_not_a_pass():
-    _, verdict = ci_summary.decide(LIST, f"{OK}\n", 0)
-    assert verdict == 11
+def test_a_job_skipped_by_its_condition_keeps_act_exit_zero():
+    lines, verdict = ci_summary.decide(LIST, f"{OK}\n", 0)
+    assert verdict == 0
+    assert "skipped    tests/node --test (needs build)" in lines
+
+
+def test_a_skip_blocks_the_cleanup_override():
+    _, verdict = ci_summary.decide(LIST, f"{OK}\n{FINALLY}\n", 1)
+    assert verdict == 0
+
+
+def write(tmp_path, text):
+    (tmp_path / "w.yml").write_text(text)
+    return str(tmp_path)
+
+
+def test_a_matrix_job_blocks_the_cleanup_override(tmp_path):
+    wf = write(tmp_path, "jobs:\n  build:\n    strategy:\n      matrix:\n        n: [1, 2]\n  test:\n    steps: []\n")
+    _, verdict = ci_summary.decide(LIST, f"{OK}\n{OK_TEST}\n{FINALLY}\n", 1, wf)
+    assert verdict == 0
+
+
+def test_a_reusable_workflow_reports_through_its_called_jobs(tmp_path):
+    listing = "Stage  Job ID  Job name  Workflow name  Workflow file  Events\n0      ci      ci        main           main.yml       push\n"
+    wf = write(tmp_path, "jobs:\n  ci:\n    uses: ./.github/workflows/inner.yml\n")
+    lines, verdict = ci_summary.decide(listing, "[inner-build] 🏁  Job succeeded\n", 0, wf)
+    assert "succeeded  main/ci" in lines
+    assert "succeeded  inner-build (called workflow)" in lines
+    assert verdict == 0
+    lines, _ = ci_summary.decide(listing, "[inner-build] 🏁  Job failed\n", 1, wf)
+    assert "failed     main/ci" in lines
+    _, verdict = ci_summary.decide(listing, f"[inner-build] 🏁  Job succeeded\n{FINALLY}\n", 1, wf)
+    assert verdict == 0  # its instances cannot all be confirmed
 
 
 def test_without_a_plan_acts_exit_code_stands():

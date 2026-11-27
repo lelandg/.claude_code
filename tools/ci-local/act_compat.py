@@ -25,13 +25,16 @@ So, per job:
     service, where the port has not changed;
   * a matrix job that publishes fixed host ports runs one instance at a time
     (`max-parallel: 1`), since its instances would share those ports; any
-    other matrix job runs at most --max-parallel instances at once.
+    other matrix job runs at most --max-parallel instances at once;
+  * a job with its own `container:` takes that container's options from the
+    workflow instead of act's --container-options, so --container-options
+    (the runner's CPU, memory and /proc settings) are added to them.
 
 The edit is line-based, so comments and formatting survive and each file stays
 byte-for-byte what you wrote except for the lines named in the printed report.
 Standard library only.
 
-Usage: act_compat.py <workflow-dir> [--max-parallel N]
+Usage: act_compat.py <workflow-dir> [--max-parallel N] [--container-options OPTS]
 """
 from __future__ import annotations
 
@@ -154,7 +157,7 @@ def child_keys(lines: list[str]) -> tuple[int | None, dict[str, int]]:
     return child, keys
 
 
-def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str], max_parallel: int) -> tuple[list[str], list[str]]:
+def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str], max_parallel: int, container_options: str = "") -> tuple[list[str], list[str]]:
     out = list(lines)
     report: list[str] = []
     moved: dict[int, int] = {}
@@ -219,18 +222,57 @@ def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str]
         inherited = {k: sub(v) for k, v in wf_env.items() if sub(v) != v}
         if inherited:
             pad = " " * child
+            added: list[str] = []
             if "env" in keys:
                 env_at = keys["env"]
                 env_end = block_end(out, env_at, child)
-                own = {KEY_LINE.match(out[j])["key"] for j in range(env_at + 1, env_end) if meaningful(out[j]) and KEY_LINE.match(out[j])}
-                add = [f"{pad}  {k}: {v}\n" for k, v in inherited.items() if k not in own]
-                out[env_at + 1:env_at + 1] = add
+                if KEY_LINE.match(out[env_at])["rest"].split("#")[0].strip():
+                    report.append(f"act-compat: {label}: workflow env {', '.join(inherited)} not copied: the job's env is written inline; set it in the job by hand")
+                else:
+                    entries = [j for j in range(env_at + 1, env_end) if meaningful(out[j])]
+                    inner = " " * (indent_of(out[entries[0]]) if entries else child + 2)
+                    own = {KEY_LINE.match(out[j])["key"] for j in entries if KEY_LINE.match(out[j])}
+                    added = [k for k in inherited if k not in own]
+                    out[env_at + 1:env_at + 1] = [f"{inner}{k}: {inherited[k]}\n" for k in added]
             else:
-                add = [f"{pad}env:\n"] + [f"{pad}  {k}: {v}\n" for k, v in inherited.items()]
-                out[1:1] = add
-            for k in inherited:
+                added = list(inherited)
+                out[1:1] = [f"{pad}env:\n"] + [f"{pad}  {k}: {inherited[k]}\n" for k in added]
+            for k in added:
                 report.append(f"act-compat: {label}: workflow env {k} copied into the job with the new port")
             child, keys = child_keys(out)
+
+    # A job with its own `container:` gets that container's options from the
+    # workflow, not from act's --container-options, so the runner's CPU,
+    # memory and /proc settings are added to them.
+    if container_options and "container" in keys:
+        c_at = keys["container"]
+        rest = KEY_LINE.match(out[c_at])["rest"].split("#")[0].strip()
+        pad = " " * child
+        if rest.startswith("{"):
+            report.append(f"act-compat: {label}: job container written inline; the runner's CPU, memory and /proc settings were not added")
+        elif rest:  # `container: node:22`
+            out[c_at:c_at + 1] = [f"{pad}container:\n", f"{pad}  image: {rest}\n", f"{pad}  options: {container_options}\n"]
+            report.append(f"act-compat: {label}: job container gets the runner's CPU, memory and /proc settings")
+        else:
+            c_end = block_end(out, c_at, child)
+            entries = [j for j in range(c_at + 1, c_end) if meaningful(out[j])]
+            inner = indent_of(out[entries[0]]) if entries else child + 2
+            opt = next((j for j in entries if indent_of(out[j]) == inner and KEY_LINE.match(out[j]) and KEY_LINE.match(out[j])["key"] == "options"), None)
+            if opt is None:
+                out.insert(c_at + 1, f"{' ' * inner}options: {container_options}\n")
+            else:
+                value = KEY_LINE.match(out[opt])["rest"].strip()
+                if value.startswith((">", "|")):  # a block scalar: one more line inside it
+                    body = [j for j in range(opt + 1, c_end) if meaningful(out[j]) and indent_of(out[j]) > inner]
+                    at = (body[-1] + 1) if body else opt + 1
+                    deeper = indent_of(out[body[0]]) if body else inner + 2
+                    out.insert(at, f"{' ' * deeper}{container_options}\n")
+                elif value[:1] in ("'", '"') and value[-1:] == value[:1]:
+                    out[opt] = f"{' ' * inner}options: {value[:-1]} {container_options}{value[-1]}\n"
+                else:
+                    out[opt] = f"{' ' * inner}options: {value} {container_options}\n"
+            report.append(f"act-compat: {label}: job container gets the runner's CPU, memory and /proc settings")
+        child, keys = child_keys(out)
 
     # Matrix instances share this one host.
     if "strategy" in keys:
@@ -253,7 +295,7 @@ def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str]
     return out, report
 
 
-def remap_text(text: str, ports: Ports, label: str = "", max_parallel: int = 4) -> tuple[str, list[str]]:
+def remap_text(text: str, ports: Ports, label: str = "", max_parallel: int = 4, container_options: str = "") -> tuple[str, list[str]]:
     """Return the workflow text adjusted for one shared host, and a report."""
     lines = text.splitlines(keepends=True)
     if lines and not lines[-1].endswith("\n"):
@@ -263,7 +305,7 @@ def remap_text(text: str, ports: Ports, label: str = "", max_parallel: int = 4) 
     shift = 0  # lines inserted by earlier jobs move the later ones down
     for job, start, end in job_blocks(lines):
         start, end = start + shift, end + shift
-        new, job_report = remap_job(lines[start:end], ports, f"{label}:{job}" if label else job, wf_env, max_parallel)
+        new, job_report = remap_job(lines[start:end], ports, f"{label}:{job}" if label else job, wf_env, max_parallel, container_options)
         lines[start:end] = new
         shift += len(new) - (end - start)
         report += job_report
@@ -275,18 +317,23 @@ def main(argv: list[str]) -> int:
     if not argv or argv[0].startswith("-"):
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
-    directory, max_parallel = argv[0], 4
-    if len(argv) == 3 and argv[1] == "--max-parallel" and argv[2].isdigit() and int(argv[2]) > 0:
-        max_parallel = int(argv[2])
-    elif len(argv) != 1:
-        print(__doc__.strip().splitlines()[-1], file=sys.stderr)
-        return 2
+    directory, max_parallel, container_options = argv[0], 4, ""
+    rest = argv[1:]
+    while rest:
+        if len(rest) >= 2 and rest[0] == "--max-parallel" and rest[1].isdigit() and int(rest[1]) > 0:
+            max_parallel = int(rest[1])
+        elif len(rest) >= 2 and rest[0] == "--container-options":
+            container_options = rest[1]
+        else:
+            print(__doc__.strip().splitlines()[-1], file=sys.stderr)
+            return 2
+        rest = rest[2:]
     ports = Ports()
     # Ports are assigned in file and job order: the first job to publish a free
     # port keeps it, and every later one gets a distinct free port.
     for path in sorted(Path(directory).glob("*.y*ml")):
         text = path.read_text(encoding="utf-8")
-        new, report = remap_text(text, ports, path.name, max_parallel)
+        new, report = remap_text(text, ports, path.name, max_parallel, container_options)
         for line in report:
             print(line)
         if new != text:

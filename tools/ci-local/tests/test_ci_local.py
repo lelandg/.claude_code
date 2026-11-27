@@ -63,10 +63,9 @@ exit "${CI_LOCAL_TEST_RC:-0}"
 STUB_DOCKER = r"""#!/usr/bin/env bash
 echo "$*" >> "$CI_LOCAL_TEST_DOCKER_LOG"
 case "$*" in
-  "ps -a --filter volume="*"--format {{.Names}}") echo act-tests-unit-abc ;;
-  "ps -aq --filter volume="*) echo jobcontainer1 ;;
-  "network ls --filter name=^act- --format {{.Name}}") printf '%s\n' act-tests-unit-abc-unit-network act-other-run-xyz-other-network ;;
-  "network inspect -f "*"act-tests-unit-abc-unit-network") echo "service1 " ;;
+  "ps -a --filter volume="*"--format {{.ID}} {{.Names}}") echo "jobcontainer1 act-tests-unit-abc" ;;
+  "network ls --filter name=^act- --format {{.ID}} {{.Name}}") printf '%s\n' "net1 act-tests-unit-abc-unit-network" "net2 act-other-run-xyz-other-network" ;;
+  "network inspect -f "*" net1") echo "service1 " ;;
   "network inspect -f "*) echo "foreign1 " ;;
 esac
 exit 0
@@ -209,10 +208,10 @@ def test_offline_only_when_every_action_is_sha_pinned(env):
 def test_job_cap(env):
     run(env)
     args = call(env)["args"]
-    assert args[args.index("--concurrent-jobs") + 1] == "4"
-    run(env, CI_LOCAL_JOBS="2")
-    args = call(env)["args"]
     assert args[args.index("--concurrent-jobs") + 1] == "2"
+    run(env, CI_LOCAL_JOBS="3")
+    args = call(env)["args"]
+    assert args[args.index("--concurrent-jobs") + 1] == "3"
     assert run(env, CI_LOCAL_JOBS="zero").returncode == 2
 
 
@@ -221,9 +220,16 @@ def test_cleanup_removes_only_this_runs_containers_and_networks(env):
     calls = env["docker_log"].read_text()
     assert "rm -f jobcontainer1" in calls
     assert "rm -f service1" in calls
-    assert "network rm act-tests-unit-abc-unit-network" in calls
-    assert "network rm act-other-run-xyz-other-network" not in calls
+    assert "network rm net1" in calls
+    assert "network rm net2" not in calls
     assert "foreign1" not in calls
+
+
+def test_back_to_back_runs_are_not_refused(env):
+    # The watcher must not keep the lock (fd 9) after a run ends.
+    assert run(env).returncode == 0
+    r = run(env)
+    assert r.returncode == 0, r.stderr
 
 
 def test_the_clone_keeps_the_sources_github_identity(env):
