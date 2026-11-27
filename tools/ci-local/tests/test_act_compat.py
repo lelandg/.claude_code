@@ -120,6 +120,62 @@ def test_main_rewrites_only_files_that_change(tmp_path, monkeypatch):
     (tmp_path / "a.yml").write_text(WORKFLOW)
     (tmp_path / "b.yaml").write_text("on: push\n")
     monkeypatch.setattr(act_compat, "bindable", lambda p: p != 5432)
-    assert act_compat.main(str(tmp_path)) == 0
+    assert act_compat.main([str(tmp_path)]) == 0
     assert "45432:5432" in (tmp_path / "a.yml").read_text()
     assert (tmp_path / "b.yaml").read_text() == "on: push\n"
+
+
+def test_service_health_checks_keep_the_containers_own_port():
+    text = (
+        "jobs:\n  a:\n    services:\n      es:\n        ports:\n          - 9200:9200\n"
+        '        options: --health-cmd "curl -f http://localhost:9200/_cluster/health"\n'
+        "    steps:\n      - run: curl http://localhost:9200/\n"
+    )
+    out, _ = act_compat.remap_text(text, ports(taken={9200}), "x.yml")
+    assert "- 45432:9200" in out
+    assert "http://localhost:9200/_cluster/health" in out  # runs inside the service
+    assert "run: curl http://localhost:45432/" in out
+
+
+def test_a_ports_key_outside_services_is_not_a_mapping():
+    text = "jobs:\n  a:\n    steps:\n      - uses: acme/tool@v1\n        with:\n          ports:\n            - 5432:5432\n"
+    out, report = act_compat.remap_text(text, ports(taken={5432}), "x.yml")
+    assert out == text and report == []
+
+
+def test_workflow_env_moves_into_each_job_that_moved_its_port():
+    text = (
+        "env:\n  DATABASE_URL: postgresql://localhost:5432/app\n  OTHER: keep\n"
+        "jobs:\n"
+        "  a:\n    services:\n      pg:\n        ports:\n          - 5432:5432\n    steps:\n      - run: echo a\n"
+        "  b:\n    env:\n      DATABASE_URL: postgresql://localhost:5432/own\n    services:\n      pg:\n        ports:\n          - 5432:5432\n    steps:\n      - run: echo b\n"
+        "  c:\n    steps:\n      - run: echo c\n"
+    )
+    out, report = act_compat.remap_text(text, ports(taken={5432}), "x.yml")
+    assert out.startswith("env:\n  DATABASE_URL: postgresql://localhost:5432/app\n")  # workflow level untouched
+    assert "  a:\n    env:\n      DATABASE_URL: postgresql://localhost:45432/app\n" in out
+    assert "DATABASE_URL: postgresql://localhost:45433/own" in out  # b's own value, rewritten in place
+    assert out.count("/app") == 2  # b keeps its override; c gets nothing
+    assert any("workflow env DATABASE_URL copied" in r for r in report)
+
+
+def test_matrix_with_published_ports_runs_one_instance_at_a_time():
+    text = (
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        node: [20, 22]\n"
+        "    services:\n      pg:\n        ports:\n          - 5432:5432\n"
+    )
+    out, report = act_compat.remap_text(text, ports(), "x.yml")
+    assert "    strategy:\n      max-parallel: 1\n      matrix:\n" in out
+    assert any("share its service ports" in r for r in report)
+
+
+def test_other_matrices_are_capped_at_max_parallel():
+    text = "jobs:\n  a:\n    strategy:\n      max-parallel: 10\n      matrix:\n        n: [1, 2, 3, 4, 5, 6]\n  b:\n    strategy:\n      max-parallel: 2\n      matrix:\n        n: [1, 2, 3]\n"
+    out, _ = act_compat.remap_text(text, ports(), "x.yml", max_parallel=4)
+    assert "max-parallel: 4\n      matrix:\n        n: [1, 2, 3, 4, 5, 6]" in out
+    assert "max-parallel: 2\n      matrix:\n        n: [1, 2, 3]" in out
+
+
+def test_main_rejects_bad_arguments():
+    assert act_compat.main([]) == 2
+    assert act_compat.main(["dir", "--max-parallel", "0"]) == 2

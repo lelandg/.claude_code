@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -29,9 +30,9 @@ jobs:
       - run: echo hi
 """
 
-# Records what act was asked to do, then reports one job, like act does.
-STUB_ACT = """\
-#!/usr/bin/env bash
+# Records what act was asked to do, then answers like act: a job table for
+# --list, otherwise one job-ID-prefixed completion line.
+STUB_ACT = r"""#!/usr/bin/env bash
 out="$CI_LOCAL_TEST_OUT"
 ev=""; prev=""
 for a in "$@"; do [ "$prev" = "-e" ] && ev="$a"; prev="$a"; done
@@ -39,14 +40,36 @@ python3 - "$out" "$ev" "$@" <<'PY'
 import json, os, subprocess, sys
 out, ev, *args = sys.argv[1:]
 event = json.load(open(ev)) if ev else None
-parents = subprocess.run(["git", "log", "-1", "--format=%P"], capture_output=True, text=True).stdout.split()
-head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-json.dump({"args": args, "event": event, "parents": parents, "head": head, "cwd": os.getcwd()}, open(out, "w"))
+run = lambda *c: subprocess.run(list(c), capture_output=True, text=True).stdout.strip()
+json.dump({"args": args, "event": event, "parents": run("git", "log", "-1", "--format=%P").split(),
+           "head": run("git", "rev-parse", "HEAD"), "origin": run("git", "remote", "get-url", "origin"),
+           "cwd": os.getcwd()}, open(out, "w"))
 PY
-if printf '%s\\n' "$@" | grep -qx -- --list; then echo "Stage  Job ID  Job name"; exit 0; fi
-echo "[tests/unit] 🏁  Job ${CI_LOCAL_TEST_JOB:-succeeded}"
-[ -n "${CI_LOCAL_TEST_FINALLY:-}" ] && echo "Error: Error occurred running finally: context deadline exceeded (original error: <nil>)"
+if printf '%s\n' "$@" | grep -qx -- --list; then
+  echo "Stage  Job ID  Job name  Workflow name  Workflow file  Events"
+  echo "0      unit    unit      tests          tests.yml      pull_request,push"
+  exit 0
+fi
+echo "[unit] 🏁  Job ${CI_LOCAL_TEST_JOB:-succeeded}"
+if [ -n "${CI_LOCAL_TEST_FINALLY:-}" ]; then
+  echo "Error: Error occurred running finally: context deadline exceeded (original error: <nil>)"
+fi
 exit "${CI_LOCAL_TEST_RC:-0}"
+"""
+
+# Answers like Docker for one job container of this run ("act-tests-unit-abc",
+# found by the run's /proc mount) and lists one network of this run and one of
+# another run. Logs every call.
+STUB_DOCKER = r"""#!/usr/bin/env bash
+echo "$*" >> "$CI_LOCAL_TEST_DOCKER_LOG"
+case "$*" in
+  "ps -a --filter volume="*"--format {{.Names}}") echo act-tests-unit-abc ;;
+  "ps -aq --filter volume="*) echo jobcontainer1 ;;
+  "network ls --filter name=^act- --format {{.Name}}") printf '%s\n' act-tests-unit-abc-unit-network act-other-run-xyz-other-network ;;
+  "network inspect -f "*"act-tests-unit-abc-unit-network") echo "service1 " ;;
+  "network inspect -f "*) echo "foreign1 " ;;
+esac
+exit 0
 """
 
 
@@ -60,7 +83,7 @@ def env(tmp_path: Path):
     home, bin_dir = tmp_path / "home", tmp_path / "bin"
     home.mkdir(); bin_dir.mkdir()
     (bin_dir / "act").write_text(STUB_ACT)
-    (bin_dir / "docker").write_text("#!/bin/sh\nexit 0\n")
+    (bin_dir / "docker").write_text(STUB_DOCKER)
     for f in bin_dir.iterdir():
         f.chmod(0o755)
     remote, src = tmp_path / "remote.git", tmp_path / "src"
@@ -76,9 +99,10 @@ def env(tmp_path: Path):
     git(src, "checkout", "-q", "-b", "feature")
     (src / "b.txt").write_text("feature\n")
     git(src, "add", "-A"); git(src, "commit", "-q", "-m", "feature")
-    out = tmp_path / "act-call.json"
-    run_env = {**os.environ, "HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}", "CI_LOCAL_TEST_OUT": str(out)}
-    return {"src": src, "remote": remote, "out": out, "env": run_env, "tmp": tmp_path}
+    out, docker_log = tmp_path / "act-call.json", tmp_path / "docker.log"
+    run_env = {**os.environ, "HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}",
+               "CI_LOCAL_TEST_OUT": str(out), "CI_LOCAL_TEST_DOCKER_LOG": str(docker_log)}
+    return {"src": src, "remote": remote, "out": out, "env": run_env, "tmp": tmp_path, "docker_log": docker_log}
 
 
 def run(env, *args, **extra):
@@ -100,14 +124,15 @@ def test_pull_request_tests_the_merge_of_head_into_base(env):
     assert "succeeded  tests/unit" in r.stdout
 
 
-def test_runner_size_cleanup_and_offline_flags(env):
+def test_runner_size_cleanup_and_cache_flags(env):
     run(env)
     args = call(env)["args"]
     opts = args[args.index("--container-options") + 1]
     assert "--cpus 2" in opts and "--memory 7g" in opts
     assert ":/proc/cpuinfo:ro" in opts and ":/proc/stat:ro" in opts
-    assert "--rm" in args and "--pull=false" in args
-    assert "--action-offline-mode" in args  # nothing to fetch, so everything is cached
+    assert "--rm" in args and "--pull=false" in args and "--log-prefix-job-id" in args
+    assert "--use-new-action-cache" in args
+    assert "--action-offline-mode" in args  # no tag-pinned actions
 
 
 def test_uncommitted_edits_are_not_tested_and_say_so(env):
@@ -149,16 +174,16 @@ def test_act_exit_code_is_returned(env):
     assert "ci-local: exit 1" in r.stdout
 
 
-def test_a_cleanup_timeout_after_all_jobs_passed_is_a_pass(env):
+def test_a_cleanup_timeout_after_all_planned_jobs_passed_is_a_pass(env):
     r = run(env, CI_LOCAL_TEST_RC="1", CI_LOCAL_TEST_FINALLY="1")
-    assert r.returncode == 0
-    assert "came only from removing a finished container" in r.stdout
+    assert r.returncode == 0, r.stdout
+    assert "every planned job succeeded" in r.stdout
 
 
 def test_a_failed_job_still_fails_with_a_cleanup_timeout(env):
     r = run(env, CI_LOCAL_TEST_RC="1", CI_LOCAL_TEST_FINALLY="1", CI_LOCAL_TEST_JOB="failed")
     assert r.returncode == 1
-    assert "failed  tests/unit" in r.stdout
+    assert "failed     tests/unit" in r.stdout
 
 
 def test_list_shows_acts_own_output(env):
@@ -181,10 +206,9 @@ def test_offline_only_when_every_action_is_sha_pinned(env):
     assert "pinned to a tag or branch" in r.stderr
 
 
-def test_new_action_cache_and_job_cap(env):
+def test_job_cap(env):
     run(env)
     args = call(env)["args"]
-    assert "--use-new-action-cache" in args
     assert args[args.index("--concurrent-jobs") + 1] == "4"
     run(env, CI_LOCAL_JOBS="2")
     args = call(env)["args"]
@@ -192,13 +216,54 @@ def test_new_action_cache_and_job_cap(env):
     assert run(env, CI_LOCAL_JOBS="zero").returncode == 2
 
 
+def test_cleanup_removes_only_this_runs_containers_and_networks(env):
+    assert run(env).returncode == 0
+    calls = env["docker_log"].read_text()
+    assert "rm -f jobcontainer1" in calls
+    assert "rm -f service1" in calls
+    assert "network rm act-tests-unit-abc-unit-network" in calls
+    assert "network rm act-other-run-xyz-other-network" not in calls
+    assert "foreign1" not in calls
+
+
+def test_the_clone_keeps_the_sources_github_identity(env):
+    git(env["src"], "remote", "set-url", "origin", "https://github.com/acme/widget.git")
+    r = run(env)  # origin/main is still known from the fixture's push
+    assert r.returncode == 0, r.stderr
+    assert call(env)["origin"] == "https://github.com/acme/widget.git"
+
+
+def test_a_detached_commit_on_no_branch_is_fetched_by_id(env):
+    run(env)  # the first run makes the clone
+    git(env["src"], "checkout", "-q", "--detach", "feature")
+    (env["src"] / "c.txt").write_text("loose\n")
+    git(env["src"], "add", "-A"); git(env["src"], "commit", "-q", "-m", "loose")
+    loose = git(env["src"], "rev-parse", "HEAD")
+    r = run(env)
+    assert r.returncode == 0, r.stderr
+    assert call(env)["event"]["pull_request"]["head"]["sha"] == loose
+    assert call(env)["parents"][1] == loose
+
+
+def test_a_windows_worktree_pointer_is_followed(env):
+    mnt = env["tmp"] / "mnt"
+    main = mnt / "d" / "repo"
+    main.parent.mkdir(parents=True)
+    shutil.move(str(env["src"]), str(main))
+    wt = env["tmp"] / "wt"
+    git(main, "worktree", "add", "-q", "-b", "wt-branch", str(wt), "feature")
+    (wt / ".git").write_text("gitdir: D:/repo/.git/worktrees/wt\n")
+    e = {**env["env"], "CI_LOCAL_MNT": str(mnt)}
+    r = subprocess.run(["bash", str(SCRIPT), str(wt)], env=e, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert call(env)["event"]["pull_request"]["head"]["ref"] == "wt-branch"
+
+
 def test_a_second_run_on_the_machine_is_refused(env):
     run(env)  # creates the lock file
-    home = Path(env["env"]["HOME"])
-    lock = home / "ci-local" / ".lock"
+    lock = Path(env["env"]["HOME"]) / "ci-local" / ".lock"
     holder = subprocess.Popen(["flock", str(lock), "sleep", "5"])
     try:
-        import time
         time.sleep(0.3)
         r = run(env)
         assert r.returncode == 2

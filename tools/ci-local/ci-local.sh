@@ -67,8 +67,9 @@ done
 # A worktree made by Windows git records "gitdir: D:/..." in its .git file,
 # which WSL git cannot follow. Use the main repository (branches are shared)
 # and take REF=HEAD from the worktree's own HEAD file.
+MNT=${CI_LOCAL_MNT:-/mnt}  # where WSL mounts Windows drives
 if [ -f "$SRC/.git" ] && grep -qE '^gitdir: [A-Za-z]:/' "$SRC/.git"; then
-  WT_GITDIR=$(sed -E 's#^gitdir: ([A-Za-z]):/#/mnt/\L\1/#' "$SRC/.git")
+  WT_GITDIR=$(sed -E "s#^gitdir: ([A-Za-z]):/#${MNT//#/\\#}/\\L\\1/#" "$SRC/.git")
   if [ "$REF" = HEAD ]; then
     WT_HEAD=$(cat "$WT_GITDIR/HEAD")
     case "$WT_HEAD" in "ref: refs/heads/"*) REF=${WT_HEAD#ref: refs/heads/} ;; *) REF=$WT_HEAD ;; esac
@@ -107,29 +108,49 @@ exec 9>"$ROOT/.lock"
 flock -n 9 || die "another ci-local run is in progress; wait for it to finish"
 
 TMP=$(mktemp -d "$ROOT/.run.XXXXXX")
-START=$(date +%s)
+WATCHER=""
 # act's own --rm gives up when Docker is slow ("context deadline exceeded"),
 # and a container left running holds its port or database for the next run.
-# So remove what THIS run created: job containers carry its /proc mount, and
-# act's per-job networks (with the service containers on them) were created
-# after it started. The machine-wide lock means no other ci-local run made them.
-remove_run_containers() {
-  local ids net created
-  ids=$(docker ps -aq --filter "volume=$TMP/proc/cpuinfo" 2>/dev/null || true)
-  [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
-  for net in $(docker network ls -q --filter name=^act- 2>/dev/null); do
-    created=$(docker network inspect -f '{{.Created}}' "$net" 2>/dev/null) || continue
-    [ "$(date -d "${created%% *}" +%s 2>/dev/null || echo 0)" -ge "$START" ] || continue
-    ids=$(docker network inspect -f '{{range $id, $c := .Containers}}{{$id}} {{end}}' "$net" 2>/dev/null || true)
-    [ -z "${ids// /}" ] || docker rm -f $ids >/dev/null 2>&1 || true
-    docker network rm "$net" >/dev/null 2>&1 || true
+# So ci-local removes what THIS run provably created, and nothing else:
+#   * job containers carry this run's own /proc mount ($TMP/proc/cpuinfo);
+#   * act names each job's service network after that job's container
+#     ("<job container>-<job id>-network"), and the services sit on it.
+# A watcher records the job containers' names while act runs, because act may
+# remove a job container before ci-local gets to clean up its network.
+watch_run_containers() {
+  while :; do
+    docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.Names}}' >> "$TMP/names" 2>/dev/null || true
+    sleep 2
   done
 }
-cleanup() { remove_run_containers; rm -rf "$TMP"; }
+remove_run_containers() {
+  local ids net name
+  [ -z "$WATCHER" ] || { kill "$WATCHER" 2>/dev/null; wait "$WATCHER" 2>/dev/null || true; }
+  docker ps -a --filter "volume=$TMP/proc/cpuinfo" --format '{{.Names}}' >> "$TMP/names" 2>/dev/null || true
+  ids=$(docker ps -aq --filter "volume=$TMP/proc/cpuinfo" 2>/dev/null || true)
+  [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
+  [ -s "$TMP/names" ] || return 0
+  sort -u "$TMP/names" -o "$TMP/names"
+  for net in $(docker network ls --filter name=^act- --format '{{.Name}}' 2>/dev/null); do
+    while read -r name; do
+      case "$net" in "$name"-*-network)
+        ids=$(docker network inspect -f '{{range $id, $c := .Containers}}{{$id}} {{end}}' "$net" 2>/dev/null || true)
+        [ -z "${ids// /}" ] || docker rm -f $ids >/dev/null 2>&1 || true
+        docker network rm "$net" >/dev/null 2>&1 || true
+        break ;;
+      esac
+    done < "$TMP/names"
+  done
+}
+cleanup() { [ -d "$TMP" ] && remove_run_containers; rm -rf "$TMP"; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 [ -d "$WORK/.git" ] || git clone --quiet --no-checkout "$SRC" "$WORK"
+# act takes github.repository (owner/name) from the clone's origin URL, so
+# give it the source's own GitHub remote; ci-local fetches from $SRC by path.
+ORIGIN_URL=$(git -C "$SRC" remote get-url origin 2>/dev/null || true)
+if [ -n "$ORIGIN_URL" ]; then git -C "$WORK" remote set-url origin "$ORIGIN_URL"; fi
 # The source repo's own branches and its view of the GitHub remote.
 git -C "$WORK" fetch --quiet --force "$SRC" "+refs/heads/*:refs/remotes/src/*" "+refs/remotes/origin/*:refs/remotes/upstream/*"
 if ! git -C "$WORK" cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
@@ -159,7 +180,7 @@ fi
 # Service ports taken here or by another job move to free ones, in the
 # throwaway clone only (act_compat.py says why).
 [ -d "$WORK/.github/workflows" ] || die "no .github/workflows in ${HEAD_SHA:0:7}"
-python3 "$HERE/act_compat.py" "$WORK/.github/workflows"
+python3 "$HERE/act_compat.py" "$WORK/.github/workflows" --max-parallel "$CONCURRENT_JOBS"
 
 # Actions: act's classic cache checks every action out into ONE shared folder
 # per job, so jobs that start together delete each other's files ("remove
@@ -212,30 +233,25 @@ if [ "$INFO" = 1 ]; then  # --list, --graph, --dryrun: show act's own output
   exit $?
 fi
 
+# The jobs act plans to run (job id, workflow, name), so a run can be called a
+# pass only when every one of them reported success: a later `needs:` stage
+# that never started must not count as passing.
+(cd "$WORK" && "${ACT[@]}" --list) > "$TMP/list" 2>/dev/null || : > "$TMP/list"
+
 LOG="$ROOT/logs/$NAME-${HEAD_SHA:0:7}-$EVENT-$(date +%Y%m%d-%H%M%S).log"
 echo "ci-local: $NAME ${HEAD_SHA:0:7} ($HEAD_BRANCH) $EVENT${BASE_SHA:+, merged into $BASE ${BASE_SHA:0:7}}${OFFLINE[*]:+, actions offline}"
 echo "ci-local: log $LOG"
+watch_run_containers & WATCHER=$!
 set +e
-(cd "$WORK" && "${ACT[@]}") > "$LOG" 2>&1
+(cd "$WORK" && "${ACT[@]}" --log-prefix-job-id) > "$LOG" 2>&1
 RC=$?
+python3 "$HERE/ci_summary.py" "$TMP/list" "$LOG" "$RC"
+VERDICT=$?
 set -e
-# One line per job: act prints "🏁  Job succeeded" / "Job failed" after the job name.
-SUMMARY=$(grep -aE "Job (succeeded|failed)" "$LOG" | sed -E 's/^\[([^]]+)\].*Job (succeeded|failed).*/\2  \1/' | sort -u || true)
-if [ -n "$SUMMARY" ]; then
-  printf '%s\n' "$SUMMARY"
-  # act exits 1 when removing a finished container times out on a busy Docker,
-  # even though every job passed ("Error occurred running finally ...
-  # (original error: <nil>)"). The containers are removed on exit anyway, so a
-  # run whose jobs all succeeded and whose only error is that one is a pass.
-  if [ "$RC" -ne 0 ] && ! grep -q '^failed' <<<"$SUMMARY" \
-     && grep -aq '^Error: Error occurred running finally: .*(original error: <nil>)' "$LOG" \
-     && [ "$(grep -ac '^Error: ' "$LOG")" -eq "$(grep -ac '^Error: Error occurred running finally: .*(original error: <nil>)' "$LOG")" ]; then
-    echo "ci-local: every job succeeded; act's exit $RC came only from removing a finished container, which ci-local does itself"
-    RC=0
-  fi
-else
-  echo "ci-local: no job reported a result; the end of the log:"
-  tail -n 20 "$LOG"
-fi
+case "$VERDICT" in
+  0) ;;
+  10) echo "ci-local: every planned job succeeded; act's exit $RC came only from removing a finished container, which ci-local does itself"; RC=0 ;;
+  *) [ "$RC" -ne 0 ] || RC=1 ;;  # a planned job that never reported is not a pass
+esac
 echo "ci-local: exit $RC"
 exit $RC

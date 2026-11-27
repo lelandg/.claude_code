@@ -13,9 +13,13 @@ ci-local.sh /path/to/repo --event push          # what a push to the branch runs
 ci-local.sh /path/to/repo -- --list             # anything after -- goes to act; --list/--graph/--dryrun print act's output
 ```
 
-Each run prints one line per job (`succeeded` / `failed`), the full log's path
-under `~/ci-local/logs/`, and exits with act's code: 0 means every selected job
-succeeded.
+Each run prints one line per planned job (`succeeded`, `failed` or `not run`)
+and the full log's path under `~/ci-local/logs/`. It exits 0 only when every
+job act planned for the event (`act --list`) succeeded; otherwise it exits with
+act's code. A job a `needs:` chain never reached counts as not run, not as a
+pass. The one act error it overrules is a timeout removing a finished container
+after every planned job passed, since ci-local removes the run's containers
+itself ([`ci_summary.py`](ci_summary.py)).
 
 ## How close is it to GitHub?
 
@@ -24,14 +28,14 @@ between act and a GitHub-hosted runner that could change a result is handled:
 
 | GitHub does | ci-local does |
 |---|---|
-| Checks out the pushed commit | Fetches that **commit** into a clean clone under `~/ci-local/<repo>-<hash>`. Uncommitted edits are never tested (it warns when you have some), and nothing crosses a slow Windows mount. One ci-local run at a time on the machine; a second is refused |
+| Checks out the pushed commit, as `owner/repo` | Fetches that **commit** into a clean clone under `~/ci-local/<repo>-<hash>`. Uncommitted edits are never tested (it warns when you have some), and nothing crosses a slow Windows mount. The clone keeps your repository's GitHub remote, so `github.repository` is right. One ci-local run at a time on the machine; a second is refused |
 | A `pull_request` run tests `refs/pull/N/merge` | Merges the commit into the base branch your clone knows (`origin/<default>`) and tests the merge, without your signing key or hooks. A conflict fails the run, as it would on GitHub |
 | 2 vCPU / 7 GB per job | Each job container gets a 2-CPU quota and 7 GB, and **sees** 2 CPUs: `/proc/cpuinfo` and `/proc/stat` are masked, as lxcfs does. Without that, a tool that sizes itself from the CPU count (Playwright's workers, test runners) starts one worker per host core inside a 2-CPU quota, and its tests time out. Timing flakes (a cold compile beating a 5-second wait) show up here too |
 | `ubuntu-latest` = Ubuntu 24.04 | `catthehacker/ubuntu:act-24.04` |
-| Every job on its own empty VM, so `ports: 5432:5432` always binds | act runs all jobs on one host. A host port in use on your machine, or by another job of the same run, moves to a free one together with that job's `localhost:<port>` uses ([`act_compat.py`](act_compat.py)); a free port is left alone |
+| Every job and matrix instance on its own empty VM, so `ports: 5432:5432` always binds | act runs them all on one host ([`act_compat.py`](act_compat.py)). A host port in use on your machine, or by another job of the same run, moves to a free one, together with that job's `localhost:<port>` uses and any it inherits from the workflow-level `env:` (copied into the job). A service's own health check is left alone, since it runs inside the service. A matrix job that publishes fixed ports runs one instance at a time. A free port is left alone |
 | Each job fetches its own copy of its actions | act's new action cache (`--use-new-action-cache`) gives each job its own copy. The classic cache checks every action out into one shared folder, and jobs that start together delete each other's files (`remove .../.gitignore: no such file`, `archive/tar: write too long`). Once cached, actions are not re-fetched when every one is pinned to a commit SHA; a tag or branch pin is fetched fresh each run |
-| Every job has its own disk | Here jobs share one disk, so at most 4 run at once (`CI_LOCAL_JOBS`). With all eight jobs of a real repository at once, seven `npm ci`s starved a Postgres service past its health check, which never happens on GitHub |
-| A finished job's VM is gone | The run's containers and networks are removed afterwards, even when act's own `--rm` times out on a busy Docker (`context deadline exceeded`), so no finished run holds a port or a database the next one needs |
+| Every job has its own disk | Here jobs share one disk, so at most 4 jobs run at once (`CI_LOCAL_JOBS`), and each matrix at most 4 instances at once. With all eight jobs of a real repository at once, seven `npm ci`s starved a Postgres service past its health check, which never happens on GitHub. act applies the job limit per job and the matrix limit per matrix, so a run with several matrices can still exceed 4 containers |
+| A finished job's VM is gone | The run's own containers and networks are removed afterwards, even when act's `--rm` times out on a busy Docker (`context deadline exceeded`). Ownership is proven, not guessed: job containers carry this run's private `/proc` mount, and each service network is named after its job container. Nothing another act run created is touched |
 
 What it does not do: post a check to the pull request, provide your repository
 secrets (jobs that need them fail or skip, as they would on a fork), or run

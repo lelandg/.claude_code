@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
-"""Make service-container ports start under act on this machine.
+"""Make workflow jobs run under act on one machine the way they run on GitHub.
 
 ci-local runs this over the workflow files in its THROWAWAY clone, never in
 your checkout.
 
 act runs a job's container on the host network and publishes each service's
 `ports:` on the host, as GitHub does, so `localhost:5432` reaches the service.
-Two things differ from GitHub:
+What differs is the host:
 
-  * GitHub gives every job its own empty VM. Your machine may already listen
-    on that port (on WSL with mirrored networking, anything Windows listens on
-    counts), and
+  * GitHub gives every job (and every matrix instance) its own empty VM. Your
+    machine may already listen on that port (on WSL with mirrored networking,
+    anything Windows listens on counts), and
   * act runs the jobs side by side on ONE host, so two jobs that both publish
     5432 would collide with each other.
 
-So host ports are made unique across every job act will run: a port that is
-free and not yet used by another job stays; any other moves to a free port
-(`5432:5432` -> `45432:5432`), and `localhost:5432` / `127.0.0.1:5432` move
-with it, inside that job only. The edit is line-based, so comments and
-formatting survive and each file stays byte-for-byte what you wrote except for
-the lines named in the printed report. Standard library only.
+So, per job:
 
-Usage: act_compat.py <workflow-dir>
+  * a published host port that is free and not used by another job stays;
+    any other moves to a free port (`5432:5432` -> `45432:5432`);
+  * the job's own `localhost:5432` / `127.0.0.1:5432` uses move with it,
+    including values it inherits from the workflow-level `env:` (copied into
+    the job's `env:`, so other jobs keep theirs). Lines inside `services:` and
+    `container:` are left alone: a service's health check runs inside the
+    service, where the port has not changed;
+  * a matrix job that publishes fixed host ports runs one instance at a time
+    (`max-parallel: 1`), since its instances would share those ports; any
+    other matrix job runs at most --max-parallel instances at once.
+
+The edit is line-based, so comments and formatting survive and each file stays
+byte-for-byte what you wrote except for the lines named in the printed report.
+Standard library only.
+
+Usage: act_compat.py <workflow-dir> [--max-parallel N]
 """
 from __future__ import annotations
 
@@ -32,9 +42,8 @@ from pathlib import Path
 
 FIRST_FREE = 45432
 
-JOBS_KEY = re.compile(r"^(?P<indent>\s*)jobs:\s*(#.*)?$")
-KEY_LINE = re.compile(r"^(?P<indent>\s*)[A-Za-z0-9_-]+:")
-# `ports:` followed by a block list, or a flow list on the same line.
+TOP_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_-]+):\s*(#.*)?$")
+KEY_LINE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z0-9_.-]+):(?P<rest>.*)$")
 PORTS_KEY = re.compile(r"^(?P<indent>\s*)ports:\s*(?P<rest>.*?)\s*(#.*)?$")
 LIST_ITEM = re.compile(r"^(?P<indent>\s*)-\s*")
 # HOST:CONTAINER, optionally IP:HOST:CONTAINER and /proto, optionally quoted.
@@ -72,44 +81,93 @@ class Ports:
         return self.next
 
 
+def indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def meaningful(line: str) -> bool:
+    return bool(line.strip()) and not line.lstrip().startswith("#")
+
+
+def block_end(lines: list[str], start: int, indent: int) -> int:
+    """First line after `start` that is meaningful and indented <= `indent`."""
+    for j in range(start + 1, len(lines)):
+        if meaningful(lines[j]) and indent_of(lines[j]) <= indent:
+            return j
+    return len(lines)
+
+
+def top_block(lines: list[str], key: str) -> tuple[int, int] | None:
+    for i, line in enumerate(lines):
+        m = TOP_KEY.match(line)
+        if m and m["key"] == key:
+            return i, block_end(lines, i, 0)
+    return None
+
+
 def job_blocks(lines: list[str]) -> list[tuple[str, int, int]]:
     """(job id, first line, end line) for each job under the top-level `jobs:`."""
+    found = top_block(lines, "jobs")
+    if not found:
+        return []
+    start, end = found
     blocks: list[tuple[str, int, int]] = []
-    jobs_indent = job_indent = None
-    current: tuple[str, int] | None = None
-    for i, line in enumerate(lines):
-        if not line.strip() or line.lstrip().startswith("#"):
+    job_indent = None
+    for i in range(start + 1, end):
+        line = lines[i]
+        if not meaningful(line):
             continue
-        indent = len(line) - len(line.lstrip())
-        if jobs_indent is None:
-            m = JOBS_KEY.match(line)
-            if m and len(m["indent"]) == 0:
-                jobs_indent = 0
-            continue
-        if indent <= jobs_indent:  # left the jobs map
-            break
-        key = KEY_LINE.match(line)
-        if key and (job_indent is None or indent == job_indent):
-            job_indent = indent
-            if current:
-                blocks.append((current[0], current[1], i))
-            current = (line.strip().split(":")[0], i)
-    if current:
-        end = len(lines)
-        if jobs_indent is not None:
-            for j in range(current[1] + 1, len(lines)):
-                s = lines[j]
-                if s.strip() and not s.lstrip().startswith("#") and len(s) - len(s.lstrip()) <= jobs_indent:
-                    end = j
-                    break
-        blocks.append((current[0], current[1], end))
+        m = KEY_LINE.match(line)
+        if m and (job_indent is None or indent_of(line) == job_indent):
+            job_indent = indent_of(line)
+            blocks.append((m["key"], i, block_end(lines, i, job_indent)))
     return blocks
 
 
-def remap_job(lines: list[str], ports: Ports, label: str) -> tuple[list[str], list[str]]:
-    """Move this job's taken host ports; rewrite its localhost uses in one pass."""
-    moved: dict[int, int] = {}
+def workflow_env(lines: list[str]) -> dict[str, str]:
+    """Single-line `KEY: value` entries of the top-level `env:`."""
+    found = top_block(lines, "env")
+    out: dict[str, str] = {}
+    if found:
+        start, end = found
+        child = None
+        for i in range(start + 1, end):
+            if not meaningful(lines[i]):
+                continue
+            child = child or indent_of(lines[i])
+            m = KEY_LINE.match(lines[i])
+            if m and indent_of(lines[i]) == child and m["rest"].strip() and not m["rest"].strip().startswith(("|", ">")):
+                out[m["key"]] = m["rest"].strip()
+    return out
+
+
+def child_keys(lines: list[str]) -> tuple[int | None, dict[str, int]]:
+    """For a job slice (line 0 = the job id), its child indent and key -> line."""
+    child, keys = None, {}
+    for i in range(1, len(lines)):
+        if not meaningful(lines[i]):
+            continue
+        child = child or indent_of(lines[i])
+        m = KEY_LINE.match(lines[i])
+        if m and indent_of(lines[i]) == child:
+            keys[m["key"]] = i
+    return child, keys
+
+
+def remap_job(lines: list[str], ports: Ports, label: str, wf_env: dict[str, str], max_parallel: int) -> tuple[list[str], list[str]]:
+    out = list(lines)
     report: list[str] = []
+    moved: dict[int, int] = {}
+    child, keys = child_keys(out)
+    if child is None:
+        return out, report
+
+    # Lines inside services: / container: are the containers' own world.
+    inside: set[int] = set()
+    for key in ("services", "container"):
+        if key in keys:
+            start = keys[key]
+            inside.update(range(start, block_end(out, start, child)))
 
     def fix(segment: str) -> str:
         def one(m: re.Match) -> str:
@@ -125,55 +183,110 @@ def remap_job(lines: list[str], ports: Ports, label: str) -> tuple[list[str], li
 
         return MAPPING.sub(one, segment)
 
-    out = list(lines)
-    in_ports_indent: int | None = None
-    mapping_lines: set[int] = set()
-    for i, line in enumerate(out):
+    published = False
+    ports_indent: int | None = None
+    for i in sorted(inside):
+        line = out[i]
         key = PORTS_KEY.match(line)
         if key:
             rest = key["rest"]
             if rest.startswith("["):
-                out[i] = line.replace(rest, fix(rest), 1)
-                mapping_lines.add(i)
-                in_ports_indent = None
+                new = fix(rest)
+                published = published or MAPPING.search(rest) is not None
+                out[i] = line.replace(rest, new, 1)
+                ports_indent = None
             else:
-                in_ports_indent = len(key["indent"])
+                ports_indent = indent_of(line)
             continue
-        if in_ports_indent is not None:
+        if ports_indent is not None:
             item = LIST_ITEM.match(line)
-            if item and len(item["indent"]) >= in_ports_indent:
+            if item and indent_of(line) >= ports_indent:
                 head, sep, comment = line.partition("#")
+                published = published or MAPPING.search(head) is not None
                 out[i] = fix(head) + sep + comment
-                mapping_lines.add(i)
                 continue
-            if line.strip() and not line.lstrip().startswith("#"):
-                in_ports_indent = None
+            if meaningful(line):
+                ports_indent = None
 
     if moved:
         # One pass, so a rewritten port can never be rewritten again.
         uses = re.compile(r"\b(localhost|127\.0\.0\.1):(" + "|".join(str(p) for p in moved) + r")\b")
-        for i, line in enumerate(out):
-            if i not in mapping_lines:
-                out[i] = uses.sub(lambda m: f"{m[1]}:{moved[int(m[2])]}", line)
+        sub = lambda text: uses.sub(lambda m: f"{m[1]}:{moved[int(m[2])]}", text)  # noqa: E731
+        for i in range(1, len(out)):
+            if i not in inside:
+                out[i] = sub(out[i])
+        # Values inherited from the workflow-level env move into this job's env.
+        inherited = {k: sub(v) for k, v in wf_env.items() if sub(v) != v}
+        if inherited:
+            pad = " " * child
+            if "env" in keys:
+                env_at = keys["env"]
+                env_end = block_end(out, env_at, child)
+                own = {KEY_LINE.match(out[j])["key"] for j in range(env_at + 1, env_end) if meaningful(out[j]) and KEY_LINE.match(out[j])}
+                add = [f"{pad}  {k}: {v}\n" for k, v in inherited.items() if k not in own]
+                out[env_at + 1:env_at + 1] = add
+            else:
+                add = [f"{pad}env:\n"] + [f"{pad}  {k}: {v}\n" for k, v in inherited.items()]
+                out[1:1] = add
+            for k in inherited:
+                report.append(f"act-compat: {label}: workflow env {k} copied into the job with the new port")
+            child, keys = child_keys(out)
+
+    # Matrix instances share this one host.
+    if "strategy" in keys:
+        s_at = keys["strategy"]
+        s_end = block_end(out, s_at, child)
+        has_matrix = any(KEY_LINE.match(out[j]) and KEY_LINE.match(out[j])["key"] == "matrix" for j in range(s_at + 1, s_end))
+        if has_matrix:
+            limit = 1 if published else max_parallel
+            why = "its instances would share its service ports" if published else "jobs here share one disk"
+            mp = next((j for j in range(s_at + 1, s_end) if KEY_LINE.match(out[j]) and KEY_LINE.match(out[j])["key"] == "max-parallel"), None)
+            if mp is not None:
+                current = KEY_LINE.match(out[mp])["rest"].split("#")[0].strip()
+                if not (current.isdigit() and int(current) <= limit):
+                    out[mp] = f"{' ' * indent_of(out[mp])}max-parallel: {limit}\n"
+                    report.append(f"act-compat: {label}: max-parallel {current} -> {limit} ({why})")
+            else:
+                inner = next((indent_of(out[j]) for j in range(s_at + 1, s_end) if meaningful(out[j])), child + 2)
+                out.insert(s_at + 1, f"{' ' * inner}max-parallel: {limit}\n")
+                report.append(f"act-compat: {label}: max-parallel {limit} ({why})")
     return out, report
 
 
-def remap_text(text: str, ports: Ports, label: str = "") -> tuple[str, list[str]]:
-    """Return the workflow text with host ports made unique and free, and a report."""
+def remap_text(text: str, ports: Ports, label: str = "", max_parallel: int = 4) -> tuple[str, list[str]]:
+    """Return the workflow text adjusted for one shared host, and a report."""
     lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    wf_env = workflow_env(lines)
     report: list[str] = []
+    shift = 0  # lines inserted by earlier jobs move the later ones down
     for job, start, end in job_blocks(lines):
-        new, job_report = remap_job(lines[start:end], ports, f"{label}:{job}" if label else job)
+        start, end = start + shift, end + shift
+        new, job_report = remap_job(lines[start:end], ports, f"{label}:{job}" if label else job, wf_env, max_parallel)
         lines[start:end] = new
+        shift += len(new) - (end - start)
         report += job_report
-    return "".join(lines), report
+    out = "".join(lines)
+    return (out if text.endswith("\n") else out[:-1]), report
 
 
-def main(directory: str) -> int:
+def main(argv: list[str]) -> int:
+    if not argv or argv[0].startswith("-"):
+        print(__doc__.strip().splitlines()[-1], file=sys.stderr)
+        return 2
+    directory, max_parallel = argv[0], 4
+    if len(argv) == 3 and argv[1] == "--max-parallel" and argv[2].isdigit() and int(argv[2]) > 0:
+        max_parallel = int(argv[2])
+    elif len(argv) != 1:
+        print(__doc__.strip().splitlines()[-1], file=sys.stderr)
+        return 2
     ports = Ports()
+    # Ports are assigned in file and job order: the first job to publish a free
+    # port keeps it, and every later one gets a distinct free port.
     for path in sorted(Path(directory).glob("*.y*ml")):
         text = path.read_text(encoding="utf-8")
-        new, report = remap_text(text, ports, path.name)
+        new, report = remap_text(text, ports, path.name, max_parallel)
         for line in report:
             print(line)
         if new != text:
@@ -182,7 +295,4 @@ def main(directory: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(__doc__.strip().splitlines()[-1], file=sys.stderr)
-        sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(sys.argv[1:]))
