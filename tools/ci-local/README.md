@@ -10,7 +10,7 @@ ci-local.sh /path/to/repo                       # every pull_request job, HEAD m
 ci-local.sh /path/to/repo -j db                 # one job (its id in the workflow)
 ci-local.sh /path/to/repo --ref my-branch --pr 42
 ci-local.sh /path/to/repo --event push          # what a push to the branch runs
-ci-local.sh /path/to/repo -- --list             # anything after -- goes to act
+ci-local.sh /path/to/repo -- --list             # anything after -- goes to act; --list/--graph/--dryrun print act's output
 ```
 
 Each run prints one line per job (`succeeded` / `failed`), the full log's path
@@ -24,17 +24,24 @@ between act and a GitHub-hosted runner that could change a result is handled:
 
 | GitHub does | ci-local does |
 |---|---|
-| Checks out the pushed commit | Fetches that **commit** into a clean clone under `~/ci-local/<repo>`. Uncommitted edits are never tested (it warns when you have some), and nothing crosses a slow Windows mount |
-| A `pull_request` run tests `refs/pull/N/merge` | Merges the commit into the base branch your clone knows (`origin/<default>`) and tests the merge. A conflict fails the run, as it would on GitHub |
-| 2 vCPU / 7 GB per job | Each job container is capped at `--cpus 2 --memory 7g`, so timing flakes (a cold compile beating a 5-second wait) show up here too |
+| Checks out the pushed commit | Fetches that **commit** into a clean clone under `~/ci-local/<repo>-<hash>`. Uncommitted edits are never tested (it warns when you have some), and nothing crosses a slow Windows mount. One ci-local run at a time on the machine; a second is refused |
+| A `pull_request` run tests `refs/pull/N/merge` | Merges the commit into the base branch your clone knows (`origin/<default>`) and tests the merge, without your signing key or hooks. A conflict fails the run, as it would on GitHub |
+| 2 vCPU / 7 GB per job | Each job container gets a 2-CPU quota and 7 GB, and **sees** 2 CPUs: `/proc/cpuinfo` and `/proc/stat` are masked, as lxcfs does. Without that, a tool that sizes itself from the CPU count (Playwright's workers, test runners) starts one worker per host core inside a 2-CPU quota, and its tests time out. Timing flakes (a cold compile beating a 5-second wait) show up here too |
 | `ubuntu-latest` = Ubuntu 24.04 | `catthehacker/ubuntu:act-24.04` |
-| An empty VM, so `ports: 5432:5432` always binds | A host port already in use here moves to a free one, with the job's `localhost:<port>` uses ([`act_compat.py`](act_compat.py)); a free port is left alone |
-| Each job fetches its actions | Every SHA-pinned action is fetched once, up front, then act runs offline. Parallel jobs otherwise race on act's shared cache (`archive/tar: write too long`) |
+| Every job on its own empty VM, so `ports: 5432:5432` always binds | act runs all jobs on one host. A host port in use on your machine, or by another job of the same run, moves to a free one together with that job's `localhost:<port>` uses ([`act_compat.py`](act_compat.py)); a free port is left alone |
+| Each job fetches its own copy of its actions | act's new action cache (`--use-new-action-cache`) gives each job its own copy. The classic cache checks every action out into one shared folder, and jobs that start together delete each other's files (`remove .../.gitignore: no such file`, `archive/tar: write too long`). Once cached, actions are not re-fetched when every one is pinned to a commit SHA; a tag or branch pin is fetched fresh each run |
+| Every job has its own disk | Here jobs share one disk, so at most 4 run at once (`CI_LOCAL_JOBS`). With all eight jobs of a real repository at once, seven `npm ci`s starved a Postgres service past its health check, which never happens on GitHub |
+| A finished job's VM is gone | The run's containers and networks are removed afterwards, even when act's own `--rm` times out on a busy Docker (`context deadline exceeded`), so no finished run holds a port or a database the next one needs |
 
 What it does not do: post a check to the pull request, provide your repository
 secrets (jobs that need them fail or skip, as they would on a fork), or run
-`macos-*` / `windows-*` jobs. The edits for ports happen only in the
+`macos-*` / `windows-*` jobs. `nproc` inside a job still reports the host's
+cores (it reads the CPU affinity, not `/proc`); Node's `os.cpus()` and
+`os.availableParallelism()` report 2. The edits for ports happen only in the
 throwaway clone; your workflow files are never changed.
+
+Overrides: `CI_LOCAL_JOBS` (jobs at once, default 4; raise it on a fast disk)
+and `CI_LOCAL_IMAGE` (runner image).
 
 ## Requirements
 
@@ -52,7 +59,8 @@ throwaway clone; your workflow files are never changed.
 
 - The runner image, once: `docker pull catthehacker/ubuntu:act-24.04` (about
   2.3 GB). Runs use `--pull=false`, so they never download it mid-run.
-- `git`, `bash` and Python 3.9 or later (standard library only).
+- `git`, `bash`, `flock` (util-linux) and Python 3.12 or later (standard
+  library only).
 
 ## WSL notes
 
@@ -73,3 +81,6 @@ throwaway clone; your workflow files are never changed.
 ```bash
 cd tools/ci-local && python -m pytest -q
 ```
+
+`test_ci_local.py` runs the script against real git repos with stub `act` and
+`docker` commands, so it needs Linux bash and `flock`; it skips on Windows.

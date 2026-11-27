@@ -6,17 +6,20 @@ your checkout.
 
 act runs a job's container on the host network and publishes each service's
 `ports:` on the host, as GitHub does, so `localhost:5432` reaches the service.
-The one difference is the host. A GitHub runner is an empty VM, while your
-machine may already listen on that port (on WSL with mirrored networking,
-anything Windows listens on counts). So for each published host port that is
-already taken here:
+Two things differ from GitHub:
 
-  * the mapping moves to a free host port (`5432:5432` -> `45432:5432`), and
-  * `localhost:5432` / `127.0.0.1:5432` in the same file moves with it.
+  * GitHub gives every job its own empty VM. Your machine may already listen
+    on that port (on WSL with mirrored networking, anything Windows listens on
+    counts), and
+  * act runs the jobs side by side on ONE host, so two jobs that both publish
+    5432 would collide with each other.
 
-A port that is free is left alone. The edit is line-based, so comments and
-formatting survive and the workflow stays byte-for-byte what you wrote except
-for the lines named in the printed report. Standard library only.
+So host ports are made unique across every job act will run: a port that is
+free and not yet used by another job stays; any other moves to a free port
+(`5432:5432` -> `45432:5432`), and `localhost:5432` / `127.0.0.1:5432` move
+with it, inside that job only. The edit is line-based, so comments and
+formatting survive and each file stays byte-for-byte what you wrote except for
+the lines named in the printed report. Standard library only.
 
 Usage: act_compat.py <workflow-dir>
 """
@@ -29,6 +32,8 @@ from pathlib import Path
 
 FIRST_FREE = 45432
 
+JOBS_KEY = re.compile(r"^(?P<indent>\s*)jobs:\s*(#.*)?$")
+KEY_LINE = re.compile(r"^(?P<indent>\s*)[A-Za-z0-9_-]+:")
 # `ports:` followed by a block list, or a flow list on the same line.
 PORTS_KEY = re.compile(r"^(?P<indent>\s*)ports:\s*(?P<rest>.*?)\s*(#.*)?$")
 LIST_ITEM = re.compile(r"^(?P<indent>\s*)-\s*")
@@ -47,7 +52,7 @@ def bindable(port: int) -> bool:
 
 
 class Ports:
-    """Host ports chosen in this run, so two services never get the same one."""
+    """Host ports handed out in this run, across every job and file."""
 
     def __init__(self, first_free: int = FIRST_FREE, is_free=None):
         self.taken: set[int] = set()
@@ -67,9 +72,42 @@ class Ports:
         return self.next
 
 
-def remap_text(text: str, ports: Ports, label: str = "") -> tuple[str, list[str]]:
-    """Return the workflow text with taken host ports moved, and a report."""
-    lines = text.splitlines(keepends=True)
+def job_blocks(lines: list[str]) -> list[tuple[str, int, int]]:
+    """(job id, first line, end line) for each job under the top-level `jobs:`."""
+    blocks: list[tuple[str, int, int]] = []
+    jobs_indent = job_indent = None
+    current: tuple[str, int] | None = None
+    for i, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if jobs_indent is None:
+            m = JOBS_KEY.match(line)
+            if m and len(m["indent"]) == 0:
+                jobs_indent = 0
+            continue
+        if indent <= jobs_indent:  # left the jobs map
+            break
+        key = KEY_LINE.match(line)
+        if key and (job_indent is None or indent == job_indent):
+            job_indent = indent
+            if current:
+                blocks.append((current[0], current[1], i))
+            current = (line.strip().split(":")[0], i)
+    if current:
+        end = len(lines)
+        if jobs_indent is not None:
+            for j in range(current[1] + 1, len(lines)):
+                s = lines[j]
+                if s.strip() and not s.lstrip().startswith("#") and len(s) - len(s.lstrip()) <= jobs_indent:
+                    end = j
+                    break
+        blocks.append((current[0], current[1], end))
+    return blocks
+
+
+def remap_job(lines: list[str], ports: Ports, label: str) -> tuple[list[str], list[str]]:
+    """Move this job's taken host ports; rewrite its localhost uses in one pass."""
     moved: dict[int, int] = {}
     report: list[str] = []
 
@@ -87,13 +125,16 @@ def remap_text(text: str, ports: Ports, label: str = "") -> tuple[str, list[str]
 
         return MAPPING.sub(one, segment)
 
+    out = list(lines)
     in_ports_indent: int | None = None
-    for i, line in enumerate(lines):
+    mapping_lines: set[int] = set()
+    for i, line in enumerate(out):
         key = PORTS_KEY.match(line)
         if key:
             rest = key["rest"]
             if rest.startswith("["):
-                lines[i] = line.replace(rest, fix(rest), 1)
+                out[i] = line.replace(rest, fix(rest), 1)
+                mapping_lines.add(i)
                 in_ports_indent = None
             else:
                 in_ports_indent = len(key["indent"])
@@ -101,16 +142,31 @@ def remap_text(text: str, ports: Ports, label: str = "") -> tuple[str, list[str]
         if in_ports_indent is not None:
             item = LIST_ITEM.match(line)
             if item and len(item["indent"]) >= in_ports_indent:
-                head, _, comment = line.partition("#")
-                lines[i] = fix(head) + ("#" + comment if comment else "")
+                head, sep, comment = line.partition("#")
+                out[i] = fix(head) + sep + comment
+                mapping_lines.add(i)
                 continue
             if line.strip() and not line.lstrip().startswith("#"):
                 in_ports_indent = None
 
-    out = "".join(lines)
-    for old, new in moved.items():
-        out = re.sub(rf"\b(localhost|127\.0\.0\.1):{old}\b", rf"\g<1>:{new}", out)
+    if moved:
+        # One pass, so a rewritten port can never be rewritten again.
+        uses = re.compile(r"\b(localhost|127\.0\.0\.1):(" + "|".join(str(p) for p in moved) + r")\b")
+        for i, line in enumerate(out):
+            if i not in mapping_lines:
+                out[i] = uses.sub(lambda m: f"{m[1]}:{moved[int(m[2])]}", line)
     return out, report
+
+
+def remap_text(text: str, ports: Ports, label: str = "") -> tuple[str, list[str]]:
+    """Return the workflow text with host ports made unique and free, and a report."""
+    lines = text.splitlines(keepends=True)
+    report: list[str] = []
+    for job, start, end in job_blocks(lines):
+        new, job_report = remap_job(lines[start:end], ports, f"{label}:{job}" if label else job)
+        lines[start:end] = new
+        report += job_report
+    return "".join(lines), report
 
 
 def main(directory: str) -> int:
